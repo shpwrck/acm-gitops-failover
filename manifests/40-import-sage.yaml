@@ -1,0 +1,33 @@
+# Import sage into the ACTIVE hub (context: hub) as a managed cluster.
+# The auto-import secret (sage kubeconfig) is created out-of-band:
+#   oc --context sage config view --flatten --minify > /tmp/sage-kubeconfig
+#   oc --context hub create secret generic auto-import-secret -n sage \
+#     --from-file=kubeconfig=/tmp/sage-kubeconfig
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: sage
+  labels:
+    name: sage
+    cluster.open-cluster-management.io/clusterset: default
+spec:
+  hubAcceptsClient: true
+---
+apiVersion: agent.open-cluster-management.io/v1
+kind: KlusterletAddonConfig
+metadata:
+  name: sage
+  namespace: sage
+spec:
+  clusterName: sage
+  clusterNamespace: sage
+  clusterLabels:
+    name: sage
+  applicationManager:
+    enabled: true
+  certPolicyController:
+    enabled: true
+  policyController:
+    enabled: true
+  searchCollector:
+    enabled: true

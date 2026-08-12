@@ -1,0 +1,37 @@
+# DataProtectionApplication — SAME on both hubs (docs: active and passive
+# hubs must point at the same storage location).
+# Secret first (never committed):
+#   printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' "$S3_ACCESS_KEY" "$S3_SECRET_KEY" > /tmp/cloud
+#   oc create secret generic cloud-credentials -n open-cluster-management-backup --from-file=cloud=/tmp/cloud
+# ROSA/S3 delta: drop s3Url + s3ForcePathStyle, set the real region.
+# checksumAlgorithm "" is the documented knob for non-AWS S3 providers
+# (newer AWS SDK checksum headers break many S3-compatibles).
+apiVersion: oadp.openshift.io/v1alpha1
+kind: DataProtectionApplication
+metadata:
+  name: acm-dpa
+  namespace: open-cluster-management-backup
+spec:
+  configuration:
+    velero:
+      defaultPlugins:
+        - openshift
+        - aws
+    nodeAgent:
+      enable: true
+      uploaderType: kopia
+  backupLocations:
+    - velero:
+        provider: aws
+        default: true
+        objectStorage:
+          bucket: acm-backups
+          prefix: acm
+        config:
+          region: us-east-1
+          s3ForcePathStyle: "true"
+          s3Url: https://truenas.skrzypek.dev:30304
+          checksumAlgorithm: ""
+        credential:
+          name: cloud-credentials
+          key: cloud
