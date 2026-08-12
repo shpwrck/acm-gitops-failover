@@ -1,0 +1,29 @@
+# Serving certificates for one cluster; CLUSTER is substituted at apply time
+# (envsubst) — apply once per cluster with CLUSTER=hub / CLUSTER=spoke.
+# NOTE: *.apps.<cluster> and api.<cluster> need separate SAN entries — a
+# *.<cluster>.k8socp.com wildcard would NOT cover the two-label apps names.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: apps-wildcard
+  namespace: openshift-ingress
+spec:
+  secretName: apps-wildcard-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.apps.${CLUSTER}.k8socp.com"
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-cert
+  namespace: openshift-config
+spec:
+  secretName: api-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "api.${CLUSTER}.k8socp.com"
