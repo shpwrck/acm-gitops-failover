@@ -381,7 +381,10 @@ and the exercise repeatable in the opposite direction.
 
 ~7 minutes from hub power-on to symmetric posture; sage and its app were
 untouched throughout (availability probe: still zero failures across
-failover AND failback).
+failover AND failback). Probe footnote: the raw probe log (15:22–16:08)
+shows failures beginning at 15:46:20 — that is the lab being powered off
+for the day, 7+ minutes after failback completed, not a DR event; every
+probe during the exercise window succeeded.
 
 Caveats verified/noted:
 
