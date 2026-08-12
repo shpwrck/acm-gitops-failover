@@ -41,3 +41,14 @@ spec:
           selfHeal: true
         syncOptions:
           - CreateNamespace=true
+      # OpenShift defaults these Route fields server-side after creation;
+      # without ignoreDifferences the app is permanently OutOfSync (verified).
+      # An explicit host in git would pin one cluster's apps domain — wrong
+      # for a multi-cluster ApplicationSet.
+      ignoreDifferences:
+        - group: route.openshift.io
+          kind: Route
+          jsonPointers:
+            - /spec/host
+            - /spec/wildcardPolicy
+            - /spec/to/weight
