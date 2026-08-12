@@ -41,6 +41,14 @@ spec:
           selfHeal: true
         syncOptions:
           - CreateNamespace=true
+        # managed-by label => GitOps operator mints namespace-scoped
+        # RoleBindings for the Argo controller on the TARGET cluster; without
+        # it the controller cannot create Routes (verified: SyncFailed
+        # "routes ... is forbidden"). Least-privilege alternative to the
+        # cluster-admin CRB the pull-model docs mention.
+        managedNamespaceMetadata:
+          labels:
+            argocd.argoproj.io/managed-by: openshift-gitops
       # OpenShift defaults these Route fields server-side after creation;
       # without ignoreDifferences the app is permanently OutOfSync (verified).
       # An explicit host in git would pin one cluster's apps domain — wrong
