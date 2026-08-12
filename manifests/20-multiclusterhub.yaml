@@ -1,0 +1,12 @@
+# MultiClusterHub for the spoke cluster.
+# PREREQUISITE: spoke must be fully detached from the old hub first — the
+# self-import of local-cluster creates a klusterlet named "klusterlet", which
+# collides with the one the old hub installed.
+# availabilityConfig Basic = single replicas; spoke is a single-node cluster.
+apiVersion: operator.open-cluster-management.io/v1
+kind: MultiClusterHub
+metadata:
+  name: multiclusterhub
+  namespace: open-cluster-management
+spec:
+  availabilityConfig: Basic
