@@ -184,3 +184,40 @@ only for the hub's *own* state (cluster inventory, policies, placements).
 
 (to be finalized and verified live — candidate: sage imported into the spoke
 hub as the test subject, hub simulating the failed datacenter)
+
+### 2a. S3-compatible backup storage (verified)
+
+The customer runs ROSA and will use real AWS S3. The lab stand-in must be
+(a) S3-compatible for the same OADP/Velero `aws` provider config, (b)
+external to every cluster (the docs require the storage location reachable
+from all hubs at all times — and it must survive the hub failure we
+simulate), and (c) license-clean. **MinIO and Garage are AGPL — excluded.**
+Chosen: **SeaweedFS** (Apache-2.0), from the TrueNAS **stable** catalog
+train (chart 1.2.32, SeaweedFS 4.41, maintained by iX), on the existing NAS
+that both cluster nodes verifiably reach.
+
+Result, verified live:
+
+- Endpoint `https://truenas.skrzypek.dev:30304` — TLS with the NAS's
+  existing **Let's Encrypt** cert, already trusted by RHCOS on both nodes
+  (`curl` exit 0, no caCert needed).
+- Identity `velero` via `weed shell s3.configure` (persisted in the filer);
+  anonymous requests correctly denied (403 from both cluster nodes).
+- Bucket `acm-backups`; signed PUT/GET round-trip returns 200/200 with
+  intact content.
+- OADP mapping (Phase 2b): `s3Url: https://truenas.skrzypek.dev:30304`,
+  bucket `acm-backups`, `s3ForcePathStyle: "true"`. On ROSA the identical
+  DPA drops `s3Url`/`s3ForcePathStyle` and uses real S3 + STS.
+
+Two live gotchas the docs won't tell you (details in
+[the S3 runbook](docs/runbooks/truenas-seaweedfs-s3/README.md)):
+
+1. **RHCOS `curl` 7.76 `--aws-sigv4` is buggy** — it returns
+   `SignatureDoesNotMatch` against a perfectly healthy endpoint
+   (canonicalization bugs fixed in later curl). Verify with curl ≥ 8 or an
+   SDK; Velero (aws-sdk-go) is unaffected.
+2. **SeaweedFS volume-slot exhaustion**: with the default 30GB
+   `volumeSizeLimitMB` and ~234G free, only ~7 volume slots exist and the
+   default collection pre-claims all of them at first start — the first
+   bucket PUT fails 500 "No writable volumes". Lowering the limit to 5GB
+   (`app.update`) freed ~46 slots and fixed it.
