@@ -1,0 +1,43 @@
+# Pull-model ApplicationSet — apply on the ACTIVE hub.
+# The three pull-model markers: ocm-managed-cluster annotation (route via
+# ManifestWork), skip-reconcile (hub Argo must not push it), and the
+# pull-to-ocm-managed-cluster label (propagation controller selector).
+# The generated Application lands ON sage, whose local Argo CD syncs it from
+# git — so syncing survives hub loss.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: hello-failover
+  namespace: openshift-gitops
+spec:
+  goTemplate: false
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: hello-failover-placement
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: "hello-failover-{{name}}"
+      labels:
+        apps.open-cluster-management.io/pull-to-ocm-managed-cluster: "true"
+      annotations:
+        apps.open-cluster-management.io/ocm-managed-cluster: "{{name}}"
+        argocd.argoproj.io/skip-reconcile: "true"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/shpwrck/acm-gitops-failover
+        targetRevision: main
+        path: apps/hello-failover
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: hello-failover
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

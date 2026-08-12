@@ -1,0 +1,63 @@
+# ACM <-> OpenShift GitOps integration — apply on the ACTIVE hub.
+# All of these are in backed-up API groups, so the passive hub inherits them
+# automatically through the restore sync.
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: default
+  namespace: openshift-gitops
+spec:
+  clusterSet: default
+---
+# Registers every cluster in the default clusterset into Argo CD (ACM mints
+# the Argo cluster secrets from rotated ManagedServiceAccount tokens).
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: gitops-clusters
+  namespace: openshift-gitops
+spec:
+  clusterSets:
+    - default
+---
+apiVersion: apps.open-cluster-management.io/v1beta1
+kind: GitOpsCluster
+metadata:
+  name: gitops-cluster
+  namespace: openshift-gitops
+spec:
+  argoServer:
+    cluster: local-cluster
+    argoNamespace: openshift-gitops
+  placementRef:
+    kind: Placement
+    apiVersion: cluster.open-cluster-management.io/v1beta1
+    name: gitops-clusters
+    namespace: openshift-gitops
+---
+# Required by the clusterDecisionResource generator (ApplicationSet).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acm-placement
+  namespace: openshift-gitops
+data:
+  apiVersion: cluster.open-cluster-management.io/v1beta1
+  kind: placementdecisions
+  statusListKey: decisions
+  matchKey: clusterName
+---
+# App-targeting placement: the demo app goes to sage only.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: hello-failover-placement
+  namespace: openshift-gitops
+spec:
+  clusterSets:
+    - default
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            name: sage

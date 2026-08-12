@@ -1,0 +1,13 @@
+# OpenShift GitOps operator — required on BOTH hubs (the restore hub must
+# carry the same operators as the backup hub), channel latest (1.21.x).
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-gitops-operator
+  namespace: openshift-operators
+spec:
+  channel: latest
+  installPlanApproval: Automatic
+  name: openshift-gitops-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace

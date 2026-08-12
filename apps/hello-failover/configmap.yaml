@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-failover-content
+data:
+  index.html: |
+    <html><body>
+    <h1>hello-failover REVISION v1</h1>
+    <p>Served from git: shpwrck/acm-gitops-failover apps/hello-failover</p>
+    </body></html>

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-failover
+  labels:
+    app: hello-failover
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-failover
+  template:
+    metadata:
+      labels:
+        app: hello-failover
+    spec:
+      containers:
+        - name: httpd
+          image: registry.access.redhat.com/ubi9/httpd-24:latest
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: content
+              mountPath: /var/www/html
+      volumes:
+        - name: content
+          configMap:
+            name: hello-failover-content
