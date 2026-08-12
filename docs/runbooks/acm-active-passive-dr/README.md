@@ -15,17 +15,19 @@ Durable state spans the three k8socp.com clusters (contexts `hub`, `spoke`,
 and the SeaweedFS S3 store on TrueNAS (see the `truenas-seaweedfs-s3`
 runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
-- **hub = ACTIVE ACM 2.17 hub**: manages `local-cluster` + `sage`
-  (imported, all addons Available); `BackupSchedule schedule-acm`
-  (`*/30 * * * *`, `veleroTtl 72h`, `useManagedServiceAccount: true`) in
+- **spoke = ACTIVE ACM 2.17 hub** (since the 2026-08-12 DR exercise —
+  roles SWAPPED from the original build): manages `local-cluster` + `sage`
+  (all 8 addons Available); `BackupSchedule schedule-acm` (`*/30 * * * *`,
+  `veleroTtl 72h`, `useManagedServiceAccount: true`) in
   `open-cluster-management-backup`; GitOps wiring in `openshift-gitops`
-  (`GitOpsCluster gitops-cluster`, Placements `gitops-clusters` +
-  `hello-failover-placement`, ConfigMap `acm-placement`, ApplicationSet
-  `hello-failover`).
-- **spoke = PASSIVE hub**: `Restore restore-acm-passive-sync`
-  (managedClusters `skip`, credentials/resources `latest`,
-  `syncRestoreWithNewBackups: true`, interval 10m) — carries hub's policies,
-  credentials, cluster namespaces; claims NO managed cluster while passive.
+  (restored from backup: `GitOpsCluster`, Placements, `acm-placement`
+  ConfigMap, ApplicationSet `hello-failover`).
+- **hub = PASSIVE hub** (ex-primary, defused after the exercise: old
+  BackupSchedule hit `BackupCollision` and was deleted, stale
+  `ManagedCluster sage` deleted in `Unknown` state, 15 s cleanup):
+  `Restore restore-acm-passive-sync` (managedClusters `skip`,
+  credentials/resources `latest`, `syncRestoreWithNewBackups: true`,
+  interval 10m); claims NO managed cluster while passive.
 - **sage = workload cluster**: runs OpenShift GitOps (operator, like both
   hubs, channel `latest`); pull-model Application `hello-failover-sage`
   synced by its LOCAL Argo from
@@ -60,7 +62,7 @@ runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 All applies are idempotent (`oc --context <c> apply -f <file>`). Rebuild
 order on a fresh pair: import clusters (40), enable `cluster-backup` MCH
 component on both, secret + DPA (50) on both, BackupSchedule (55) on ACTIVE
-only, passive Restore (56) on PASSIVE only, GitOps operator (60) on all
+only (currently spoke), passive Restore (56) on PASSIVE only (currently hub), GitOps operator (60) on all
 three, integration (61) + AppSet (62) on ACTIVE. Prerequisite checks that
 MUST pass first (each broke once, live):
 
@@ -73,9 +75,9 @@ oc --context <spoke-cluster> get crd routes.route.openshift.io # must NOT exist 
 ### Verify and recover
 
 ```bash
-oc --context hub get backupschedule,backup -n open-cluster-management-backup   # schedule Enabled, backups Completed
-oc --context spoke get restore -n open-cluster-management-backup               # phase Enabled (sync mode)
-oc --context spoke get managedclusters                                         # local-cluster ONLY while passive
+oc --context spoke get backupschedule,backup -n open-cluster-management-backup # ACTIVE: schedule Enabled, backups Completed
+oc --context hub get restore -n open-cluster-management-backup                 # PASSIVE: phase Enabled (sync mode)
+oc --context hub get managedclusters                                           # local-cluster ONLY while passive
 oc --context sage get applications.argoproj.io -A                              # hello-failover-sage Synced/Healthy
 curl -s https://hello-failover-hello-failover.apps.sage.k8socp.com | grep REVISION
 ```
@@ -119,9 +121,8 @@ Change workloads by committing to `apps/` in the git repo — sage syncs
 within ~3 min (or annotate the Application `argocd.argoproj.io/refresh`).
 Change DR wiring by editing `manifests/` + `oc apply` to the right cluster
 (active vs passive matters for 55/56/57), then commit+push in the same
-change. Watch the posture with the Verify block. The NEXT planned change is
-the failover exercise itself: shut hub down, delete the passive Restore,
-apply 57 on spoke, verify sage re-homes (MSA auto-import) and the app keeps
-serving/syncing throughout; then fail back per the docs' return-to-primary
-procedure. Record timings and any new gotcha in `README.md` §3 and update
-this runbook's roles afterward (spoke becomes active).
+change. Watch the posture with the Verify block. The DR exercise ran 2026-08-12
+(README.md §3: failover 3m20s, zero downtime, v2 deployed mid-outage;
+§3.2: role-swap failback ~7 min, BackupCollision observed live). The
+posture is symmetric: to exercise the reverse direction, run §3 again with
+hub/spoke swapped (kill spoke, activate on hub, then role-swap back).
