@@ -1,0 +1,107 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  creationTimestamp: "2026-06-29T18:17:01Z"
+  generation: 1
+  labels:
+    apps.open-cluster-management.io/gitopsaddon: "true"
+  name: routes.route.openshift.io
+  resourceVersion: "5320530"
+  uid: 1393f1fd-3111-4add-800f-e1cae97c1782
+spec:
+  conversion:
+    strategy: None
+  group: route.openshift.io
+  names:
+    kind: Route
+    listKind: RouteList
+    plural: routes
+    singular: route
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: The route's host
+      jsonPath: .spec.host
+      name: Host
+      type: string
+    - description: Whether the route is accepted
+      jsonPath: .status.ingress[0].conditions[?(@.type=="Accepted")].status
+      name: Accepted
+      type: boolean
+    - description: The route's service
+      jsonPath: .spec.to.name
+      name: Service
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: Route specifies a route to be created
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              host:
+                type: string
+              path:
+                type: string
+              port:
+                properties:
+                  targetPort:
+                    type: string
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+              tls:
+                properties:
+                  insecureEdgeTerminationPolicy:
+                    enum:
+                    - Allow
+                    - Redirect
+                    - None
+                    type: string
+                  termination:
+                    enum:
+                    - edge
+                    - reencrypt
+                    - passthrough
+                    type: string
+                type: object
+              to:
+                properties:
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  weight:
+                    type: integer
+                type: object
+            type: object
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+        type: object
+    served: true
+    storage: true
+status:
+  acceptedNames:
+    kind: Route
+    listKind: RouteList
+    plural: routes
+    singular: route
+  conditions:
+  - lastTransitionTime: "2026-06-29T18:17:01Z"
+    message: no conflicts found
+    reason: NoConflicts
+    status: "True"
+    type: NamesAccepted
+  - lastTransitionTime: "2026-06-29T18:17:01Z"
+    message: the initial names have been accepted
+    reason: InitialNamesAccepted
+    status: "True"
+    type: Established
+  storedVersions:
+  - v1
