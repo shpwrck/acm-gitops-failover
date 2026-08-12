@@ -48,31 +48,139 @@ Verified: CSV `advanced-cluster-management.v2.17.0` reached `Succeeded` in
 
 ### 1.2 Detach spoke from the old hub
 
-(placeholder — being executed; clean detach = delete the `ManagedCluster` on
-the hub, which deletes the `…-spoke-klusterlet(-crds)` ManifestWorks, and the
-work agent uninstalls itself. Verification: klusterlet CR, agent namespaces,
-and replicated policies disappear from spoke.)
+Record the hub-side state first (what the detach must clean up):
 
-Detach leaves policy-*created* resources on spoke orphaned but intact
-(namespace `acm-policy-demo`: ConfigMap `gated-by-health`, helm release
-`demo-hello`, ESO demo objects). This is expected: ConfigurationPolicy does
-not prune on detach unless `pruneObjectBehavior` was set.
+```console
+$ oc --context hub get manifestwork -n spoke
+NAME                                         AGE
+addon-application-manager-deploy-0           33d
+addon-cert-policy-controller-deploy-0        33d
+addon-config-policy-controller-deploy-0      33d
+addon-governance-policy-framework-deploy-0   33d
+addon-search-collector-deploy-0              33d
+spoke-klusterlet                             33d
+spoke-klusterlet-crds                        33d
+```
+
+The clean detach is a single delete on the hub; four finalizers do the rest:
+
+```console
+$ oc --context hub delete managedcluster spoke --wait=false
+managedcluster.cluster.open-cluster-management.io "spoke" deleted
+# finalizers: resource-cleanup, managedcluster-import-controller cleanup,
+#             api-resource-cleanup, manifestwork-cleanup
+```
+
+Observed sequence and timing (live, 2026-08-12):
+
+1. `ManagedClusterImportSucceeded` flips to `False/ManagedClusterDetaching`;
+   addon ManifestWorks are deleted one by one (~4 min for 5 addons).
+2. `spoke-klusterlet` + `spoke-klusterlet-crds` ManifestWorks are deleted;
+   the work agent uninstalls the klusterlet and all agent namespaces on
+   spoke (~30 s).
+3. Hub-side namespace `spoke` and the `ManagedCluster` object disappear.
+
+**Total: ~4.5 minutes** from delete to fully clean on both sides.
+
+Verify on spoke (all should come back empty / NotFound):
+
+```console
+$ oc --context spoke get klusterlet
+$ oc --context spoke get ns | grep open-cluster-management
+$ oc --context spoke get crd | grep open-cluster-management
+appliedmanifestworks.work.open-cluster-management.io   # harmless leftovers,
+clusterclaims.cluster.open-cluster-management.io       # reused by the new hub
+```
+
+**Surprise verified live — detach pruned the policy-managed workloads.**
+The entire `acm-policy-demo` namespace on spoke (policy-created ConfigMap,
+`demo-hello` helm release installed by the application-manager addon, ESO
+demo objects) was REMOVED during detach, along with the replicated policies
+and even the policy CRDs. Do not assume policy-deployed workloads survive a
+detach: anything the application-manager addon installed is uninstalled with
+the addon, and policy-created objects were pruned with their policies. If a
+managed cluster's workloads must survive re-homing to a new hub, they must
+come from GitOps/Argo (cluster-local reconciliation), not from hub-pushed
+addons — this observation drives the Phase 2 design.
 
 ### 1.3 Create the MultiClusterHub
 
-(placeholder — `manifests/20-multiclusterhub.yaml`, `availabilityConfig:
-Basic` because spoke is SNO.)
+Only after 1.2 is fully clean (the `local-cluster` self-import creates a
+klusterlet named `klusterlet`, which would collide with the old one):
+
+```console
+$ oc --context spoke apply -f manifests/20-multiclusterhub.yaml
+multiclusterhub.operator.open-cluster-management.io/multiclusterhub created
+```
+
+`availabilityConfig: Basic` because spoke is SNO (single replicas; the
+default High doubles replicas for no benefit on one node).
 
 ### 1.4 Verify spoke is a self-managing hub
 
-(placeholder — MCH phase Running, `local-cluster` ManagedCluster
-Joined/Available.)
+Observed install timeline on SNO (19.5 CPU / 95Gi allocatable): MCE CR
+appeared ~6 min after MCH creation; `local-cluster` self-import
+Joined/Available at ~7 min; **MCH `Running` at 10m20s**.
 
-## Phase 2 — Failover design (options under evaluation)
+```console
+$ oc --context spoke get mch -n open-cluster-management
+NAME              STATUS    AGE   CURRENTVERSION   DESIREDVERSION   MESSAGE
+multiclusterhub   Running   10m   2.17.0           2.17.0           All hub components ready.
 
-To be written after Phase 1: candidate approaches are
-(a) two independent hubs with git as the source of truth (active/active,
-GitOps re-targets workloads), (b) ACM cluster-backup-operator + OADP
-hub restore (active/passive), (c) manual re-import of managed clusters to
-the surviving hub. The choice will be verified live, including what happens
-to `sage` as a managed cluster during a hub outage.
+$ oc --context spoke get managedclusters
+NAME            HUB ACCEPTED   MANAGED CLUSTER URLS                JOINED   AVAILABLE   AGE
+local-cluster   true           https://api.spoke.k8socp.com:6443   True     True        3m44s
+
+$ oc --context spoke get klusterlet          # new self-managed klusterlet
+NAME         AGE
+klusterlet   4m20s
+```
+
+Post-install footprint: 24 pods in `multicluster-engine`, 23 in
+`open-cluster-management`, zero not-Running; node at 11% CPU / 42% memory
+(up from 4% / 36%). The old hub is unaffected (`local-cluster` only, MCH
+Running). ACM 2.17 has no separate console route — use the OpenShift
+console's cluster switcher ("All Clusters" perspective) on
+`console-openshift-console.apps.spoke.k8socp.com`.
+
+**Phase 1 result: two independent, same-version (2.17.0) ACM hubs.**
+
+## Phase 2 — Failover design (decision pending)
+
+Doc research (citations in [research-notes.md](research-notes.md), verified
+against the ACM 2.17 doc source) narrows the design space:
+
+- **Hub backup/restore (active/passive)** — cluster-backup-operator +
+  OADP/Velero into S3-compatible storage; passive hub restores continuously
+  with `veleroManagedClustersBackupName: skip`, failover = flip to `latest`.
+  Hard requirements verified: same ACM version + namespace + pre-installed
+  operators on both hubs (2.17.0 parity ✔), S3 target (lab has none yet —
+  TrueNAS/MinIO would work), and — because this lab's clusters are
+  *imported*, not Hive-created — **ManagedServiceAccount auto-import**
+  (`useManagedServiceAccount: true`) or every failover ends in
+  `Pending Import`. The old hub must be shut down or defused
+  (paused BackupSchedule + `disable-auto-import` annotation) before
+  activation.
+- **GitOps as source of truth (active/active)** — both hubs run OpenShift
+  GitOps fed from the same git repo; ACM `GitOpsCluster` + `Placement`
+  auto-registers managed clusters into Argo (secrets minted from rotated
+  ManagedServiceAccount tokens — no manual `argocd cluster add`). Hub loss
+  is benign for running workloads (verified in docs AND observed live:
+  spoke's workloads ran untouched through hub's outage today); the
+  **pull-model** Argo addon keeps even *syncing* alive during hub loss,
+  at the cost of centralized status only.
+- **Manual re-import (no preparation)** — the baseline DR story: detach +
+  re-import each cluster to the survivor. Today's live exercise measured
+  exactly this path: clean detach ~4.5 min, and the hard lesson that
+  **hub-pushed addon/policy workloads are pruned on detach** — only
+  git-reconciled (or out-of-band) workloads survive re-homing.
+
+The Phase 1 observation is the load-bearing argument: anything delivered by
+hub addons (application-manager helm releases, `pruneObjectBehavior`
+policies) dies with the hub relationship, while GitOps-delivered state is
+cluster-local and survives. A failover design should therefore put workloads
+in git delivered by Argo (pull model preferred), and use hub backup/restore
+only for the hub's *own* state (cluster inventory, policies, placements).
+
+(to be finalized and verified live — candidate: sage imported into the spoke
+hub as the test subject, hub simulating the failed datacenter)
