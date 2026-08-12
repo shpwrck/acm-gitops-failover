@@ -356,3 +356,35 @@ Timeline (hub = active, spoke = passive, sage = workloads):
 
 (Failback pending: role-swap vs documented return-to-primary — §3.2 after
 it runs.)
+
+### 3.2 Failback as role swap (verified live)
+
+The user chose the role swap over the documented return-to-primary mirror:
+the ex-primary comes back as the NEW passive, leaving the posture symmetric
+and the exercise repeatable in the opposite direction.
+
+| Clock | Event |
+| --- | --- |
+| 15:31:54 | hub API back; its view of sage still STALE (`True/True`) |
+| ~15:34 | sage lease expired on hub → `Available=Unknown` |
+| ≤15:36 | **`BackupCollision` fired on hub's old BackupSchedule** — it saw spoke's newer backup in the shared bucket, from a different cluster id, and froze itself (exactly the documented zombie-primary guard) |
+| 15:36:24 | defuse: old `BackupSchedule` deleted; stale `ManagedCluster sage` deleted (safe ONLY in `Unknown` — a `True` deletion would uninstall sage's workloads) |
+| 15:36:57 | hub-side cleanup complete — **15 s, zero stuck finalizers** |
+| 15:38:45 | passive `Restore` applied and `Enabled` — hub is the new passive |
+
+~7 minutes from hub power-on to symmetric posture; sage and its app were
+untouched throughout (availability probe: still zero failures across
+failover AND failback).
+
+Caveats verified/noted:
+
+- Wait out the lease: the returning hub shows moved clusters as `True` for
+  the first ~2–4 minutes. Do NOT delete the ManagedCluster until it reads
+  `Unknown`.
+- Velero skips pre-existing same-name resources on restore, which is why
+  docs prefer a CLEAN passive hub. Harmless here: the ex-primary's leftover
+  GitOps wiring is byte-identical to the backup content (both from the same
+  git commits). On a real re-used hub, audit leftovers first.
+- End state: spoke ACTIVE (sage + backups), hub PASSIVE (continuous
+  restore), git the only workload source of truth. Re-running the exercise
+  in the reverse direction is the same §3 procedure with the roles renamed.
