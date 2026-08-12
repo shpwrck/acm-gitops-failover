@@ -221,3 +221,41 @@ Two live gotchas the docs won't tell you (details in
    default collection pre-claims all of them at first start — the first
    bucket PUT fails 500 "No writable volumes". Lowering the limit to 5GB
    (`app.update`) freed ~46 slots and fixed it.
+
+### 2b. Let's Encrypt serving certs on all three clusters (verified)
+
+Prerequisite hygiene for the failover work (and standard practice on ROSA,
+where API/ingress certs are managed for you): every cluster serves publicly
+trusted certs on both the apps wildcard and the API, so importing clusters
+and wiring Argo needs no custom-CA plumbing.
+
+- cert-manager (Red Hat build, `stable-v1` → v1.20.0) on all three clusters;
+  `ClusterIssuer letsencrypt-prod` with Cloudflare DNS-01
+  (`manifests/31-letsencrypt-issuer.yaml`; the Cloudflare key lives in
+  secret `cloudflare-api-key` in `cert-manager`, never in git).
+- Two Certificates per cluster (`manifests/32-cluster-certs.yaml`):
+  `*.apps.<c>.k8socp.com` → `openshift-ingress/apps-wildcard-tls` and
+  `api.<c>.k8socp.com` → `openshift-config/api-tls`. **A single
+  `*.<c>.k8socp.com` wildcard would NOT work** — console lives at
+  `console-openshift-console.apps.<c>...`, two labels below it.
+- Patches: IngressController `default` `spec.defaultCertificate`, APIServer
+  `cluster` `spec.servingCerts.namedCertificates`.
+- The whole flow is scripted and was verified end-to-end on sage:
+  `scripts/cluster-le-certs.sh <cluster>`.
+
+Observed timings/gotchas, verified live:
+
+1. DNS-01 issuance was fast (~90 s for all four hub+spoke certs). The
+   kube-apiserver static-pod rollout after the APIServer patch is the slow
+   part on SNO (~5–15 min, brief API blips).
+2. **Hub already ran cert-manager** (service-mesh CA hierarchy). Applying a
+   second OperatorGroup to `cert-manager-operator` put the CSV into
+   `Failed/TooManyOperatorGroups`; deleting the duplicate OG let it
+   self-recover to `Succeeded`. Check for an existing install first.
+3. After the API serves LE, kubeconfigs that pin the internal CA
+   (`certificate-authority-data`) fail TLS. Fix: `oc config unset
+   clusters.<name>.certificate-authority-data` — client-cert auth keeps
+   working (`system:admin`), server trust moves to the system store.
+4. **ACM is untouched by the swap**: the klusterlet's hub kubeconfig points
+   at `https://kubernetes.default.svc:443` (internal CA), so `local-cluster`
+   stayed Joined/Available on both hubs through the API cert change.
