@@ -1,0 +1,13 @@
+# BackupSchedule — ACTIVE hub only (never on the passive hub; BackupCollision
+# protection would fire if both wrote to the same location).
+# useManagedServiceAccount: true is what makes IMPORTED clusters (all of ours)
+# auto-reconnect after an activation restore on the other hub.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: BackupSchedule
+metadata:
+  name: schedule-acm
+  namespace: open-cluster-management-backup
+spec:
+  veleroSchedule: "*/30 * * * *"
+  veleroTtl: 72h
+  useManagedServiceAccount: true

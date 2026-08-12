@@ -1,0 +1,16 @@
+# FAILOVER ACTION — apply on the passive hub to make it primary.
+# Prerequisite (docs): the old active hub must be SHUT DOWN or defused
+# (paused BackupSchedule + disable-auto-import annotations) first, or it
+# will fight to reclaim the managed clusters.
+# Note: only one Restore is honored at a time — delete
+# restore-acm-passive-sync before applying this one.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Restore
+metadata:
+  name: restore-acm-activate
+  namespace: open-cluster-management-backup
+spec:
+  veleroManagedClustersBackupName: latest
+  veleroCredentialsBackupName: latest
+  veleroResourcesBackupName: latest
+  cleanupBeforeRestore: CleanupRestored
