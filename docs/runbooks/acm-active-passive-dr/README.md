@@ -11,7 +11,10 @@ status: current
 ### State and access
 
 Durable state spans the three k8socp.com clusters (contexts `hub`, `spoke`,
-`sage` in `~/.kube/config`, client-cert auth; API CAs unpinned — LE-trusted)
+`sage` in `~/.kube/config`, client-cert auth; kubeconfig cluster entries
+carry no CA pins because the lab's API endpoints serve publicly trusted
+certs — that cert setup is separate from this DR solution, tracked in the
+local `~/k8socp-le-certs` repo)
 and the SeaweedFS S3 store on TrueNAS (see the `truenas-seaweedfs-s3`
 runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
