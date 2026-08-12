@@ -259,3 +259,62 @@ Observed timings/gotchas, verified live:
 4. **ACM is untouched by the swap**: the klusterlet's hub kubeconfig points
    at `https://kubernetes.default.svc:443` (internal CA), so `local-cluster`
    stayed Joined/Available on both hubs through the API cert change.
+
+### 2c. Import sage + backup layer + GitOps pull model (verified)
+
+**Import** (`manifests/40-import-sage.yaml` + auto-import secret): sage went
+`Joined/Available` in **under 15 seconds**; all five addons Available within
+minutes. With LE-trusted API certs the kubeconfig needs no CA data at all.
+
+**Backup layer**: `cluster-backup` enabled via MCH override on both hubs
+(OADP auto-installs in `open-cluster-management-backup`);
+`cloud-credentials` + `manifests/50-dpa.yaml` on both — **both
+BackupStorageLocations went `Available` in ~10 s** against SeaweedFS
+(`checksumAlgorithm: ""` + trusted LE cert, first try). Hub runs
+`manifests/55-backupschedule.yaml` (every 30 min, `useManagedServiceAccount:
+true`); first backup set (5 backups) completed in <1 min, ~187 KB in the
+bucket. Spoke runs `manifests/56-restore-passive.yaml` — first passive sync
+restored hub's 11 policies, credentials, and cluster namespaces onto spoke
+**without claiming any managed cluster** (verified). Failover is staged as
+`manifests/57-restore-activate.yaml`.
+
+**GitOps pull model** (`manifests/6*-*.yaml`): GitOps operator on all three
+clusters; `GitOpsCluster` + Placement on hub registers `local-cluster` +
+`sage` into Argo (secrets minted from MSA tokens); pull-model ApplicationSet
+delivers `hello-failover` to sage, whose local Argo syncs it from
+`github.com/shpwrck/acm-gitops-failover`. End state verified:
+`Synced/Healthy`, route serving `REVISION v1` over trusted TLS.
+
+Five live gotchas — each cost real time and each is invisible in the docs:
+
+1. **Hub's `open-cluster-management-global-set` namespace was missing**, so
+   the `managed-serviceaccount`/`cluster-proxy`/`work-manager` addons (which
+   install via the `global` Placement there) never reached any cluster — no
+   MSA tokens existed. This broke GitOpsCluster registration AND would have
+   silently broken `useManagedServiceAccount` auto-import at failover
+   (backups carried a token-less `auto-import-account`). Fix: recreate the
+   namespace — MCE regenerates the binding/placement instantly.
+   **DR pre-flight check:** `oc get managedserviceaccount -A` on the active
+   hub must show `auto-import-account` per imported cluster WITH a
+   `.status.tokenSecretRef`.
+2. On an ACM hub, bare `application` resolves to ACM's `app.k8s.io` CRD —
+   always query `applications.argoproj.io` or you'll chase phantom
+   disappearances.
+3. **A stray `routes.route.openshift.io` CRD** (labeled
+   `apps.open-cluster-management.io/gitopsaddon` — installed on spokes by
+   the old hub's GitOps addon) collided with the real aggregated Route API
+   and 503'd sage's entire `/openapi/v2`, wedging Argo's cluster cache
+   (`ComparisonError: failed to load open api schema`). The failure is
+   timing-dependent: spoke carried the same CRD undetonated. Fix: delete the
+   CRD (real Routes live in openshift-apiserver and are unaffected; backups
+   in `backups/`). Check ALL former gitops-addon spokes for this.
+4. **Route creation forbidden** for the spoke's Argo application-controller
+   (`SyncFailed: routes ... is forbidden`) — the pull-model RBAC
+   prerequisite. Least-privilege fix (chosen): `managedNamespaceMetadata`
+   labels the app namespace `argocd.argoproj.io/managed-by=openshift-gitops`
+   and the GitOps operator mints namespace-scoped RoleBindings; the
+   docs' alternative is a cluster-admin CRB for the controller SA.
+5. **Routes are permanently OutOfSync without `ignoreDifferences`** for
+   `/spec/host`, `/spec/wildcardPolicy`, `/spec/to/weight` (server-side
+   defaults). An explicit host in git is wrong for ApplicationSets (it would
+   pin one cluster's apps domain).
