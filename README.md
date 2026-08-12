@@ -318,3 +318,41 @@ Five live gotchas — each cost real time and each is invisible in the docs:
    `/spec/host`, `/spec/wildcardPolicy`, `/spec/to/weight` (server-side
    defaults). An explicit host in git is wrong for ApplicationSets (it would
    pin one cluster's apps domain).
+
+## Phase 3 — The DR exercise (verified live, 2026-08-12)
+
+Pre-flight (all EIGHT checks passed; the full checklist is in the
+`acm-active-passive-dr` runbook): the load-bearing one is the MSA token —
+`oc get managedserviceaccount auto-import-account -n <cluster>` on the
+active hub must show `.status.tokenSecretRef` and an unexpired
+`.status.expirationTimestamp`, and a backup must have COMPLETED after that
+token existed. Bonus data point: the whole posture had just survived a full
+three-cluster cold start with zero intervention (backups resumed, passive
+sync resumed, app kept serving).
+
+Timeline (hub = active, spoke = passive, sage = workloads):
+
+| Clock | T+ | Event |
+| --- | --- | --- |
+| 15:22:32 | 0:00 | hub powered off (API dead) — datacenter loss |
+| 15:23:38 | 1:06 | `REVISION v2` committed+pushed to git, no hub alive |
+| 15:24:12 | 1:40 | on spoke: passive `Restore` deleted, `57-restore-activate.yaml` applied |
+| 15:24:49 | 2:17 | activation `Finished`; **sage Import/Joined/Available on spoke** (MSA auto-import ≤37 s) |
+| 15:25:52 | 3:20 | spoke regenerated the app ManifestWork; **route serving v2** |
+
+- **App availability: 100%** — a 10-second probe never failed once through
+  hub death, failover, and re-home.
+- **Mid-outage deploys work**: sage's local Argo pulled v2 from git while
+  NO hub existed — the pull model's whole point, observed.
+- Proof of re-home: sage's `bootstrap-hub-kubeconfig` now points at
+  `https://api.spoke.k8socp.com:6443`; all 8 addons Available on the new
+  hub.
+- Post-failover step (documented, easy to forget): create the
+  `BackupSchedule` on the NEW primary. Done at 15:2x; ACM's
+  `backup-restore-enabled` policy exists to nag if you forget.
+- ROSA translation: identical procedure; the S3 bucket is real S3, and the
+  hubs' `DataProtectionApplication` loses only the `s3Url`/`s3ForcePathStyle`
+  lines.
+
+(Failback pending: role-swap vs documented return-to-primary — §3.2 after
+it runs.)
