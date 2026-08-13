@@ -6,14 +6,14 @@ failback-as-role-swap. Every step gives the command, why it exists, what
 success looks like, and the failure modes with recovery. The *posture*
 this exercises (what is deployed where and why) lives in
 [`acm-active-passive-dr`](../acm-active-passive-dr/README.md); the
-verified narrative with timings is the repo
-[README](../../../README.md) §3.
+verified narrative with timings is the
+[exercise records](../../exercises.md) §3.
 
-**Validated live 2026-08-13** (spoke→hub reverse exercise, README §3.4):
+**Validated live 2026-08-13** (spoke→hub reverse exercise, exercise records §3.4):
 every step below ran as written; measured decision-to-re-home ≈10 s, zero
 failed requests across the full window.
 
-**This is Path 1 of 4** (manual operation, pull delivery — README §4).
+**This is Path 1 of 4** (manual operation, pull delivery — README, The four paths).
 Siblings: [path 2](../dr-failover-gitops/README.md) git-driven operation,
 [path 3](../dr-failover-push-manual/README.md) push delivery,
 [path 4](../dr-failover-push-gitops/README.md) both — all three are
@@ -75,7 +75,7 @@ missing, expired, or frozen, failover ends in `Pending Import` — the
 single most likely way this whole architecture fails. `TokenReported` must
 be checked explicitly: a Velero-restored-but-frozen secret passes the
 weaker "does a token exist" checks while rotation is already dead
-(README §3.3, found live 2026-08-13).
+(exercise records §3.3, found live 2026-08-13).
 **Success:** Every `auto-import-account` row: `TOKEN-REPORTED: True`,
 expiry comfortably in the future (rotation validity is 144h; expect
 several days out).
@@ -365,7 +365,7 @@ claim.
 **Success:** Pointer log shows the new hub URL; availability log shows
 unbroken 200s.
 
-### E.3 Post-activation hygiene — the restored MSA secret (README §3.3)
+### E.3 Post-activation hygiene — the restored MSA secret (exercise records §3.3)
 
 ```bash
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
@@ -528,5 +528,5 @@ this direction); fine, continue.
   timestamp) into the exercise record.
 - Update the [posture runbook](../acm-active-passive-dr/README.md) header
   if the roles swapped (it states who is active NOW).
-- Update README §3 with the new timings; commit everything —
+- Update the [exercise records](../../exercises.md) with the new timings; commit everything —
   the repo IS the DR plan; an undocumented exercise never happened.

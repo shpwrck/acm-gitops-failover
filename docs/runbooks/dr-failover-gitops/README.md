@@ -3,7 +3,8 @@
 **Status: EXERCISE VERIFIED LIVE 2026-08-13** (attempt 2, 18:00–18:15Z;
 attempt 1, 17:32–17:57Z, falsified the original one-PR flip and was
 reverted — findings in the Phase D' header and dr/README.md's ledger;
-full timeline README §3.5). V1/V3/V4 closed; V5 open until spoke's next
+full timeline in the [exercise records](../../exercises.md) §3.5).
+V1/V3/V4 closed; V5 open until spoke's next
 demote. Same command / rationale / success / failure format as the
 verified [path-1 runbook](../dr-failover-exercise/README.md); this
 document is a DELTA — phases not listed here run exactly as path 1 wrote
@@ -239,5 +240,5 @@ Wait for `$MANAGED` to read `Available: Unknown` on the returned hub
 dangerous moment), then delete the stale ManagedCluster (G.3). No PR
 represents this: it is runtime state, and the gate is a live reading.
 
-## Phase H — evidence, V-item verdicts (V1–V5), timings into README §3.5,
+## Phase H — evidence, V-item verdicts (V1–V5), timings into the exercise records (§3.5),
 role comments in `dr/*/kustomization.yaml` updated to match the new truth.

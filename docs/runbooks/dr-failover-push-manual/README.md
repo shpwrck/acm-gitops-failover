@@ -1,7 +1,8 @@
 # Path 3 — DR exercise runbook: manual operation, push delivery
 
-**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:30–18:40Z** (README
-§3.6). **Measured push-model delivery RTO: 2 min 53 s** (deploy
+**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:30–18:40Z**
+([exercise records](../../exercises.md) §3.6). **Measured push-model
+delivery RTO: 2 min 53 s** (deploy
 committed 18:32:15Z with no active hub → route serving it 18:35:08Z),
 against the pull model's ~2.5 min ordinary poll latency in the same
 window — pull has no outage term at all. Both probes: zero non-200s.
@@ -63,7 +64,7 @@ What verification found (2026-08-13, ACM 2.17):
   the hub holds an admin credential for every managed cluster. That is
   the push model's real price tag: a compromised hub Argo is admin
   everywhere it pushes. The pull model's namespace-scoped
-  `managedNamespaceMetadata` RBAC (README gotcha #4) is the
+  `managedNamespaceMetadata` RBAC ([build.md](../../build.md) gotcha #4) is the
   least-privilege contrast — put both sentences in the customer
   comparison.
 
