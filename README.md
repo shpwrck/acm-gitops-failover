@@ -573,6 +573,41 @@ healed `latest` within a minute. Zero downtime throughout. The fix —
   (V1 falsified→fixed, V3 benign, V4 measured; V5 open until spoke's
   next demote).
 
+### 3.6 Path 3: what a hub outage costs push delivery (verified live, 2026-08-13)
+
+Manual failover with the push app under test (ACTIVE=spoke, PASSIVE=hub),
+run 18:30–18:40Z, driven by the
+[`dr-failover-push-manual` runbook](docs/runbooks/dr-failover-push-manual/README.md):
+
+| Clock (UTC) | Event |
+| --- | --- |
+| 18:30:19 | pre-flight 0.3 gate: credentials set newer than the §3.3 fix `Completed` — the fix's protection lag was 15.5 min, the RPO number live |
+| 18:30:38 | spoke killed (self-recovering variant); API dead 18:31:57 |
+| 18:32:15 | **C' inverted teaching moment**: push `v2` + pull `v6` committed, no active hub — push RTO clock starts |
+| 18:32:26 | D.0 break-glass on hub (suspend `dr-role`) — D.1's delete then held (no 6 s selfHeal resurrection) |
+| 18:32:53 | D.2 manual activation applied → sage `Joined/Available` on hub 18:33:03 (**10 s**, pointer flip same second) |
+| 18:34:37 | MSA token re-minted (§3.3 hygiene), GitOps cluster secret re-minted (1→2) |
+| 18:34:48 | pull route serves `v6` — ordinary poll latency, zero outage term |
+| 18:35:08 | push app `Synced`, **route serves `v2` — push delivery RTO 2 min 53 s** |
+| 18:35:41 | F.1 schedule on hub; first set `Completed` immediately (fresh token captured) |
+| 18:36:43 | spoke returns (~4.8 min down), stale `sage True/True`, dr-role reasserting active |
+| 18:37:34 | operator-at-return break-glass: spoke's `dr-role` suspended before touching role objects |
+| 18:39:06 / 18:39:16 | sage lease expires (`Unknown`) / **`BackupCollision` freezes spoke's schedule — third observation, froze before writing a byte** |
+| 18:39:28–18:40:04 | G.2/G.3/G.4/G.5 residue; spoke passive-sync `Enabled` |
+| be20031 | git re-aligned to manual reality (D.0 afterwards-contract), both dr-roles re-enabled — **adoption verified** (object creation timestamps preserved) |
+
+- **The number the path exists for:** push delivery RTO **2:53** =
+  operator decision latency (38 s) + activation (10 s) + MSA/cluster-secret
+  chain (~95 s) + appset sync and push (~30 s). The pull app's same-window
+  "RTO" was its ~2.5 min poll — structurally zero outage contribution. In a
+  real disaster the operator term dominates: pull stays flat while push
+  grows with every minute of decision time.
+- **Both apps served continuously** — the push app's Argo dying uninstalls
+  nothing (customers doubt this; the probe log is the receipt).
+- The E' resurrection chain was observed strictly ordered: MSA token →
+  cluster secret → app sync → route flip; §3.3 hygiene stays FIRST (the
+  push credential is the same MSA family).
+
 ## 4. The four paths
 
 The repo carries the full 2×2 of delivery model × DR operation, so the
@@ -582,7 +617,7 @@ choice can be made on evidence rather than doctrine:
 | --- | --- | --- | --- | --- |
 | 1 | Pull | Manual | [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | **VERIFIED** both directions (§3, §3.4): ≈10 s re-home, zero downtime, deploys land mid-outage |
 | 2 | Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | **VERIFIED** 2026-08-13 (§3.5): two-PR choreography (V1 falsified the one-PR flip live, twice, then fixed); merge→claim ≈20 s of machinery; demote-at-boot race benign (V3); zero downtime |
-| 3 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | **Wiring VERIFIED** 2026-08-13 (serving on sage; identity chain documented incl. a security finding); delivery-RTO exercise pending |
+| 3 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | **VERIFIED** 2026-08-13 (§3.6): **push delivery RTO 2:53** vs pull's poll-only ~2:33 in the same outage; app served stale-but-up throughout; MSA chain resurrection observed end-to-end |
 | 4 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Composition of 2+3 — run after both parents' exercises |
 
 How the halves differ, in one line each:

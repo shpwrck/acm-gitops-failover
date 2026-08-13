@@ -1,9 +1,15 @@
 # Path 3 — DR exercise runbook: manual operation, push delivery
 
-**Status: PHASE P VERIFIED LIVE 2026-08-13** (push wiring deployed and
-serving; identity chain discovered — findings below). The exercise phases
-(the disaster + delivery-RTO measurement) remain UNVERIFIED until the
-path-3 run. Delta against the verified
+**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:30–18:40Z** (README
+§3.6). **Measured push-model delivery RTO: 2 min 53 s** (deploy
+committed 18:32:15Z with no active hub → route serving it 18:35:08Z),
+against the pull model's ~2.5 min ordinary poll latency in the same
+window — pull has no outage term at all. Both probes: zero non-200s.
+Under live dr/ wiring the G phase gains the operator-at-return
+break-glass (suspend the returned hub's dr-role before touching its
+role objects), then git re-align + re-enable per D.0's
+afterwards-contract — adoption verified, nothing recreated. Phase P was
+verified earlier the same day. Delta against the verified
 [path-1 runbook](../dr-failover-exercise/README.md); unlisted phases run
 as written there. The DR *operation* is identical — what changes is the
 delivery model under test and therefore what the exercise measures: path 1
