@@ -1,8 +1,9 @@
 # DR role for cluster `spoke`. Reconciled by SPOKE'S OWN local Argo CD
 # (dr/bootstrap/dr-role-spoke.yaml). See ../README.md for the flip
 # choreography.
-# CURRENT ROLE: passive (since the 2026-08-13 reverse exercise).
+# CURRENT ROLE: active (path-2 failover PR, 2026-08-13 — hub dead).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../roles/passive
+  - ../roles/active
+  - restore-activate-202608131731.yaml
