@@ -1,13 +1,13 @@
 # Path 2 — DR exercise runbook: GitOps operation, pull delivery
 
-**Status: PHASE P VERIFIED LIVE 2026-08-13** (bootstrap, RBAC, adoption,
-backup exclusion — outputs below are real). The exercise phases (D'/G' —
-the actual role flips) remain UNVERIFIED until the path-2 disaster run;
-they burn down [`dr/README.md`](../../../dr/README.md) items V1/V3/V4/V5.
-Same command / rationale / success / failure format as the verified
-[path-1 runbook](../dr-failover-exercise/README.md); this document is a
-DELTA — phases not listed here run exactly as path 1 wrote them (and
-path 1 verified them twice).
+**Status: EXERCISE VERIFIED LIVE 2026-08-13** (attempt 2, 18:00–18:15Z;
+attempt 1, 17:32–17:57Z, falsified the original one-PR flip and was
+reverted — findings in the Phase D' header and dr/README.md's ledger;
+full timeline README §3.5). V1/V3/V4 closed; V5 open until spoke's next
+demote. Same command / rationale / success / failure format as the
+verified [path-1 runbook](../dr-failover-exercise/README.md); this
+document is a DELTA — phases not listed here run exactly as path 1 wrote
+them (and path 1 verified them twice).
 
 Conventions as path 1 (`$ACTIVE`/`$PASSIVE`/`$MANAGED`, UTC, probes).
 
@@ -167,9 +167,17 @@ to `Finished`).
 **Success:** Passive restore pruned, `restore-acm-activate-<stamp>`
 reaches `Finished`, then `$MANAGED` lands `Joined/Available` on
 `$PASSIVE` (same ≈10 s machinery as verified).
-**Failure:** Activation `Error` mentioning an existing restore → V1
-failed; delete the passive Restore by hand, let selfHeal re-apply the
-activation, and file the two-PR choreography as the fix. Record it.
+**Failure (OBSERVED live, attempt 2 — treat as the expected first
+outcome):** the activation lands `FinishedWithErrors` with lastMessage
+"ignored because Restore resource restore-acm-passive-sync is currently
+active" — PruneFirst prunes the passive restore, but the operator
+evaluates the activation before the prune completes, and a Restore is
+one-shot: it stays dead. **Verified recovery (30 s):** delete the ignored
+activation Restore; selfHeal re-creates it within ~6 s and the fresh
+object runs clean — observed delete→`Finished`→`Joined/Available` in
+11 s. Do NOT touch the passive restore (already pruned) and do NOT
+`oc apply` the manifest by hand (a hand-applied object is untracked and
+the demote PR's prune will never clean it — attempt-1 lesson).
 
 ## Phase E — as path 1
 
@@ -189,8 +197,9 @@ git add dr/ && git commit -m "PROMOTE: $PASSIVE to full active (claim verified)"
 **Why:** Delivers the BackupSchedule only AFTER the claim landed — the
 same ordering the manual path enforces with F.1, expressed in git. The
 review gate is posture evidence, not death evidence.
-**Success:** After merge+sync: schedule `Enabled`, first full set fires
-immediately and reaches `Completed` (verified path 1); no
+**Success (VERIFIED attempt 2):** After merge+sync: schedule `Enabled`,
+first full set fires immediately and reaches `Completed` (observed: PR-B
+merged 18:09:05Z, set `20260813180954` Completed <1 min); no
 `BackupCollision` (the old hub is dead or already demoted).
 **Failure:** Restore refused/ignored messages at THIS point → you merged
 F' before D''s restore `Finished`; the operator's one-at-a-time rule
@@ -213,6 +222,10 @@ git add -A dr/ && git commit -m "DEMOTE: $ACTIVE to passive" && git push -u orig
 its Argo prunes the stale BackupSchedule (automating manual G.2) and
 applies the passive Restore (manual G.4). V3 observes the boot-time race
 (collision-fire vs prune) — expected benign in either order.
+**VERIFIED (attempt 2):** demote PR merged 18:09:29Z while hub was down;
+hub booted ~18:09:3xZ, and its natural-poll sync pruned the schedule at
+18:13:29Z before it fired anything — no collision, no catch-up backup;
+passive restore `Enabled` 18:13:39Z. Prune won the race cleanly.
 **Success:** After the hub boots: `dr-role` `Synced`, exactly one restore
 (`restore-acm-passive-sync` `Enabled`), no BackupSchedule.
 **Failure:** Sync stuck on the pruned schedule → record for V3 and delete

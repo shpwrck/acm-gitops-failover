@@ -18,22 +18,24 @@ local `~/k8socp-le-certs` repo)
 and the SeaweedFS S3 store on TrueNAS (see the `truenas-seaweedfs-s3`
 runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
-- **hub = ACTIVE ACM 2.17 hub** (since the 2026-08-13 reverse DR exercise
-  — the ORIGINAL roles restored; README §3.4): manages `local-cluster` +
-  `sage` (all 8 addons Available); `BackupSchedule schedule-acm`
-  (`*/30 * * * *`, `veleroTtl 72h`, `useManagedServiceAccount: true`) in
-  `open-cluster-management-backup`; GitOps wiring in `openshift-gitops`
-  (restored from backup: `GitOpsCluster`, Placements, `acm-placement`
-  ConfigMap, ApplicationSet `hello-failover`); post-activation MSA secret
-  cleanup done (token re-minted 14:45:44Z, captured in the 14:46:38Z
-  backup set).
-- **spoke = PASSIVE hub** (ex-active, demoted after the reverse exercise:
-  old BackupSchedule hit `BackupCollision` and was deleted, stale
-  `ManagedCluster sage` deleted in `Unknown` state, stale `Finished`
-  `restore-acm-activate` deleted — silent-no-op guard, exercise runbook
-  G.5): `Restore restore-acm-passive-sync` (managedClusters `skip`,
-  credentials/resources `latest`, `syncRestoreWithNewBackups: true`,
-  interval 10m); claims NO managed cluster while passive.
+- **spoke = ACTIVE ACM 2.17 hub** (since the 2026-08-13 path-2 git-driven
+  exercise, README §3.5 — activated by PR-A 18:02Z, claim 18:08:09Z):
+  manages `local-cluster` + `sage` (all 8 addons Available);
+  `BackupSchedule schedule-acm` delivered by promotion PR-B (git:
+  `dr/spoke → ../roles/active` + activation one-shot
+  `restore-activate-202608131800.yaml`, reconciled by spoke's own Argo);
+  GitOps wiring restored from backup (`GitOpsCluster`, Placements,
+  ApplicationSets `hello-failover` + `hello-failover-push`);
+  post-activation MSA secret cleanup done (token re-minted 18:14:22Z —
+  protected once the next credentials set completes).
+- **hub = PASSIVE hub** (demoted via PR #5 merged while hub was down;
+  on boot its Argo pruned the stale BackupSchedule before it fired — V3
+  benign; git: `dr/hub → ../roles/passive`): `Restore
+  restore-acm-passive-sync` `Enabled` (managedClusters `skip`,
+  credentials/resources `latest`, `syncRestoreWithNewBackups: true`);
+  stale `ManagedCluster sage` deleted in `Unknown` (G.3), stale manual
+  `restore-acm-activate` deleted (G.5) — exactly one restore remains;
+  claims NO managed cluster while passive.
 - **sage = workload cluster**: runs OpenShift GitOps (operator, like both
   hubs, channel `latest`); pull-model Application `hello-failover-sage`
   synced by its LOCAL Argo from

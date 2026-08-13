@@ -1,10 +1,11 @@
 # Git-driven DR roles (paths 2 & 4)
 
-**Status: WIRING VERIFIED LIVE 2026-08-13** (bootstrap, adoption, RBAC,
-backup exclusion — V2 closed with instance-level evidence). The
-role-FLIP items (V1, V3, V4, V5) still require the path-2 disaster
-exercise ([runbook](../docs/runbooks/dr-failover-gitops/README.md));
-until then, flip claims are design, not proof.
+**Status: FLIP VERIFIED LIVE 2026-08-13** (path-2 disaster exercise,
+[runbook](../docs/runbooks/dr-failover-gitops/README.md), two attempts —
+README §3.5). V0/V2 closed with wiring evidence earlier that day; the
+exercise closed V1 (FALSIFIED as designed — hence the two-PR
+choreography below), V3 (benign, prune won), and V4 (measured). V5 stays
+open until spoke's next demote.
 
 ## Mechanism
 
@@ -134,18 +135,36 @@ Closed 2026-08-13 (wiring, no disaster required):
   INCLUDED (push delivery fails over), `dr-role` still absent — the
   opposite-treatments design, proven both ways.
 
-Open — require the path-2 disaster exercise:
+Closed 2026-08-13 by the path-2 disaster exercise (README §3.5):
 
-- **V1 — PruneFirst ordering:** confirm a single role-flip PR removes the
-  passive Restore before the activation Restore is applied ("only one
-  Restore honored at a time"). Fallback if it misbehaves: two-PR
-  choreography (demote-then-activate).
-- **V3 — Boot-time demote race:** returned hub syncing the demote overlay
-  while its stale BackupSchedule sits in `BackupCollision` — expected
-  benign in either order; observe it once.
-- **V4 — Measured RTO delta:** merge→re-home vs the manual path's ≈10 s
-  (expected: + PR merge + Argo poll (≤3 min; refresh-annotation or a git
-  webhook cuts it), which is the price of an audit trail and a review
-  gate).
+- **V1 — PruneFirst ordering: FALSIFIED, twice, two different ways.**
+  Attempt 1 (one-PR flip to `../roles/active`): the role's BackupSchedule
+  arrived in the same sync and the operator ignored the activation
+  entirely, then the premature schedule poisoned the bucket's `latest`
+  (details in "Why two PRs" above). Attempt 2 (activation-only PR-A):
+  PruneFirst DID prune the passive Restore, but the activation one-shot
+  was evaluated first and permanently ignored ("only one Restore honored
+  at a time" — `FinishedWithErrors`, restore ran nothing). **Verified
+  recovery, now the canonical D'.3 step: delete the ignored one-shot;
+  selfHeal re-creates it (6 s) and the fresh evaluation runs clean —
+  delete→`Finished`→claim took 11 s live.** The predicted fallback (two-PR
+  choreography) is now the documented design.
+- **V3 — Boot-time demote race: VERIFIED benign, prune won.** Hub booted
+  ~18:09Z still holding active-role state (demote PR merged 18:09:29Z
+  while it was down); sage read `Unknown` at 18:13:08Z; hub's own Argo
+  natural-poll sync pruned the stale BackupSchedule at 18:13:29Z before
+  it ever fired a backup or a collision, and the passive restore was
+  `Enabled` by 18:13:39Z — manual G.2+G.4 fully automated.
+- **V4 — Measured RTO delta:** merge→Argo sync ≈5 s with the refresh
+  annotation (18:02:09→18:02:14Z); clean-path machinery merge→claim is
+  ≈20 s (restore create→`Finished`→`Joined/Available` observed at 11 s).
+  Attempt 2's 6-minute merge→claim wall clock was V1 detection+recovery,
+  not machinery. The audit trail costs tens of seconds, not minutes.
+
+Open:
+
 - **V5 — Restore names accumulating:** confirm demote-PR file removal
-  prunes the inert Finished restores as expected.
+  prunes the inert Finished restores — observe at spoke's next demote
+  (path-4 failback). Note from attempt 1: an activation restore
+  re-created by hand (`oc apply`) is NOT Argo-tracked and must be deleted
+  by hand; only Argo-created objects get pruned by the demote PR.
