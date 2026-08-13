@@ -10,39 +10,39 @@ status: current
 
 ### State and access
 
-Durable state spans the three k8socp.com clusters (contexts `hub`, `spoke`,
-`sage` in `~/.kube/config`, client-cert auth; kubeconfig cluster entries
+Durable state spans the three k8socp.com clusters (contexts `hub-x`, `hub-y`,
+`spoke` in `~/.kube/config`, client-cert auth; kubeconfig cluster entries
 carry no CA pins because the lab's API endpoints serve publicly trusted
 certs — that cert setup is separate from this DR solution, tracked in the
 local `~/k8socp-le-certs` repo)
 and the SeaweedFS S3 store on TrueNAS (see the `truenas-seaweedfs-s3`
 runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
-- **spoke = ACTIVE ACM 2.17 hub** (since the 2026-08-13 path-4 composed
+- **hub-y = ACTIVE ACM 2.17 hub** (since the 2026-08-13 path-4 composed
   exercise, [exercise records](../../exercises.md) §3.7 — PR-A claim 18:45:59Z, merge→claim 28 s):
-  manages `local-cluster` + `sage` (all 8 addons Available);
+  manages `local-cluster` + `spoke` (all 8 addons Available);
   `BackupSchedule schedule-acm` delivered by promotion PR-B #7 (git:
   `dr/spoke → ../roles/active` + one-shot
-  `restore-activate-202608131843.yaml`, reconciled by spoke's own Argo);
+  `restore-activate-202608131843.yaml`, reconciled by hub-y's own Argo);
   ApplicationSets `hello-failover` + `hello-failover-push` restored
   (push delivery resumed, measured RTO 2:45); §3.3 MSA cleanup done
   (token re-minted 18:46:54Z, captured in PR-B's first set 18:48:42Z).
-- **hub = PASSIVE hub** (demoted via PR #8, merged while hub was down;
+- **hub-x = PASSIVE hub** (demoted via PR #8, merged while hub-x was down;
   at boot: `BackupCollision` froze its stale schedule 18:51:30Z, its
   Argo pruned it 18:51:41Z and applied the passive restore — V3's
-  collision-first order; stale `ManagedCluster sage` deleted in
+  collision-first order; stale `ManagedCluster spoke` deleted in
   `Unknown` 18:53:00Z; git: `dr/hub → ../roles/passive`): `Restore
   restore-acm-passive-sync` `Enabled` (managedClusters `skip`,
   credentials/resources `latest`, `syncRestoreWithNewBackups: true`);
   claims NO managed cluster while passive.
-- **sage = workload cluster**: runs OpenShift GitOps (operator, like both
-  hubs, channel `latest`); pull-model Application `hello-failover-sage`
+- **spoke = workload cluster**: runs OpenShift GitOps (operator, like both
+  hubs, channel `latest`); pull-model Application `hello-failover-spoke`
   synced by its LOCAL Argo from
   `https://github.com/shpwrck/acm-gitops-failover` (`apps/hello-failover`,
   branch main); app namespace `hello-failover` labeled
   `argocd.argoproj.io/managed-by=openshift-gitops` (operator-minted
   namespace-scoped RBAC). Route:
-  `https://hello-failover-hello-failover.apps.sage.k8socp.com`.
+  `https://hello-failover-hello-failover.apps.spoke.k8socp.com`.
 - Both hubs: `cluster-backup` MCH component enabled, OADP in
   `open-cluster-management-backup`, secret `cloud-credentials`, DPA
   `acm-dpa` → `https://truenas.skrzypek.dev:30304`, bucket `acm-backups`,
@@ -55,44 +55,48 @@ runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
 ### Template map
 
-~/acm-failover-guide/manifests/40-import-sage.yaml -> hub ManagedCluster sage + KlusterletAddonConfig (auto-import secret out-of-band)
+(Committed filenames and dirs keep the original lab names:
+`40-import-sage.yaml` imports spoke; `dr/hub` = hub-x's overlay,
+`dr/spoke` = hub-y's.)
+
+~/acm-failover-guide/manifests/40-import-sage.yaml -> hub-x ManagedCluster spoke + KlusterletAddonConfig (auto-import secret out-of-band)
 ~/acm-failover-guide/manifests/50-dpa.yaml -> DPA acm-dpa on BOTH hubs (ns open-cluster-management-backup)
-~/acm-failover-guide/manifests/55-backupschedule.yaml -> hub BackupSchedule schedule-acm (ACTIVE hub only)
-~/acm-failover-guide/manifests/56-restore-passive.yaml -> spoke Restore restore-acm-passive-sync (PASSIVE posture)
-~/acm-failover-guide/manifests/57-restore-activate.yaml -> spoke Restore restore-acm-activate (FAILOVER action; not applied)
-~/acm-failover-guide/manifests/61-gitops-integration.yaml -> hub GitOpsCluster + Placements + acm-placement ConfigMap
-~/acm-failover-guide/manifests/62-appset-pull.yaml -> hub ApplicationSet hello-failover (pull model)
-~/acm-failover-guide/manifests/63-appset-push.yaml -> hub ApplicationSet hello-failover-push (push model; APPLIED+VERIFIED 2026-08-13)
-~/acm-failover-guide/apps/hello-failover/ -> sage ns hello-failover (Deployment/ConfigMap/Service/Route via sage-local Argo)
-~/acm-failover-guide/apps/hello-failover-push/ -> sage ns hello-failover-push (pushed by HUB's Argo via cluster-proxy; APPLIED+VERIFIED 2026-08-13)
+~/acm-failover-guide/manifests/55-backupschedule.yaml -> hub-x BackupSchedule schedule-acm (ACTIVE hub only)
+~/acm-failover-guide/manifests/56-restore-passive.yaml -> hub-y Restore restore-acm-passive-sync (PASSIVE posture)
+~/acm-failover-guide/manifests/57-restore-activate.yaml -> hub-y Restore restore-acm-activate (FAILOVER action; not applied)
+~/acm-failover-guide/manifests/61-gitops-integration.yaml -> hub-x GitOpsCluster + Placements + acm-placement ConfigMap
+~/acm-failover-guide/manifests/62-appset-pull.yaml -> hub-x ApplicationSet hello-failover (pull model)
+~/acm-failover-guide/manifests/63-appset-push.yaml -> hub-x ApplicationSet hello-failover-push (push model; APPLIED+VERIFIED 2026-08-13)
+~/acm-failover-guide/apps/hello-failover/ -> spoke ns hello-failover (Deployment/ConfigMap/Service/Route via spoke-local Argo)
+~/acm-failover-guide/apps/hello-failover-push/ -> spoke ns hello-failover-push (pushed by HUB's Argo via cluster-proxy; APPLIED+VERIFIED 2026-08-13)
 ~/acm-failover-guide/dr/bootstrap/ -> BOTH hubs: Role/RoleBinding dr-role-backup-operator + Application dr-role in openshift-gitops (velero-excluded; APPLIED+VERIFIED 2026-08-13)
-~/acm-failover-guide/dr/{hub,spoke}/ -> per-hub git-driven DR role overlays (hub->active, spoke->passive), reconciled by each hub's LOCAL Argo
+~/acm-failover-guide/dr/{hub,spoke}/ -> per-hub git-driven DR role overlays (hub-x->passive, hub-y->active as of the path-4 exercise), reconciled by each hub's LOCAL Argo
 
 ### Re-run
 
 All applies are idempotent (`oc --context <c> apply -f <file>`). Rebuild
 order on a fresh pair: import clusters (40), enable `cluster-backup` MCH
 component on both, secret + DPA (50) on both, BackupSchedule (55) on ACTIVE
-only (currently hub), passive Restore (56) on PASSIVE only (currently
-spoke), GitOps operator (60) on all
+only (currently hub-y), passive Restore (56) on PASSIVE only (currently
+hub-x), GitOps operator (60) on all
 three, integration (61) + AppSet (62) on ACTIVE. Prerequisite checks that
 MUST pass first (each broke once, live):
 
 ```bash
 oc --context <hub> get ns open-cluster-management-global-set   # must exist (addon rollout)
 oc --context <hub> get managedserviceaccount -A                # auto-import-account per imported cluster
-oc --context <spoke-cluster> get crd routes.route.openshift.io # must NOT exist (gitopsaddon relic)
+oc --context <hub-y-cluster> get crd routes.route.openshift.io # must NOT exist (gitopsaddon relic)
 ```
 
 ### Verify and recover
 
 ```bash
-oc --context hub get backupschedule,backup -n open-cluster-management-backup   # ACTIVE: schedule Enabled, backups Completed
-oc --context spoke get restore -n open-cluster-management-backup               # PASSIVE: phase Enabled (sync mode), passive-sync ONLY
-oc --context spoke get managedclusters                                         # local-cluster ONLY while passive
-oc --context sage get applications.argoproj.io -A                              # hello-failover-sage Synced/Healthy
-curl -s https://hello-failover-hello-failover.apps.sage.k8socp.com | grep REVISION
-oc --context hub get managedserviceaccount auto-import-account -n sage \
+oc --context hub-y get backupschedule,backup -n open-cluster-management-backup   # ACTIVE: schedule Enabled, backups Completed
+oc --context hub-x get restore -n open-cluster-management-backup               # PASSIVE: phase Enabled (sync mode), passive-sync ONLY
+oc --context hub-x get managedclusters                                         # local-cluster ONLY while passive
+oc --context spoke get applications.argoproj.io -A                              # hello-failover-spoke Synced/Healthy
+curl -s https://hello-failover-hello-failover.apps.spoke.k8socp.com | grep REVISION
+oc --context hub-y get managedserviceaccount auto-import-account -n spoke \
   -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'  # ACTIVE: True (rotation live — exercises §3.3)
 ```
 
@@ -107,7 +111,7 @@ ownerRef` → Velero-restored token secret from a past activation was never
 cleaned up; rotation is frozen with a hard deadline at token expiry —
 delete the secret (only on an already-imported cluster), the addon
 re-mints it in seconds (exercise records §3.3; found+fixed live 2026-08-13,
-reproduced on hub post-activation the same day). Applying
+reproduced on hub-x post-activation the same day). Applying
 `57-restore-activate.yaml` produces no activation → a `Finished`
 `restore-acm-activate` from a previous activation still exists with an
 identical spec, so the apply is a silent no-op — delete it first (now
@@ -135,21 +139,21 @@ repo is the source of truth; only secrets are out-of-band).
 - `useManagedServiceAccount: true` is load-bearing: all clusters here are
   IMPORTED, and without MSA tokens an activation restore ends in
   `Pending Import`. The token chain was silently broken (missing global-set
-  ns on hub) and was only caught because GitOpsCluster uses the same chain —
+  ns on hub-x) and was only caught because GitOpsCluster uses the same chain —
   promoted to a DR pre-flight check.
 - Namespace-scoped Argo RBAC via `managedNamespaceMetadata` managed-by
   label (user choice over the docs' cluster-admin CRB).
 - Route `ignoreDifferences` in the AppSet template rather than pinning
   `spec.host` in git (ApplicationSet targets multiple clusters).
-- Stray gitopsaddon Route CRDs deleted from sage AND spoke with user
-  approval (spoke's was undetonated; a failover-time detonation on the
-  passive hub was the risk being removed). Hub never had it.
+- Stray gitopsaddon Route CRDs deleted from spoke AND hub-y with user
+  approval (hub-y's was undetonated; a failover-time detonation on the
+  passive hub was the risk being removed). hub-x never had it.
 - Backup cadence 30 min / TTL 72h: lab-friendly iteration speed; RPO for a
   real customer is a business decision (note in guide).
 
 ### How to drive it
 
-Change workloads by committing to `apps/` in the git repo — sage syncs
+Change workloads by committing to `apps/` in the git repo — spoke syncs
 within ~3 min (or annotate the Application `argocd.argoproj.io/refresh`).
 Change DR wiring by editing `manifests/` + `oc apply` to the right cluster
 (active vs passive matters for 55/56/57), then commit+push in the same
@@ -159,8 +163,8 @@ v2 deployed mid-outage;
 §3.2: role-swap failback ~7 min, BackupCollision observed live). The
 REVERSE exercise ran 2026-08-13 (§3.4: decision-to-re-home
 ≈10 s, zero downtime again, v3 deployed mid-outage, §3.3 reproduced on
-hub, BackupCollision fired in the opposite direction) — restoring the
-ORIGINAL hub-active/spoke-passive posture and validating the exercise
+hub-x, BackupCollision fired in the opposite direction) — restoring the
+ORIGINAL hub-x-active/hub-y-passive posture and validating the exercise
 runbook end to end. The posture is symmetric: each exercise is the same
 procedure with the roles renamed.
 The full step-by-step exercise script — command / rationale / success /

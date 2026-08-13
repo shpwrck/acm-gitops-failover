@@ -4,22 +4,30 @@
 attempt 1, 17:32–17:57Z, falsified the original one-PR flip and was
 reverted — findings in the Phase D' header and dr/README.md's ledger;
 full timeline in the [exercise records](../../exercises.md) §3.5).
-V1/V3/V4 closed; V5 open until spoke's next
+V1/V3/V4 closed; V5 open until hub-y's next
 demote. Same command / rationale / success / failure format as the
 verified [path-1 runbook](../dr-failover-exercise/README.md); this
 document is a DELTA — phases not listed here run exactly as path 1 wrote
 them (and path 1 verified them twice).
 
-Conventions as path 1 (`$ACTIVE`/`$PASSIVE`/`$MANAGED`, UTC, probes).
+Conventions as path 1 (`$ACTIVE`/`$PASSIVE`/`$MANAGED`, UTC, probes),
+plus the overlay-dir mapping: the committed dirs keep the original lab
+names (`dr/hub` = hub-x, `dr/spoke` = hub-y), so set both before
+authoring any PR (values shown match path 1's exports):
+
+```bash
+export ACTIVE_DIR=dr/spoke   # $ACTIVE's overlay dir  (dr/hub if $ACTIVE=hub-x, dr/spoke if hub-y)
+export PASSIVE_DIR=dr/hub    # $PASSIVE's overlay dir (dr/hub if $PASSIVE=hub-x, dr/spoke if hub-y)
+```
 
 ## Phase P — One-time prerequisites (VERIFIED 2026-08-13)
 
 ### P.0 RBAC first — the grant that makes git-driven DR possible
 
 ```bash
-oc --context hub   apply -f dr/bootstrap/dr-role-rbac.yaml
-oc --context spoke apply -f dr/bootstrap/dr-role-rbac.yaml
-oc --context hub auth can-i patch backupschedules.cluster.open-cluster-management.io \
+oc --context hub-x   apply -f dr/bootstrap/dr-role-rbac.yaml
+oc --context hub-y apply -f dr/bootstrap/dr-role-rbac.yaml
+oc --context hub-x auth can-i patch backupschedules.cluster.open-cluster-management.io \
   -n open-cluster-management-backup \
   --as=system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller
 ```
@@ -39,18 +47,22 @@ failed sync and align.
 ### P.1 Bootstrap each hub's dr-role Application
 
 ```bash
-oc --context hub   apply -f dr/bootstrap/dr-role-hub.yaml
-oc --context spoke apply -f dr/bootstrap/dr-role-spoke.yaml
-oc --context hub   get applications.argoproj.io dr-role -n openshift-gitops
-oc --context spoke get applications.argoproj.io dr-role -n openshift-gitops
+oc --context hub-x   apply -f dr/bootstrap/dr-role-hub.yaml
+oc --context hub-y apply -f dr/bootstrap/dr-role-spoke.yaml
+oc --context hub-x   get applications.argoproj.io dr-role -n openshift-gitops
+oc --context hub-y get applications.argoproj.io dr-role -n openshift-gitops
 ```
+
+(The committed bootstrap filenames keep the original lab names:
+`dr-role-hub.yaml` is hub-x's Application, `dr-role-spoke.yaml` is
+hub-y's — likewise the `dr/hub/` and `dr/spoke/` overlay dirs.)
 
 **Why:** Each hub's own Argo must reconcile its own role — the applier of
 a failover cannot be the hub that just died. Imperative once, declarative
 forever after. (`applications.argoproj.io`, never bare `application` —
 ACM's CRD shadows it; yes, this bit us again during verification.)
 **Success (observed):** Both `Synced | Healthy`, and ADOPTION not
-recreation — the live BackupSchedule (hub) and passive Restore (spoke)
+recreation — the live BackupSchedule (hub-x) and passive Restore (hub-y)
 kept their original creationTimestamps through the first sync.
 **Failure:** Sync `Failed` on RBAC → P.0 was skipped or landed late.
 NOTE (observed live): a sync that exhausts its retries stays `Failed` —
@@ -69,9 +81,9 @@ drift BEFORE trusting git-driven ops.
 ### P.2 Confirm the backup exclusion works (V2 — VERIFIED)
 
 ```bash
-NEWEST=$(oc --context hub get backup -n open-cluster-management-backup \
+NEWEST=$(oc --context hub-x get backup -n open-cluster-management-backup \
   --sort-by=.metadata.creationTimestamp -o name | grep acm-resources-schedule | tail -1 | cut -d/ -f2)
-oc --context hub -n open-cluster-management-backup exec deploy/velero -- \
+oc --context hub-x -n open-cluster-management-backup exec deploy/velero -- \
   /velero backup describe "$NEWEST" --details | grep -A6 'v1alpha1/Application'
 ```
 
@@ -80,7 +92,7 @@ split-brain (the other hub reconciling the wrong role dir). Exec'ing the
 velero pod avoids needing a local CLI.
 **Success (observed, backup `acm-resources-schedule-20260813153034`):**
 the instance list shows the delivery resources
-(`openshift-gitops/hello-failover-sage`,
+(`openshift-gitops/hello-failover-spoke`,
 ApplicationSet `hello-failover`, AppProject, ArgoCD CR) and NO `dr-role`
 — which existed in that namespace at backup time. Precision exclusion,
 proven instance-level.
@@ -119,9 +131,9 @@ F' (promotion).
 ```bash
 git checkout -b failover-$(date -u +%Y%m%d%H%M)
 # 1. cp dr/templates/restore-activate.template.yaml \
-#      dr/$PASSIVE/restore-activate-$(date -u +%Y%m%d%H%M).yaml
+#      $PASSIVE_DIR/restore-activate-$(date -u +%Y%m%d%H%M).yaml
 #    …replace <UTCSTAMP> in metadata.name
-# 2. dr/$PASSIVE/kustomization.yaml: resources -> ONLY the new
+# 2. $PASSIVE_DIR/kustomization.yaml: resources -> ONLY the new
 #    restore-activate-*.yaml (remove ../roles/passive; do NOT add
 #    ../roles/active — that is F''s promotion PR, after the claim lands)
 git add dr/ && git commit -m "FAILOVER: activate $PASSIVE ($ACTIVE dead $(date -u +%FT%TZ))" && git push -u origin HEAD
@@ -188,7 +200,7 @@ Path-1 E (verify + §3.3 MSA hygiene) unchanged.
 
 ```bash
 git checkout -b promote-$(date -u +%Y%m%d%H%M)
-# dr/$PASSIVE/kustomization.yaml: resources ->
+# $PASSIVE_DIR/kustomization.yaml: resources ->
 #   - ../roles/active
 #   - restore-activate-<stamp>.yaml     (keep; demote PR removes it)
 git add dr/ && git commit -m "PROMOTE: $PASSIVE to full active (claim verified)" && git push -u origin HEAD
@@ -213,8 +225,8 @@ from path 1.
 
 ```bash
 git checkout -b demote-$(date -u +%Y%m%d%H%M)
-# 1. dr/$ACTIVE/kustomization.yaml: resources -> ../roles/passive
-# 2. git rm dr/$ACTIVE/restore-activate-*.yaml   (if any — V5 housekeeping)
+# 1. $ACTIVE_DIR/kustomization.yaml: resources -> ../roles/passive
+# 2. git rm $ACTIVE_DIR/restore-activate-*.yaml   (if any — V5 housekeeping)
 git add -A dr/ && git commit -m "DEMOTE: $ACTIVE to passive" && git push -u origin HEAD
 # PR + merge — review gate here is posture correctness, not death
 ```
@@ -223,8 +235,8 @@ git add -A dr/ && git commit -m "DEMOTE: $ACTIVE to passive" && git push -u orig
 its Argo prunes the stale BackupSchedule (automating manual G.2) and
 applies the passive Restore (manual G.4). V3 observes the boot-time race
 (collision-fire vs prune) — expected benign in either order.
-**VERIFIED (attempt 2):** demote PR merged 18:09:29Z while hub was down;
-hub booted ~18:09:3xZ, and its natural-poll sync pruned the schedule at
+**VERIFIED (attempt 2):** demote PR merged 18:09:29Z while hub-x was down;
+hub-x booted ~18:09:3xZ, and its natural-poll sync pruned the schedule at
 18:13:29Z before it fired anything — no collision, no catch-up backup;
 passive restore `Enabled` 18:13:39Z. Prune won the race cleanly.
 **Success:** After the hub boots: `dr-role` `Synced`, exactly one restore

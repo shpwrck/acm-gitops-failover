@@ -18,27 +18,27 @@ have COMPLETED after that token existed. Bonus data point: the whole posture had
 three-cluster cold start with zero intervention (backups resumed, passive
 sync resumed, app kept serving).
 
-Timeline (hub = active, spoke = passive, sage = workloads):
+Timeline (hub-x = active, hub-y = passive, spoke = workloads):
 
 | Clock | T+ | Event |
 | --- | --- | --- |
-| 15:22:32 | 0:00 | hub powered off (API dead) — datacenter loss |
+| 15:22:32 | 0:00 | hub-x powered off (API dead) — datacenter loss |
 | 15:23:38 | 1:06 | `REVISION v2` committed+pushed to git, no hub alive |
-| 15:24:12 | 1:40 | on spoke: passive `Restore` deleted, `57-restore-activate.yaml` applied ([activation restore docs](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#restore-activation-resources)) |
-| 15:24:49 | 2:17 | activation `Finished`; **sage Import/Joined/Available on spoke** (MSA auto-import ≤37 s) |
-| 15:25:52 | 3:20 | spoke regenerated the app ManifestWork; **route serving v2** |
+| 15:24:12 | 1:40 | on hub-y: passive `Restore` deleted, `57-restore-activate.yaml` applied ([activation restore docs](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#restore-activation-resources)) |
+| 15:24:49 | 2:17 | activation `Finished`; **spoke Import/Joined/Available on hub-y** (MSA auto-import ≤37 s) |
+| 15:25:52 | 3:20 | hub-y regenerated the app ManifestWork; **route serving v2** |
 
 - **App availability: 100%** — a 10-second probe never failed once through
   hub death, failover, and re-home. ([Hub loss is benign for managed
   clusters](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#backup-intro):
   "some features stop working, even if all managed clusters still work" —
   observed.)
-- **Mid-outage deploys work**: sage's local Argo pulled v2 from git while
+- **Mid-outage deploys work**: spoke's local Argo pulled v2 from git while
   NO hub existed — [the pull model's whole
   point](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#arch-pull),
   observed.
-- Proof of re-home: sage's `bootstrap-hub-kubeconfig` now points at
-  `https://api.spoke.k8socp.com:6443`; all 8 addons Available on the new
+- Proof of re-home: spoke's `bootstrap-hub-kubeconfig` now points at
+  `https://api.hub-y.k8socp.com:6443`; all 8 addons Available on the new
   hub.
 - Post-failover step (documented, easy to forget): [create the
   `BackupSchedule` on the NEW
@@ -58,14 +58,14 @@ and the exercise repeatable in the opposite direction.
 
 | Clock | Event |
 | --- | --- |
-| 15:31:54 | hub API back; its view of sage still STALE (`True/True`) |
-| ~15:34 | sage lease expired on hub → `Available=Unknown` |
-| ≤15:36 | **`BackupCollision` fired on hub's old BackupSchedule** — it saw spoke's newer backup in the shared bucket, from a different cluster id, and froze itself ([the documented collision guard](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#prevent-backup-collision)) |
-| 15:36:24 | defuse: old `BackupSchedule` deleted; stale `ManagedCluster sage` deleted — [safe ONLY in `Unknown`: "If the status is not Unknown, your workloads are uninstalled from the managed cluster"](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#keep-hub-active-restore-clean) |
+| 15:31:54 | hub-x API back; its view of spoke still STALE (`True/True`) |
+| ~15:34 | spoke lease expired on hub-x → `Available=Unknown` |
+| ≤15:36 | **`BackupCollision` fired on hub-x's old BackupSchedule** — it saw hub-y's newer backup in the shared bucket, from a different cluster id, and froze itself ([the documented collision guard](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#prevent-backup-collision)) |
+| 15:36:24 | defuse: old `BackupSchedule` deleted; stale `ManagedCluster spoke` deleted — [safe ONLY in `Unknown`: "If the status is not Unknown, your workloads are uninstalled from the managed cluster"](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#keep-hub-active-restore-clean) |
 | 15:36:57 | hub-side cleanup complete — **15 s, zero stuck finalizers** |
-| 15:38:45 | passive `Restore` applied and `Enabled` — hub is the new passive |
+| 15:38:45 | passive `Restore` applied and `Enabled` — hub-x is the new passive |
 
-~7 minutes from hub power-on to symmetric posture; sage and its app were
+~7 minutes from hub-x power-on to symmetric posture; spoke and its app were
 untouched throughout (availability probe: still zero failures across
 failover AND failback). Probe footnote: the raw probe log (15:22–16:08)
 shows failures beginning at 15:46:20 — that is the lab being powered off
@@ -83,7 +83,7 @@ Caveats verified/noted:
   Harmless here: the ex-primary's leftover GitOps wiring is byte-identical
   to the backup content (both from the same git commits). On a real re-used
   hub, audit leftovers first.
-- End state: spoke ACTIVE (sage + backups), hub PASSIVE (continuous
+- End state: hub-y ACTIVE (spoke + backups), hub-x PASSIVE (continuous
   restore), git the only workload source of truth. Re-running the exercise
   in the reverse direction is the same §3 procedure with the roles renamed.
 
@@ -91,7 +91,7 @@ Caveats verified/noted:
 
 Pre-flighting the reverse exercise the next morning surfaced a silent
 failure the 2026-08-12 activation had left behind on the new active hub
-(spoke): the `auto-import-account` ManagedServiceAccount for sage reported
+(hub-y): the `auto-import-account` ManagedServiceAccount for spoke reported
 
 ```
 TokenReported: False — failed to update the token secret: secrets
@@ -128,11 +128,11 @@ The timing rule, now a standard runbook step:
   rotation. Verified live (fix at 14:10:47Z):
 
   ```console
-  $ oc --context spoke delete secret auto-import-account -n sage
-  $ oc --context spoke get managedserviceaccount auto-import-account -n sage \
+  $ oc --context hub-y delete secret auto-import-account -n spoke
+  $ oc --context hub-y get managedserviceaccount auto-import-account -n spoke \
       -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{" | "}{.status.expirationTimestamp}{"\n"}'
   True | 2026-08-19T14:10:47Z
-  $ oc --context spoke get secret auto-import-account -n sage \
+  $ oc --context hub-y get secret auto-import-account -n spoke \
       -o jsonpath='{.metadata.ownerReferences[0].kind}{"\n"}'
   ManagedServiceAccount        # controller-owned again (restored copy had none)
   ```
@@ -158,29 +158,29 @@ $ oc --context <active-hub> get managedserviceaccount -A \
 
 ### 3.4 The reverse exercise (verified live, 2026-08-13)
 
-The whole §3 procedure run in the opposite direction the next day — spoke
-(active since §3) killed, hub activated, role-swap failback — driven
+The whole §3 procedure run in the opposite direction the next day — hub-y
+(active since §3) killed, hub-x activated, role-swap failback — driven
 end-to-end from the
 [`dr-failover-exercise` runbook](runbooks/dr-failover-exercise/README.md),
 which this run validated step by step. Two deliberate differences from §3:
 pre-flight found and fixed the frozen MSA rotation first (§3.3 — fix
 14:10:47Z, protecting credentials backup `Completed` 14:30:21Z), and the
 disaster was a clean host shutdown through the API
-(`oc --context spoke debug node/spoke -- chroot /host shutdown -h 1`) —
+(`oc --context hub-y debug node/hub-y -- chroot /host shutdown -h 1`) —
 gentler on SNO etcd than a power cut; the variant belongs in the exercise
 record because a customer will ask.
 
 | Clock (UTC) | T+ | Event |
 | --- | --- | --- |
-| 14:34:12 | 0:00 | spoke halted (scheduled shutdown fired; API dead within the minute) |
+| 14:34:12 | 0:00 | hub-y halted (scheduled shutdown fired; API dead within the minute) |
 | ~14:35:30 | ~1:20 | `REVISION v3` committed+pushed to git, no active hub alive |
-| ~14:39 | ~5:00 | sage serving v3 (its local Argo's normal poll; hub still passive) |
-| 14:42:09 | 7:57 | on hub: passive restore deleted, activation restore created |
-| 14:42:19 | 8:07 | **sage re-homed** — bootstrap pointer flip observed (10 s probe granularity) |
-| ≤14:43 | ~9:00 | sage `Joined/Available` on hub; all 8 addons `Available` |
-| 14:45:44 | — | §3.3 reproduced on hub: `TokenReported: False` → restored secret deleted → re-minted `True` |
-| 14:46:38 | — | `BackupSchedule` applied on hub; first full set fired immediately, `Completed` in seconds |
-| +~15 min | — | spoke powered on: sage already `Unknown` (lease long expired), `BackupCollision` fired (hub id `4331cb00…` vs spoke id `88d1a668…`), stale schedule + `ManagedCluster` + activation restore deleted, passive restore `Enabled` |
+| ~14:39 | ~5:00 | spoke serving v3 (its local Argo's normal poll; hub-x still passive) |
+| 14:42:09 | 7:57 | on hub-x: passive restore deleted, activation restore created |
+| 14:42:19 | 8:07 | **spoke re-homed** — bootstrap pointer flip observed (10 s probe granularity) |
+| ≤14:43 | ~9:00 | spoke `Joined/Available` on hub-x; all 8 addons `Available` |
+| 14:45:44 | — | §3.3 reproduced on hub-x: `TokenReported: False` → restored secret deleted → re-minted `True` |
+| 14:46:38 | — | `BackupSchedule` applied on hub-x; first full set fired immediately, `Completed` in seconds |
+| +~15 min | — | hub-y powered on: spoke already `Unknown` (lease long expired), `BackupCollision` fired (hub-x id `4331cb00…` vs hub-y id `88d1a668…`), stale schedule + `ManagedCluster` + activation restore deleted, passive restore `Enabled` |
 
 - **Availability: 0 non-200 responses across the entire window**
   (`grep -cv ' 200$'` over the 10 s probe log = 0) — zero downtime in this
@@ -206,14 +206,14 @@ record because a customer will ask.
   - A hub that was down longer than the lease window wakes with its moved
     clusters already `Unknown` — the 2–4 minute wait applies only to short
     outages.
-- End state: **hub ACTIVE, spoke PASSIVE, sage untouched — the original
+- End state: **hub-x ACTIVE, hub-y PASSIVE, spoke untouched — the original
   posture, restored by exercising the DR machinery in both directions on
   consecutive days.**
 
 ### 3.5 Path 2: failover as a pull request (verified live, 2026-08-13)
 
-The git-driven flip run twice against the restored posture (hub active,
-spoke passive), driven by the
+The git-driven flip run twice against the restored posture (hub-x active,
+hub-y passive), driven by the
 [`dr-failover-gitops` runbook](runbooks/dr-failover-gitops/README.md).
 Kill variant both times: `shutdown -r +1` (self-recovering graceful
 reboot — no out-of-band dependency; SNO stays API-dead ~8 min).
@@ -225,9 +225,9 @@ failure modes in one run: the active role's BackupSchedule arrived in the
 same Argo sync as the activation Restore, and the operator **ignored the
 restore** ("This resource is ignored because BackupSchedule resource
 schedule-acm is currently active"); the premature schedule then
-immediately wrote spoke's **passive state over the bucket's `latest`**,
-so a re-run restore "succeeded" restoring nothing. The hub rebooted back
-with sage untouched; revert PR #2 restored the symmetric posture; hub's
+immediately wrote hub-y's **passive state over the bucket's `latest`**,
+so a re-run restore "succeeded" restoring nothing. hub-x rebooted back
+with spoke untouched; revert PR #2 restored the symmetric posture; hub-x's
 schedule (selfHeal-recreated after deleting the collision-frozen object)
 healed `latest` within a minute. Zero downtime throughout. The fix —
 **failover = activation PR-A, then promotion PR-B** — landed as 96c22ab.
@@ -236,16 +236,16 @@ healed `latest` within a minute. Zero downtime throughout. The fix —
 
 | Clock (UTC) | T+ | Event |
 | --- | --- | --- |
-| 18:00:12 | 0:00 | hub killed (scheduled reboot; API dead 18:01:28) |
-| 18:01:51 | 1:39 | `REVISION v5` committed+pushed, no hub alive (served by sage ~3 min later) |
+| 18:00:12 | 0:00 | hub-x killed (scheduled reboot; API dead 18:01:28) |
+| 18:01:51 | 1:39 | `REVISION v5` committed+pushed, no hub alive (served by spoke ~3 min later) |
 | 18:02:09 | 1:57 | **PR-A merged** (activation-only; death-gate evidence in review comment) |
-| 18:02:14 | 2:02 | spoke's Argo synced (refresh annotation): passive Restore pruned — but the activation one-shot was evaluated first and permanently ignored (V1 race, "only one Restore honored at a time") |
+| 18:02:14 | 2:02 | hub-y's Argo synced (refresh annotation): passive Restore pruned — but the activation one-shot was evaluated first and permanently ignored (V1 race, "only one Restore honored at a time") |
 | 18:07:58 | 7:46 | V1 recovery: ignored one-shot deleted; selfHeal re-created it in 6 s |
-| 18:08:09 | 7:57 | restore `Finished`; **sage `Joined/Available` on spoke** (pointer flip 18:08:11 — delete→claim 11 s) |
+| 18:08:09 | 7:57 | restore `Finished`; **spoke `Joined/Available` on hub-y** (pointer flip 18:08:11 — delete→claim 11 s) |
 | 18:09:05 | 8:53 | **promotion PR-B merged** → BackupSchedule; first full set `Completed` (18:09:54) |
-| 18:09:29 | 9:17 | **demote PR merged while hub still down** |
+| 18:09:29 | 9:17 | **demote PR merged while hub-x still down** |
 | 18:13:29 | — | returned hub's Argo pruned its stale schedule before it fired anything (V3 benign); passive restore `Enabled` 18:13:39 |
-| 18:14:06 | — | G.3/G.5 residue on hub; 18:14:53 §3.3 token re-mint on spoke (third consecutive reproduction — it is systematic) |
+| 18:14:06 | — | G.3/G.5 residue on hub-x; 18:14:53 §3.3 token re-mint on hub-y (third consecutive reproduction — it is systematic) |
 
 - **Availability: zero non-200s** in both probe logs (pull and push apps)
   across both attempts — two hub deaths, no workload blip.
@@ -255,30 +255,30 @@ healed `latest` within a minute. Zero downtime throughout. The fix —
   documented 30-second runbook step (delete the ignored one-shot; never
   hand-apply).
 - Verdict details: [dr/README.md](../dr/README.md) verification ledger
-  (V1 falsified→fixed, V3 benign, V4 measured; V5 open until spoke's
+  (V1 falsified→fixed, V3 benign, V4 measured; V5 open until hub-y's
   next demote).
 
 ### 3.6 Path 3: what a hub outage costs push delivery (verified live, 2026-08-13)
 
-Manual failover with the push app under test (ACTIVE=spoke, PASSIVE=hub),
+Manual failover with the push app under test (ACTIVE=hub-y, PASSIVE=hub-x),
 run 18:30–18:40Z, driven by the
 [`dr-failover-push-manual` runbook](runbooks/dr-failover-push-manual/README.md):
 
 | Clock (UTC) | Event |
 | --- | --- |
 | 18:30:19 | pre-flight 0.3 gate: credentials set newer than the §3.3 fix `Completed` — the fix's protection lag was 15.5 min, the RPO number live |
-| 18:30:38 | spoke killed (self-recovering variant); API dead 18:31:57 |
+| 18:30:38 | hub-y killed (self-recovering variant); API dead 18:31:57 |
 | 18:32:15 | **C' inverted teaching moment**: push `v2` + pull `v6` committed, no active hub — push RTO clock starts |
-| 18:32:26 | D.0 break-glass on hub (suspend `dr-role`) — D.1's delete then held (no 6 s selfHeal resurrection) |
-| 18:32:53 | D.2 manual activation applied → sage `Joined/Available` on hub 18:33:03 (**10 s**, pointer flip same second) |
+| 18:32:26 | D.0 break-glass on hub-x (suspend `dr-role`) — D.1's delete then held (no 6 s selfHeal resurrection) |
+| 18:32:53 | D.2 manual activation applied → spoke `Joined/Available` on hub-x 18:33:03 (**10 s**, pointer flip same second) |
 | 18:34:37 | MSA token re-minted (§3.3 hygiene), GitOps cluster secret re-minted (1→2) |
 | 18:34:48 | pull route serves `v6` — ordinary poll latency, zero outage term |
 | 18:35:08 | push app `Synced`, **route serves `v2` — push delivery RTO 2 min 53 s** |
-| 18:35:41 | F.1 schedule on hub; first set `Completed` immediately (fresh token captured) |
-| 18:36:43 | spoke returns (~4.8 min down), stale `sage True/True`, dr-role reasserting active |
-| 18:37:34 | operator-at-return break-glass: spoke's `dr-role` suspended before touching role objects |
-| 18:39:06 / 18:39:16 | sage lease expires (`Unknown`) / **`BackupCollision` freezes spoke's schedule — third observation, froze before writing a byte** |
-| 18:39:28–18:40:04 | G.2/G.3/G.4/G.5 residue; spoke passive-sync `Enabled` |
+| 18:35:41 | F.1 schedule on hub-x; first set `Completed` immediately (fresh token captured) |
+| 18:36:43 | hub-y returns (~4.8 min down), stale `spoke True/True`, dr-role reasserting active |
+| 18:37:34 | operator-at-return break-glass: hub-y's `dr-role` suspended before touching role objects |
+| 18:39:06 / 18:39:16 | spoke lease expires (`Unknown`) / **`BackupCollision` freezes hub-y's schedule — third observation, froze before writing a byte** |
+| 18:39:28–18:40:04 | G.2/G.3/G.4/G.5 residue; hub-y passive-sync `Enabled` |
 | be20031 | git re-aligned to manual reality (D.0 afterwards-contract), both dr-roles re-enabled — **adoption verified** (object creation timestamps preserved) |
 
 - **The number the path exists for:** push delivery RTO **2:53** =
@@ -296,22 +296,22 @@ run 18:30–18:40Z, driven by the
 ### 3.7 Path 4: the composed exercise (verified live, 2026-08-13)
 
 The full composition — git-driven operation with push delivery under
-measurement (ACTIVE=hub, PASSIVE=spoke), run 18:43–18:53Z, closing the
+measurement (ACTIVE=hub-x, PASSIVE=hub-y), run 18:43–18:53Z, closing the
 2×2:
 
 | Clock (UTC) | Event |
 | --- | --- |
-| 18:43:48 | hub killed (self-recovering variant); API dead 18:45:06 |
+| 18:43:48 | hub-x killed (self-recovering variant); API dead 18:45:06 |
 | 18:45:11 | push `v3` (RTO clock) + pull `v7` committed, no active hub |
 | 18:45:31 | **PR-A merged** (death-gate evidence in review) |
 | 18:45:37 | V1 race detected in 6 s (`ignored … passive-sync currently active`) — now a routine step |
-| 18:45:48→59 | recovery delete → selfHeal re-run → **sage `True/True` on spoke; merge→claim 28 s total** |
+| 18:45:48→59 | recovery delete → selfHeal re-run → **spoke `True/True` on hub-y; merge→claim 28 s total** |
 | 18:46:54 | §3.3 token + cluster-secret re-mint (fourth consecutive reproduction) |
 | 18:47:56 | **push route serves `v3` — delivery RTO 2 min 45 s**, beating manual path 3's 2:53 |
-| 18:48:30 / 18:48:38 | promotion PR-B merged (first backup set `Completed` 18:48:42) / demote PR merged, hub still down |
-| 18:51:30→41 | returned hub: **`BackupCollision` first, prune 10 s later** — V3's other order, benign both ways across paths 2+4 |
-| 18:52:11 / 18:52:41 | sage `Unknown` on hub / pull `v7` serving (one slow ~7.5 min poll cycle — jitter, not outage) |
-| 18:53:00 | G.3 stale-claim delete — posture symmetric: spoke ACTIVE, hub PASSIVE |
+| 18:48:30 / 18:48:38 | promotion PR-B merged (first backup set `Completed` 18:48:42) / demote PR merged, hub-x still down |
+| 18:51:30→41 | returned hub-x: **`BackupCollision` first, prune 10 s later** — V3's other order, benign both ways across paths 2+4 |
+| 18:52:11 / 18:52:41 | spoke `Unknown` on hub-x / pull `v7` serving (one slow ~7.5 min poll cycle — jitter, not outage) |
+| 18:53:00 | G.3 stale-claim delete — posture symmetric: hub-y ACTIVE, hub-x PASSIVE |
 
 - **The matrix's slowest cell beat its manual sibling**: PR merge→claim
   took 28 s (V1 recovery included), less than path 3's 38 s operator

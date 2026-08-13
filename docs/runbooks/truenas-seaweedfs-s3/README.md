@@ -15,7 +15,7 @@ Durable state lives on the TrueNAS SCALE box (25.10.4) at `192.168.17.1` /
 SSH via the UDM jump host (`root@192.168.1.1`, key auth; `sshpass` lives
 there), then `truenas_admin@192.168.17.1` (password auth; same password works
 for `sudo -S`). The OpenShift cluster VLAN (`172.16.10.x`) reaches the NAS
-directly — verified from both `hub` and `spoke` nodes.
+directly — verified from both `hub-x` and `hub-y` nodes.
 
 - TrueNAS app `seaweedfs` (stable catalog train, chart 1.2.32, SeaweedFS
   4.41, maintained by iX): 6 service containers (`ix-seaweedfs-{master,
@@ -64,7 +64,7 @@ docker exec ix-seaweedfs-master-1 sh -c 'echo "s3.bucket.create -name acm-backup
 
 ```bash
 # From a cluster node (RHCOS): TLS trust + anonymous denial
-oc --context hub debug node/hub -- chroot /host curl -s -o /dev/null -w '%{http_code}' https://truenas.skrzypek.dev:30304/acm-backups   # expect 403
+oc --context hub-x debug node/hub-x -- chroot /host curl -s -o /dev/null -w '%{http_code}' https://truenas.skrzypek.dev:30304/acm-backups   # expect 403
 # Signed round-trip — use a MODERN curl (>=8.x); RHCOS curl 7.76 --aws-sigv4 is
 # BUGGY and returns SignatureDoesNotMatch falsely. On the NAS:
 docker run --rm curlimages/curl -sk --aws-sigv4 aws:amz:us-east-1:s3 --user KEY:SECRET \

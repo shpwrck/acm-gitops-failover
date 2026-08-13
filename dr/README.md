@@ -5,14 +5,16 @@
 [exercise records](../docs/exercises.md) §3.5). V0/V2 closed with wiring evidence earlier that day; the
 exercise closed V1 (FALSIFIED as designed — hence the two-PR
 choreography below), V3 (benign, prune won), and V4 (measured). V5 stays
-open until spoke's next demote.
+open until hub-y's next demote.
 
 ## Mechanism
 
 Each hub's DR role (active = BackupSchedule, passive = sync Restore) is
 git state under `dr/<hub>/`, reconciled by **that hub's own local Argo
 CD** — bootstrapped once, imperatively, per hub
-(`dr/bootstrap/dr-role-<hub>.yaml`). The reconciler survives the *other*
+(`dr/bootstrap/dr-role-<hub>.yaml`). The committed directory and
+bootstrap names keep the original lab names: `dr/hub` belongs to hub-x,
+`dr/spoke` to hub-y. The reconciler survives the *other*
 hub's death by construction, which is the property that makes git-driven
 failover possible at all: after a disaster, the surviving hub is both the
 decision's subject and its executor.
@@ -124,14 +126,14 @@ Closed 2026-08-13 (wiring, no disaster required):
   (above) discovered in the same session.
 - **V2 — Backup exclusion: VERIFIED.** Instance list of
   `acm-resources-schedule-20260813153034` contains
-  `openshift-gitops/hello-failover-sage` (Application),
+  `openshift-gitops/hello-failover-spoke` (Application),
   `openshift-gitops/hello-failover` (ApplicationSet), the AppProject and
   ArgoCD CR — and NO `dr-role`, which existed in the same namespace at
   backup time. Delivery resources ride the backup; the role reconciler
   does not. (Checked via `oc -n open-cluster-management-backup exec
   deploy/velero -- /velero backup describe <name> --details` — no local
   CLI needed.) Re-confirmed on `…160034` after the push app went live:
-  `hello-failover-push-sage` + ApplicationSet `hello-failover-push`
+  `hello-failover-push-spoke` + ApplicationSet `hello-failover-push`
   INCLUDED (push delivery fails over), `dr-role` still absent — the
   opposite-treatments design, proven both ways.
 
@@ -149,9 +151,9 @@ Closed 2026-08-13 by the path-2 disaster exercise (exercise records §3.5):
   selfHeal re-creates it (6 s) and the fresh evaluation runs clean —
   delete→`Finished`→claim took 11 s live.** The predicted fallback (two-PR
   choreography) is now the documented design.
-- **V3 — Boot-time demote race: VERIFIED benign, prune won.** Hub booted
+- **V3 — Boot-time demote race: VERIFIED benign, prune won.** hub-x booted
   ~18:09Z still holding active-role state (demote PR merged 18:09:29Z
-  while it was down); sage read `Unknown` at 18:13:08Z; hub's own Argo
+  while it was down); spoke read `Unknown` at 18:13:08Z; hub-x's own Argo
   natural-poll sync pruned the stale BackupSchedule at 18:13:29Z before
   it ever fired a backup or a collision, and the passive restore was
   `Enabled` by 18:13:39Z — manual G.2+G.4 fully automated. **Path 4
@@ -166,7 +168,7 @@ Closed 2026-08-13 by the path-2 disaster exercise (exercise records §3.5):
 Open:
 
 - **V5 — Restore names accumulating:** confirm demote-PR file removal
-  prunes the inert Finished restores — observe at spoke's next demote
+  prunes the inert Finished restores — observe at hub-y's next demote
   (path-4 failback). Note from attempt 1: an activation restore
   re-created by hand (`oc apply`) is NOT Argo-tracked and must be deleted
   by hand; only Argo-created objects get pruned by the demote PR.
