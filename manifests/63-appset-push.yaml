@@ -1,5 +1,10 @@
-# PUSH-model ApplicationSet — apply on the ACTIVE hub. [UNVERIFIED — authored
-# 2026-08-13, not yet exercised live; see docs/runbooks/dr-failover-push-manual]
+# PUSH-model ApplicationSet — apply on the ACTIVE hub.
+# [Delivery wiring VERIFIED live 2026-08-13: Synced/Healthy, route serving,
+#  no extra RBAC needed — see the P.2 findings (identity = application-manager
+#  MSA, destination = cluster-proxy addon URL, sage-side rights =
+#  cluster-admin-equivalent) in docs/runbooks/dr-failover-push-manual.
+#  DR behavior (delivery RTO across a failover) still pending the path-3
+#  exercise.]
 #
 # Contrast with 62-appset-pull.yaml: NONE of the three pull markers
 # (ocm-managed-cluster annotation, skip-reconcile, pull-to-ocm label).
@@ -56,11 +61,7 @@ spec:
             - /spec/host
             - /spec/wildcardPolicy
             - /spec/to/weight
-# OPEN VERIFICATION ITEM (path-3 exercise, step P.2): the RBAC the pushing
-# identity has on the target cluster. The cluster secret's token belongs to
-# an ACM ManagedServiceAccount; whether it may create
-# Deployment/Service/Route/Namespace on sage must be DISCOVERED (inspect
-# the minted secret's identity, then `oc auth can-i --as=<sa>`), and any
-# grant added as a new manifests/64 with the real subject — not guessed
-# here. The pull app's managedNamespaceMetadata trick does NOT apply: that
-# grants the TARGET's local Argo, which push does not use.
+# RBAC: none needed (verified live) — the pushing identity's sage-side SA
+# is bound cluster-admin-equivalent by the application-manager addon
+# itself. See the security finding in the path-3 runbook P.2 before
+# selling that convenience as a feature.

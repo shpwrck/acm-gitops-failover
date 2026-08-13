@@ -1,7 +1,9 @@
-# Bootstrap: apply ONCE, MANUALLY, on cluster `spoke` only:
+# Bootstrap: apply ONCE, MANUALLY, on cluster `spoke` only — AFTER
+# dr-role-rbac.yaml:
+#   oc --context spoke apply -f dr/bootstrap/dr-role-rbac.yaml
 #   oc --context spoke apply -f dr/bootstrap/dr-role-spoke.yaml
 # See dr-role-hub.yaml for the full rationale (imperative bootstrap,
-# exclude-from-backup criticality, PruneFirst).
+# RBAC-first ordering, exclude-from-backup criticality, PruneFirst).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

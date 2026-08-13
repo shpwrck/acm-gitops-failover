@@ -1,6 +1,9 @@
 # Path 3 — DR exercise runbook: manual operation, push delivery
 
-**Status: UNVERIFIED — authored 2026-08-13.** Delta against the verified
+**Status: PHASE P VERIFIED LIVE 2026-08-13** (push wiring deployed and
+serving; identity chain discovered — findings below). The exercise phases
+(the disaster + delivery-RTO measurement) remain UNVERIFIED until the
+path-3 run. Delta against the verified
 [path-1 runbook](../dr-failover-exercise/README.md); unlisted phases run
 as written there. The DR *operation* is identical — what changes is the
 delivery model under test and therefore what the exercise measures: path 1
@@ -8,7 +11,7 @@ proves workload delivery is IMMUNE to hub loss; path 3 measures exactly
 how delivery DIES with the hub and how it resurrects. Both truths belong
 in the customer conversation.
 
-## Phase P — One-time prerequisites
+## Phase P — One-time prerequisites (VERIFIED 2026-08-13)
 
 ### P.1 Deploy the push app from the active hub
 
@@ -22,30 +25,49 @@ oc --context $ACTIVE get applications.argoproj.io -n openshift-gitops
 ACM-minted cluster secret. Coexists with the pull app by design (separate
 namespace `hello-failover-push`) so one outage exercises both models
 side by side.
-**Success:** `hello-failover-push-$MANAGED` appears ON THE HUB (contrast:
-the pull model's Application lives on sage) and reaches `Synced/Healthy`;
+**Success (observed):** `hello-failover-push-sage` appeared ON THE HUB
+(contrast: the pull model's stub carries skip-reconcile and the workload
+Application lives on sage) and reached `Synced | Healthy` in under two
+minutes with NO extra RBAC;
 `https://hello-failover-push-hello-failover-push.apps.sage.k8socp.com`
 serves `REVISION v1`.
-**Failure:** `SyncFailed … forbidden` → expected first hurdle; go to P.2.
+**Failure:** `SyncFailed … forbidden` → your environment's addon RBAC
+differs from what P.2 documents; rediscover before granting anything.
 
-### P.2 Discover (not guess) the push identity and its RBAC
+### P.2 The push identity — discovered, with a security finding
+
+What verification found (2026-08-13, ACM 2.17):
+
+- The minted cluster secret is `sage-application-manager-cluster-secret`
+  — the token belongs to the **`application-manager`
+  ManagedServiceAccount** (same MSA family as auto-import; one more
+  dependent of the §3.3 token chain).
+- The Application's destination is NOT sage's API URL but the
+  **cluster-proxy addon**
+  (`https://cluster-proxy-addon-user.multicluster-engine.svc.cluster.local:9092/sage`)
+  — push traffic tunnels through ACM's proxy, adding the proxy chain
+  (hub-side service + sage-side agent tunnel) to push delivery's
+  dependency list. Note for the exercise: delivery resurrection requires
+  this chain re-established on the NEW hub, not just the cluster secret.
+- **Security finding:** the sage-side SA behind that token
+  (`open-cluster-management-agent-addon/application-manager`) is bound to
+  ClusterRole `open-cluster-management:application-manager`, whose rules
+  are `apiGroups:*, resources:*, verbs:*` + all nonResourceURLs —
+  **cluster-admin in all but name**. Push worked "out of the box" because
+  the hub holds an admin credential for every managed cluster. That is
+  the push model's real price tag: a compromised hub Argo is admin
+  everywhere it pushes. The pull model's namespace-scoped
+  `managedNamespaceMetadata` RBAC (README gotcha #4) is the
+  least-privilege contrast — put both sentences in the customer
+  comparison.
+
+Re-verify in any new environment:
 
 ```bash
-# Whose token is in the minted cluster secret?
-oc --context $ACTIVE get secret -n openshift-gitops -l apps.open-cluster-management.io/acm-cluster=true -o yaml | grep -E 'name:|server:'
-# On the target: what can that identity do in the app namespace?
-oc --context $MANAGED auth can-i create deployment -n hello-failover-push --as=<discovered-sa>
+oc --context $ACTIVE get secret -n openshift-gitops -l apps.open-cluster-management.io/acm-cluster=true
+oc --context $MANAGED get clusterrolebinding open-cluster-management:application-manager -o jsonpath='{.roleRef.name}{" -> "}{.subjects}'
+oc --context $MANAGED get clusterrole open-cluster-management:application-manager -o jsonpath='{.rules}'
 ```
-
-**Why:** The pushing identity is an ACM ManagedServiceAccount's token; its
-permissions on `$MANAGED` are the load-bearing unknown of the whole path
-(the pull model's `managedNamespaceMetadata` trick does NOT apply — that
-empowers the TARGET's local Argo, which push doesn't use). Whatever grant
-turns out to be needed becomes `manifests/64-push-rbac-sage.yaml` with the
-REAL subject, applied to `$MANAGED`, and this runbook gets updated —
-that's the deal with author-now-verify-later.
-**Success:** `yes` from `auth can-i`, or a written+applied 64 that makes
-it so.
 
 ## Phase 0/A — as path 1, plus the second probe
 

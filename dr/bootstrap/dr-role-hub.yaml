@@ -1,4 +1,7 @@
-# Bootstrap: apply ONCE, MANUALLY, on cluster `hub` only:
+# Bootstrap: apply ONCE, MANUALLY, on cluster `hub` only — AFTER
+# dr-role-rbac.yaml (without it the first sync fails on the ACM backup
+# CRs and stays Failed until explicitly re-synced; verified 2026-08-13):
+#   oc --context hub apply -f dr/bootstrap/dr-role-rbac.yaml
 #   oc --context hub apply -f dr/bootstrap/dr-role-hub.yaml
 # Bootstrap is imperative BY DESIGN — the thing that applies a hub's DR
 # role must be the hub itself (its local Argo), or failover has a

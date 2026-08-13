@@ -61,10 +61,11 @@ runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 ~/acm-failover-guide/manifests/57-restore-activate.yaml -> spoke Restore restore-acm-activate (FAILOVER action; not applied)
 ~/acm-failover-guide/manifests/61-gitops-integration.yaml -> hub GitOpsCluster + Placements + acm-placement ConfigMap
 ~/acm-failover-guide/manifests/62-appset-pull.yaml -> hub ApplicationSet hello-failover (pull model)
-~/acm-failover-guide/manifests/63-appset-push.yaml -> hub ApplicationSet hello-failover-push (push model; AUTHORED 2026-08-13, NOT YET APPLIED)
+~/acm-failover-guide/manifests/63-appset-push.yaml -> hub ApplicationSet hello-failover-push (push model; APPLIED+VERIFIED 2026-08-13)
 ~/acm-failover-guide/apps/hello-failover/ -> sage ns hello-failover (Deployment/ConfigMap/Service/Route via sage-local Argo)
-~/acm-failover-guide/apps/hello-failover-push/ -> sage ns hello-failover-push (push model; NOT YET APPLIED)
-~/acm-failover-guide/dr/ -> per-hub git-driven DR role overlays + bootstrap Applications (paths 2/4; NOT YET APPLIED — bootstrap is manual, once per hub)
+~/acm-failover-guide/apps/hello-failover-push/ -> sage ns hello-failover-push (pushed by HUB's Argo via cluster-proxy; APPLIED+VERIFIED 2026-08-13)
+~/acm-failover-guide/dr/bootstrap/ -> BOTH hubs: Role/RoleBinding dr-role-backup-operator + Application dr-role in openshift-gitops (velero-excluded; APPLIED+VERIFIED 2026-08-13)
+~/acm-failover-guide/dr/{hub,spoke}/ -> per-hub git-driven DR role overlays (hub->active, spoke->passive), reconciled by each hub's LOCAL Argo
 
 ### Re-run
 
@@ -166,8 +167,17 @@ failure per step, parameterized for either direction — is the
 After ANY activation, run its Phase E.3 (delete the restored
 `auto-import-account` secret once the cluster is imported) — skipping it
 is what silently froze token rotation after the 2026-08-12 exercise.
-2026-08-13 (later): the repo now carries FOUR paths (README §4 — delivery
-pull/push × operation manual/gitops). Only path 1 is verified; paths 2–4
-are authored with explicit UNVERIFIED markers and open-item lists, and
-NONE of their cluster wiring (63-appset-push, dr/ bootstrap) is applied
-yet — live cluster state still matches path 1 exactly.
+2026-08-13 (later): the repo carries FOUR paths (README §4 — delivery
+pull/push × operation manual/gitops). Path 1 fully verified; paths 2/3
+WIRING verified and LIVE on the clusters (dr-role apps + RBAC on both
+hubs, push app serving on sage via hub's Argo through cluster-proxy) —
+their disaster exercises (role-flip PR, delivery-RTO measurement) are the
+remaining unverified halves; path 4 composes 2+3 and runs last. The
+dr-role Applications carry `velero.io/exclude-from-backup` — verified
+absent from backups while delivery resources ride along; never remove
+that label (split-brain via restore). New failure paths from the wiring
+verification: dr-role sync `Failed` after retry exhaustion needs an
+explicit re-sync (`oc patch … '{"operation":{"sync":{}}}'`) — Argo won't
+re-try the same revision; and the openshift-gitops controller writes ACM
+backup CRs only via `dr/bootstrap/dr-role-rbac.yaml` (the managed-by
+label does NOT grant it — verified with `auth can-i`).

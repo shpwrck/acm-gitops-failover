@@ -1,50 +1,90 @@
 # Path 2 — DR exercise runbook: GitOps operation, pull delivery
 
-**Status: UNVERIFIED — authored 2026-08-13.** Same command / rationale /
-success / failure format as the verified
+**Status: PHASE P VERIFIED LIVE 2026-08-13** (bootstrap, RBAC, adoption,
+backup exclusion — outputs below are real). The exercise phases (D'/G' —
+the actual role flips) remain UNVERIFIED until the path-2 disaster run;
+they burn down [`dr/README.md`](../../../dr/README.md) items V1/V3/V4/V5.
+Same command / rationale / success / failure format as the verified
 [path-1 runbook](../dr-failover-exercise/README.md); this document is a
 DELTA — phases not listed here run exactly as path 1 wrote them (and
-path 1 verified them twice). The mechanism being exercised is
-[`dr/README.md`](../../../dr/README.md); its open items V1–V5 are burned
-down here.
+path 1 verified them twice).
 
 Conventions as path 1 (`$ACTIVE`/`$PASSIVE`/`$MANAGED`, UTC, probes).
 
-## Phase P — One-time prerequisites (before the first path-2 exercise)
+## Phase P — One-time prerequisites (VERIFIED 2026-08-13)
+
+### P.0 RBAC first — the grant that makes git-driven DR possible
+
+```bash
+oc --context hub   apply -f dr/bootstrap/dr-role-rbac.yaml
+oc --context spoke apply -f dr/bootstrap/dr-role-rbac.yaml
+oc --context hub auth can-i patch backupschedules.cluster.open-cluster-management.io \
+  -n open-cluster-management-backup \
+  --as=system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller
+```
+
+**Why:** Discovered live: the default openshift-gitops
+application-controller CANNOT write ACM backup CRs, and the operator's
+`managed-by` label does NOT fix it (its minted role is an API-group
+allowlist omitting `cluster.open-cluster-management.io` — verified with
+`auth can-i` after labeling). The explicit Role grants exactly two
+resource types in exactly one namespace — the fix and the security
+statement in one file.
+**Success:** `yes` from `auth can-i` on both hubs.
+**Failure:** `no` → the RoleBinding subject doesn't match your Argo
+instance's controller SA; check the SA name in the error message of a
+failed sync and align.
 
 ### P.1 Bootstrap each hub's dr-role Application
 
 ```bash
 oc --context hub   apply -f dr/bootstrap/dr-role-hub.yaml
 oc --context spoke apply -f dr/bootstrap/dr-role-spoke.yaml
-oc --context hub   get application dr-role -n openshift-gitops
-oc --context spoke get application dr-role -n openshift-gitops
+oc --context hub   get applications.argoproj.io dr-role -n openshift-gitops
+oc --context spoke get applications.argoproj.io dr-role -n openshift-gitops
 ```
 
 **Why:** Each hub's own Argo must reconcile its own role — the applier of
 a failover cannot be the hub that just died. Imperative once, declarative
-forever after.
-**Success:** Both `Synced/Healthy`; cluster state unchanged (the overlays
-encode the CURRENT posture — bootstrap is adoption, not change; Argo
-adopts the existing BackupSchedule/Restore objects since specs are
-identical).
-**Failure:** `OutOfSync` with a diff on adoption → the live object drifted
-from `manifests/` (the two copies are supposed to be identical) —
-reconcile the drift BEFORE trusting git-driven ops.
-
-### P.2 Confirm the backup exclusion works (V2)
+forever after. (`applications.argoproj.io`, never bare `application` —
+ACM's CRD shadows it; yes, this bit us again during verification.)
+**Success (observed):** Both `Synced | Healthy`, and ADOPTION not
+recreation — the live BackupSchedule (hub) and passive Restore (spoke)
+kept their original creationTimestamps through the first sync.
+**Failure:** Sync `Failed` on RBAC → P.0 was skipped or landed late.
+NOTE (observed live): a sync that exhausts its retries stays `Failed` —
+Argo will NOT re-attempt the same revision by itself even with selfHeal.
+After fixing the cause, trigger a fresh operation:
 
 ```bash
-velero backup describe <newest-acm-resources-backup> --details -n open-cluster-management-backup | grep -i 'dr-role' || echo "EXCLUDED — correct"
+oc --context <hub> patch applications.argoproj.io dr-role -n openshift-gitops \
+  --type merge -p '{"operation":{"sync":{}}}'
+```
+
+`OutOfSync` with a spec diff on adoption → the live object drifted from
+`manifests/` (the copies are supposed to be identical); reconcile the
+drift BEFORE trusting git-driven ops.
+
+### P.2 Confirm the backup exclusion works (V2 — VERIFIED)
+
+```bash
+NEWEST=$(oc --context hub get backup -n open-cluster-management-backup \
+  --sort-by=.metadata.creationTimestamp -o name | grep acm-resources-schedule | tail -1 | cut -d/ -f2)
+oc --context hub -n open-cluster-management-backup exec deploy/velero -- \
+  /velero backup describe "$NEWEST" --details | grep -A6 'v1alpha1/Application'
 ```
 
 **Why:** If `dr-role` ever lands in a backup, a future restore delivers
-split-brain (the other hub reconciling the wrong role dir). This check
-must pass once before the posture is trusted, and belongs in pre-flight
-thereafter.
-**Success:** `EXCLUDED — correct` on a backup taken AFTER P.1.
-**Failure:** The app appears in the backup → stop; fix the label before
-anything else.
+split-brain (the other hub reconciling the wrong role dir). Exec'ing the
+velero pod avoids needing a local CLI.
+**Success (observed, backup `acm-resources-schedule-20260813153034`):**
+the instance list shows the delivery resources
+(`openshift-gitops/hello-failover-sage`,
+ApplicationSet `hello-failover`, AppProject, ArgoCD CR) and NO `dr-role`
+— which existed in that namespace at backup time. Precision exclusion,
+proven instance-level.
+**Failure:** `dr-role` appears → stop; fix the label before anything
+else.
 
 ## Phase 0/A/B/C — as path 1, plus one pre-flight line
 

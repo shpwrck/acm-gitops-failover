@@ -533,16 +533,21 @@ choice can be made on evidence rather than doctrine:
 | Path | Delivery | Operation | Runbook | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Pull | Manual | [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | **VERIFIED** both directions (§3, §3.4): ≈10 s re-home, zero downtime, deploys land mid-outage |
-| 2 | Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | Authored, UNVERIFIED (open items: [dr/README.md](dr/README.md) V1–V5) |
-| 3 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | Authored, UNVERIFIED (key unknown: push RBAC — discovered, not guessed, in its P.2) |
-| 4 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Authored, UNVERIFIED (composition of 2+3; run last) |
+| 2 | Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | **Wiring VERIFIED** 2026-08-13 (bootstrap+RBAC+adoption+backup exclusion, live on both hubs); flip exercise pending ([dr/README.md](dr/README.md) V1/V3/V4/V5) |
+| 3 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | **Wiring VERIFIED** 2026-08-13 (serving on sage; identity chain documented incl. a security finding); delivery-RTO exercise pending |
+| 4 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Composition of 2+3 — run after both parents' exercises |
 
 How the halves differ, in one line each:
 
 - **Pull vs push** is *what a hub outage costs delivery*: nothing (sage
   syncs git itself — proven, v2 and v3 both landed hubless) vs a
   delivery outage lasting until the new hub's Argo resumes pushing
-  (path 3 measures it).
+  (path 3 measures it). It is also *what the hub is worth to an
+  attacker*: push runs on an ACM-minted credential whose managed-cluster
+  SA is cluster-admin-equivalent (verified — path-3 runbook P.2), so a
+  compromised hub Argo is admin on every cluster it pushes to; pull
+  keeps the hub credential-free for delivery and the app's RBAC
+  namespace-scoped.
 - **Manual vs git-driven** is *what a failover decision looks like*: an
   operator with a runbook (≈10 s of machinery after seconds of typing)
   vs a pull request whose review is the split-brain gate and whose merge

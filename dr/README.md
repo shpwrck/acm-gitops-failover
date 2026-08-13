@@ -1,10 +1,10 @@
 # Git-driven DR roles (paths 2 & 4)
 
-**Status: AUTHORED 2026-08-13, NOT YET VERIFIED LIVE.** The design encodes
-everything the two verified manual exercises taught (README §3, §3.4); the
-open items below must be burned down by the path-2 exercise
-([runbook](../docs/runbooks/dr-failover-gitops/README.md)) before any
-claim here is treated as proven.
+**Status: WIRING VERIFIED LIVE 2026-08-13** (bootstrap, adoption, RBAC,
+backup exclusion — V2 closed with instance-level evidence). The
+role-FLIP items (V1, V3, V4, V5) still require the path-2 disaster
+exercise ([runbook](../docs/runbooks/dr-failover-gitops/README.md));
+until then, flip claims are design, not proof.
 
 ## Mechanism
 
@@ -47,8 +47,19 @@ The BackupCollision guard remains as defense-in-depth underneath.
 Pretending everything is declarative is how operators get burned. These
 stay imperative, with their safety gates:
 
-- **Bootstrap** (`dr/bootstrap/`): once per hub, by hand. See file
-  headers.
+- **Bootstrap** (`dr/bootstrap/`): once per hub, by hand, RBAC FIRST
+  (`dr-role-rbac.yaml`, then `dr-role-<hub>.yaml`). Verified 2026-08-13:
+  the default openshift-gitops controller cannot touch the ACM backup
+  CRs, and the operator's `managed-by` label trick does NOT fix it (its
+  minted role is an API-group allowlist that omits
+  `cluster.open-cluster-management.io` — checked with `oc auth can-i`).
+  The explicit two-resource Role is both the fix and the tighter
+  statement of what git-driven DR may touch. Bonus finding: a sync that
+  exhausted its retries while RBAC was missing stays Failed — Argo does
+  not re-try the same revision on its own; trigger a fresh operation
+  (`oc patch applications.argoproj.io dr-role -n openshift-gitops
+  --type merge -p '{"operation":{"sync":{}}}'`) after fixing
+  permissions.
 - **Stale ManagedCluster deletion on a returned hub** (manual path G.3):
   runtime state, not git state, and it carries the exercise's one
   dangerous gate — `Available: Unknown` first, *never* elapsed time
@@ -66,15 +77,31 @@ by the backup system itself. Hence the non-negotiable
 `velero.io/exclude-from-backup: "true"` label on both bootstrap
 Applications.
 
-## Open verification items (path-2 exercise burns these down)
+## Verification ledger
+
+Closed 2026-08-13 (wiring, no disaster required):
+
+- **V0 — Bootstrap + adoption (added during verification):** dr-role apps
+  reach `Synced/Healthy` on both hubs and ADOPT the live
+  BackupSchedule/Restore (creation timestamps unchanged: 14:46:37Z /
+  14:59:20Z) rather than recreating them. Required the RBAC bootstrap
+  (above) discovered in the same session.
+- **V2 — Backup exclusion: VERIFIED.** Instance list of
+  `acm-resources-schedule-20260813153034` contains
+  `openshift-gitops/hello-failover-sage` (Application),
+  `openshift-gitops/hello-failover` (ApplicationSet), the AppProject and
+  ArgoCD CR — and NO `dr-role`, which existed in the same namespace at
+  backup time. Delivery resources ride the backup; the role reconciler
+  does not. (Checked via `oc -n open-cluster-management-backup exec
+  deploy/velero -- /velero backup describe <name> --details` — no local
+  CLI needed.)
+
+Open — require the path-2 disaster exercise:
 
 - **V1 — PruneFirst ordering:** confirm a single role-flip PR removes the
   passive Restore before the activation Restore is applied ("only one
   Restore honored at a time"). Fallback if it misbehaves: two-PR
   choreography (demote-then-activate).
-- **V2 — Backup exclusion:** confirm the `dr-role` Applications do NOT
-  appear in any backup (`velero backup describe --details` on a fresh
-  set), and that generated/synced role resources restore harmlessly.
 - **V3 — Boot-time demote race:** returned hub syncing the demote overlay
   while its stale BackupSchedule sits in `BackupCollision` — expected
   benign in either order; observe it once.
