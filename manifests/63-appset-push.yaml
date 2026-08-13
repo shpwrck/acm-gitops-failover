@@ -1,0 +1,66 @@
+# PUSH-model ApplicationSet — apply on the ACTIVE hub. [UNVERIFIED — authored
+# 2026-08-13, not yet exercised live; see docs/runbooks/dr-failover-push-manual]
+#
+# Contrast with 62-appset-pull.yaml: NONE of the three pull markers
+# (ocm-managed-cluster annotation, skip-reconcile, pull-to-ocm label).
+# The generated Applications live on the HUB, and the hub's Argo pushes
+# to the target cluster using the ACM-minted cluster secret
+# (GitOpsCluster -> ManagedServiceAccount token). Consequences for DR:
+# - Applications + cluster secrets die with the hub; delivery is DOWN
+#   during a hub outage (workloads keep running — Argo never uninstalls
+#   on its own death — but nothing new syncs).
+# - After activation, the restored ApplicationSet + re-minted cluster
+#   secret resume pushing. Delivery-pipeline RTO = failover RTO + secret
+#   re-mint + sync; measuring it is the point of the path-3 exercise.
+# Coexists with the pull app: separate namespace + separate app name, so
+# both models can be observed through the same outage.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: hello-failover-push
+  namespace: openshift-gitops
+spec:
+  goTemplate: false
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: hello-failover-placement
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: "hello-failover-push-{{name}}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/shpwrck/acm-gitops-failover
+        targetRevision: main
+        path: apps/hello-failover-push
+      destination:
+        # {{server}} resolves to the target cluster's API URL from the
+        # ACM-minted cluster secret — this is what makes it push.
+        server: "{{server}}"
+        namespace: hello-failover-push
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+      # Same server-defaulted Route fields as the pull app (verified there).
+      ignoreDifferences:
+        - group: route.openshift.io
+          kind: Route
+          jsonPointers:
+            - /spec/host
+            - /spec/wildcardPolicy
+            - /spec/to/weight
+# OPEN VERIFICATION ITEM (path-3 exercise, step P.2): the RBAC the pushing
+# identity has on the target cluster. The cluster secret's token belongs to
+# an ACM ManagedServiceAccount; whether it may create
+# Deployment/Service/Route/Namespace on sage must be DISCOVERED (inspect
+# the minted secret's identity, then `oc auth can-i --as=<sa>`), and any
+# grant added as a new manifests/64 with the real subject — not guessed
+# here. The pull app's managedNamespaceMetadata trick does NOT apply: that
+# grants the TARGET's local Argo, which push does not use.

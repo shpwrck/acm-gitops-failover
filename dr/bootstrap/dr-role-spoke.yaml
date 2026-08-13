@@ -1,0 +1,26 @@
+# Bootstrap: apply ONCE, MANUALLY, on cluster `spoke` only:
+#   oc --context spoke apply -f dr/bootstrap/dr-role-spoke.yaml
+# See dr-role-hub.yaml for the full rationale (imperative bootstrap,
+# exclude-from-backup criticality, PruneFirst).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dr-role
+  namespace: openshift-gitops
+  labels:
+    velero.io/exclude-from-backup: "true"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shpwrck/acm-gitops-failover
+    targetRevision: main
+    path: dr/spoke
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: open-cluster-management-backup
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - PruneFirst=true

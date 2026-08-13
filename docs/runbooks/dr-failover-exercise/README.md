@@ -9,6 +9,17 @@ this exercises (what is deployed where and why) lives in
 verified narrative with timings is the repo
 [README](../../../README.md) §3.
 
+**Validated live 2026-08-13** (spoke→hub reverse exercise, README §3.4):
+every step below ran as written; measured decision-to-re-home ≈10 s, zero
+failed requests across the full window.
+
+**This is Path 1 of 4** (manual operation, pull delivery — README §4).
+Siblings: [path 2](../dr-failover-gitops/README.md) git-driven operation,
+[path 3](../dr-failover-push-manual/README.md) push delivery,
+[path 4](../dr-failover-push-gitops/README.md) both — all three are
+deltas against this document, so a change here must be checked against
+them.
+
 ## Conventions
 
 The posture is symmetric — set these once and every command below works in
@@ -189,6 +200,21 @@ command here.
 **Why:** A real datacenter loss gives no warning and no clean shutdown;
 killing the API out-of-band is the honest simulation. Do NOT cordon/drain
 first — that would be a migration, not a disaster.
+
+**API variant (used 2026-08-13):** on SNO the cluster dies with its one
+node, so a debug pod can pull the trigger:
+
+```bash
+oc --context $ACTIVE get nodes                                   # confirm target
+oc --context $ACTIVE debug node/<node> -- chroot /host shutdown -h 1
+```
+
+`-h 1` (not `now`) lets the debug pod detach cleanly and leaves a 60 s
+`shutdown -c` abort window. Two caveats: (1) this is a GRACEFUL shutdown —
+gentler than a power cut (kubelet terminates pods, etcd flushes) — note
+the variant in the exercise record; (2) `oc` can never power a host back
+ON — confirm out-of-band access exists BEFORE firing, or Phase G is
+unreachable.
 **Success:**
 
 ```bash
@@ -259,7 +285,10 @@ distinguishes activation from passive sync — restoring the managed-cluster
 resources is what makes this hub claim the fleet.
 `cleanupBeforeRestore: CleanupRestored` clears previously-synced copies so
 the restore lands clean.
-**Success:** Phase reaches `Finished` (observed 2026-08-12: ~37 s).
+**Success:** Phase reaches `Finished` (observed 2026-08-12: ~37 s;
+2026-08-13: seconds). The operator also stamps an
+`acm-restore-clusters-<ts>` safety backup at activation time — expected
+artifact, not an anomaly.
 **Failure:** `FinishedWithErrors` → read
 `oc --context $PASSIVE describe restore restore-acm-activate -n open-cluster-management-backup`
 and the velero pod logs in the same namespace; do not re-apply blindly
@@ -351,8 +380,12 @@ oc --context $PASSIVE get backupschedule,backup -n open-cluster-management-backu
 BackupSchedule runs HERE, the fleet state that just changed hands is
 unprotected — and E.3's fresh token is not in any backup. ACM's
 `backup-restore-enabled` policy exists purely to nag about this step.
-**Success:** Schedule `Enabled`; first full set `Completed` within ~1 min
-of its first fire; a credentials backup newer than E.3's fix.
+**Success:** Schedule `Enabled`; the first full set fires IMMEDIATELY on
+creation (no wait for the cron slot — observed 2026-08-13) and reaches
+`Completed` within ~1 min, capturing E.3's fresh token. The listing will
+also show the OTHER hub's entire backup history — Velero syncs the shared
+bucket's contents into every cluster with the BSL; expected, and useful
+for auditing which cluster ID wrote `latest`.
 **Failure:** `BackupCollision` → the OLD hub is somehow alive and still
 writing to the bucket — you have a split-brain: kill it properly, delete
 its schedule, then re-check.
@@ -389,7 +422,11 @@ oc --context $ACTIVE get managedclusters -w   # $ACTIVE = the RETURNED hub
 **Why:** The returned hub wakes with a STALE worldview — it still lists
 `$MANAGED` as `True/True` for the first ~2–4 min until the klusterlet
 lease (which now heartbeats to the OTHER hub) expires.
-**Success:** `$MANAGED` flips to `Available: Unknown`.
+**Success:** `$MANAGED` flips to `Available: Unknown`. If the hub was down
+longer than the lease window (observed 2026-08-13 after a ~15 min outage),
+it wakes with the cluster ALREADY `Unknown` — the 2–4 min wait applies
+only to short outages; the gate is the `Unknown` reading itself, never
+elapsed time.
 **Failure — the one dangerous moment of the whole exercise:** deleting the
 ManagedCluster while it still reads `True` triggers a live detach and
 **uninstalls the agent + hub-delivered workloads from `$MANAGED`** ("If
@@ -445,7 +482,25 @@ continue to sync with new backups"); managedclusters shows
 **Failure:** Restore `Error` → check the BSL on this hub (0.4) — after a
 power-off the object store connection is the usual suspect.
 
-**Gate:** G.4 `Enabled` → exercise complete.
+### G.5 Delete the demoted hub's stale activation restore
+
+```bash
+oc --context $ACTIVE delete restore restore-acm-activate -n open-cluster-management-backup
+oc --context $ACTIVE get restore -n open-cluster-management-backup
+```
+
+**Why:** The `Finished` restore from this hub's LAST activation lingers
+after demotion. Left in place, the NEXT activation's
+`oc apply -f manifests/57-restore-activate.yaml` is a **silent no-op** —
+the object already exists with an identical spec, so nothing re-triggers:
+a "successful" apply and no failover, discovered 2026-08-13 and exactly
+the failure you don't want mid-disaster.
+**Success:** Exactly ONE restore remains: `restore-acm-passive-sync` at
+`Enabled`.
+**Failure:** `NotFound` → this hub never activated (first-ever exercise in
+this direction); fine, continue.
+
+**Gate:** G.4 `Enabled` + G.5 single-restore → exercise complete.
 
 ## Phase H — Evidence and docs
 

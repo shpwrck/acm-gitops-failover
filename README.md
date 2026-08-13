@@ -471,6 +471,101 @@ $ oc --context <active-hub> get managedserviceaccount -A \
     -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,TOKEN-REPORTED:.status.conditions[?(@.type=="TokenReported")].status,EXPIRES:.status.expirationTimestamp'
 ```
 
+### 3.4 The reverse exercise (verified live, 2026-08-13)
+
+The whole §3 procedure run in the opposite direction the next day — spoke
+(active since §3) killed, hub activated, role-swap failback — driven
+end-to-end from the
+[`dr-failover-exercise` runbook](docs/runbooks/dr-failover-exercise/README.md),
+which this run validated step by step. Two deliberate differences from §3:
+pre-flight found and fixed the frozen MSA rotation first (§3.3 — fix
+14:10:47Z, protecting credentials backup `Completed` 14:30:21Z), and the
+disaster was a clean host shutdown through the API
+(`oc --context spoke debug node/spoke -- chroot /host shutdown -h 1`) —
+gentler on SNO etcd than a power cut; the variant belongs in the exercise
+record because a customer will ask.
+
+| Clock (UTC) | T+ | Event |
+| --- | --- | --- |
+| 14:34:12 | 0:00 | spoke halted (scheduled shutdown fired; API dead within the minute) |
+| ~14:35:30 | ~1:20 | `REVISION v3` committed+pushed to git, no active hub alive |
+| ~14:39 | ~5:00 | sage serving v3 (its local Argo's normal poll; hub still passive) |
+| 14:42:09 | 7:57 | on hub: passive restore deleted, activation restore created |
+| 14:42:19 | 8:07 | **sage re-homed** — bootstrap pointer flip observed (10 s probe granularity) |
+| ≤14:43 | ~9:00 | sage `Joined/Available` on hub; all 8 addons `Available` |
+| 14:45:44 | — | §3.3 reproduced on hub: `TokenReported: False` → restored secret deleted → re-minted `True` |
+| 14:46:38 | — | `BackupSchedule` applied on hub; first full set fired immediately, `Completed` in seconds |
+| +~15 min | — | spoke powered on: sage already `Unknown` (lease long expired), `BackupCollision` fired (hub id `4331cb00…` vs spoke id `88d1a668…`), stale schedule + `ManagedCluster` + activation restore deleted, passive restore `Enabled` |
+
+- **Availability: 0 non-200 responses across the entire window**
+  (`grep -cv ' 200$'` over the 10 s probe log = 0) — zero downtime in this
+  direction too, through kill, mid-outage deploy, activation, and
+  failback.
+- **Decision-to-re-home ≈10 s** (activation restore 14:42:09 → pointer
+  flip 14:42:19). The 8-minute T+ total is dominated by the deliberate
+  mid-outage-deploy demonstration, not by the machinery.
+- New findings, all folded into the exercise runbook:
+  - **§3.3 is systematic, not a one-off**: the freshly-activated hub
+    reproduced the frozen `TokenReported` exactly as predicted, and the
+    same fix worked — post-activation secret cleanup is a permanent step.
+  - A new `BackupSchedule` fires its first full backup set immediately on
+    creation (no wait for the cron slot), so the new active hub's
+    repair-to-protection lag at failover is under a minute.
+  - The backup operator stamps an `acm-restore-clusters-<ts>` safety
+    backup at activation time — expected artifact, not an anomaly.
+  - **A demoted hub keeps its `Finished` `restore-acm-activate` — delete
+    it during demotion.** Left in place, the NEXT activation's `oc apply`
+    of the same manifest is a silent no-op (identical spec, nothing
+    re-triggers): a "successful" apply and no failover, at the worst
+    possible moment.
+  - A hub that was down longer than the lease window wakes with its moved
+    clusters already `Unknown` — the 2–4 minute wait applies only to short
+    outages.
+- End state: **hub ACTIVE, spoke PASSIVE, sage untouched — the original
+  posture, restored by exercising the DR machinery in both directions on
+  consecutive days.**
+
+## 4. The four paths
+
+The repo carries the full 2×2 of delivery model × DR operation, so the
+choice can be made on evidence rather than doctrine:
+
+| Path | Delivery | Operation | Runbook | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Pull | Manual | [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | **VERIFIED** both directions (§3, §3.4): ≈10 s re-home, zero downtime, deploys land mid-outage |
+| 2 | Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | Authored, UNVERIFIED (open items: [dr/README.md](dr/README.md) V1–V5) |
+| 3 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | Authored, UNVERIFIED (key unknown: push RBAC — discovered, not guessed, in its P.2) |
+| 4 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Authored, UNVERIFIED (composition of 2+3; run last) |
+
+How the halves differ, in one line each:
+
+- **Pull vs push** is *what a hub outage costs delivery*: nothing (sage
+  syncs git itself — proven, v2 and v3 both landed hubless) vs a
+  delivery outage lasting until the new hub's Argo resumes pushing
+  (path 3 measures it).
+- **Manual vs git-driven** is *what a failover decision looks like*: an
+  operator with a runbook (≈10 s of machinery after seconds of typing)
+  vs a pull request whose review is the split-brain gate and whose merge
+  history is the audit log (expected cost: + merge + Argo poll; measured
+  by path 2's V4).
+
+Why there is no fifth, fully-autonomous path: hub failover is
+deliberately a human decision. A passive-side monitor cannot distinguish
+"active hub died" from "network partition," and with MSA auto-import an
+activation actively re-points the fleet's klusterlets — automating a
+false positive moves the fleet onto a second live hub. `BackupCollision`
+guards the bucket, not cluster claims; going autonomous safely requires a
+quorum witness/fencing, and the architecture has already made hub
+downtime cheap (workloads run and — on pull — deploy hubless). Automate
+the detection, the pre-flight, and the execution; keep the decision
+human. Path 2/4's PR gate is exactly that boundary drawn in git.
+
+Delivery infrastructure shared by paths 3/4:
+[manifests/63-appset-push.yaml](manifests/63-appset-push.yaml) +
+[apps/hello-failover-push/](apps/hello-failover-push/) (separate
+namespace — both models coexist through one outage). Role-flip
+infrastructure for paths 2/4: [dr/](dr/README.md).
+
 ## Sources
 
 Primary documentation (ACM 2.17; every claim above links to its exact

@@ -1,0 +1,36 @@
+# Bootstrap: apply ONCE, MANUALLY, on cluster `hub` only:
+#   oc --context hub apply -f dr/bootstrap/dr-role-hub.yaml
+# Bootstrap is imperative BY DESIGN — the thing that applies a hub's DR
+# role must be the hub itself (its local Argo), or failover has a
+# chicken-and-egg dependency on the cluster that just died.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dr-role
+  namespace: openshift-gitops
+  labels:
+    # CRITICAL — do not remove. ACM's resource backups demonstrably scoop
+    # argoproj objects in openshift-gitops (the ApplicationSet is restored
+    # cross-hub; verified 2026-08-13). If THIS Application were restored
+    # onto the other hub, that hub would start reconciling dr/hub — the
+    # WRONG role — which is split-brain delivered by the backup system.
+    # Each hub's dr-role app must exist on that hub alone, forever.
+    velero.io/exclude-from-backup: "true"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shpwrck/acm-gitops-failover
+    targetRevision: main
+    path: dr/hub
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: open-cluster-management-backup
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Passive restore must be GONE before an activation restore lands
+      # (one Restore honored at a time). PruneFirst makes a single
+      # role-flip PR safe. [UNVERIFIED — path-2 exercise item V1]
+      - PruneFirst=true

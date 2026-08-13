@@ -1,0 +1,14 @@
+# PASSIVE role, git-driven variant of manifests/56-restore-passive.yaml.
+# Identical spec; see the note in ../active/backupschedule.yaml.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Restore
+metadata:
+  name: restore-acm-passive-sync
+  namespace: open-cluster-management-backup
+spec:
+  veleroManagedClustersBackupName: skip
+  veleroCredentialsBackupName: latest
+  veleroResourcesBackupName: latest
+  cleanupBeforeRestore: CleanupRestored
+  syncRestoreWithNewBackups: true
+  restoreSyncInterval: 10m
