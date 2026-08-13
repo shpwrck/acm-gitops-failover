@@ -1,0 +1,36 @@
+# Bootstrap RBAC — apply ONCE, MANUALLY, on EACH hub (both of them):
+#   oc --context <hub> apply -f dr/bootstrap/dr-role-rbac.yaml
+# This is the permission that lets each hub's local Argo reconcile its DR
+# role. It cannot be delivered by the dr-role Application itself (RBAC
+# escalation prevention: the controller can only grant what it holds).
+#
+# Why explicit and not the managed-by label (verified 2026-08-13): the
+# GitOps operator's minted namespace role is an allowlist of known API
+# groups — `oc auth can-i` shows it does NOT include
+# cluster.open-cluster-management.io backupschedules/restores. The label
+# trick works for the demo app's core/Route kinds on sage; it does not
+# work here. This Role is also the tighter statement: git-driven DR may
+# touch exactly two resource types in exactly one namespace, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dr-role-backup-operator
+  namespace: open-cluster-management-backup
+rules:
+  - apiGroups: ["cluster.open-cluster-management.io"]
+    resources: ["backupschedules", "restores"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dr-role-backup-operator
+  namespace: open-cluster-management-backup
+subjects:
+  - kind: ServiceAccount
+    name: openshift-gitops-argocd-application-controller
+    namespace: openshift-gitops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dr-role-backup-operator

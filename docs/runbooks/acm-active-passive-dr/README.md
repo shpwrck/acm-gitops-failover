@@ -18,17 +18,20 @@ local `~/k8socp-le-certs` repo)
 and the SeaweedFS S3 store on TrueNAS (see the `truenas-seaweedfs-s3`
 runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
-- **spoke = ACTIVE ACM 2.17 hub** (since the 2026-08-12 DR exercise —
-  roles SWAPPED from the original build): manages `local-cluster` + `sage`
-  (all 8 addons Available); `BackupSchedule schedule-acm` (`*/30 * * * *`,
-  `veleroTtl 72h`, `useManagedServiceAccount: true`) in
+- **hub = ACTIVE ACM 2.17 hub** (since the 2026-08-13 reverse DR exercise
+  — the ORIGINAL roles restored; README §3.4): manages `local-cluster` +
+  `sage` (all 8 addons Available); `BackupSchedule schedule-acm`
+  (`*/30 * * * *`, `veleroTtl 72h`, `useManagedServiceAccount: true`) in
   `open-cluster-management-backup`; GitOps wiring in `openshift-gitops`
   (restored from backup: `GitOpsCluster`, Placements, `acm-placement`
-  ConfigMap, ApplicationSet `hello-failover`).
-- **hub = PASSIVE hub** (ex-primary, defused after the exercise: old
-  BackupSchedule hit `BackupCollision` and was deleted, stale
-  `ManagedCluster sage` deleted in `Unknown` state, 15 s cleanup):
-  `Restore restore-acm-passive-sync` (managedClusters `skip`,
+  ConfigMap, ApplicationSet `hello-failover`); post-activation MSA secret
+  cleanup done (token re-minted 14:45:44Z, captured in the 14:46:38Z
+  backup set).
+- **spoke = PASSIVE hub** (ex-active, demoted after the reverse exercise:
+  old BackupSchedule hit `BackupCollision` and was deleted, stale
+  `ManagedCluster sage` deleted in `Unknown` state, stale `Finished`
+  `restore-acm-activate` deleted — silent-no-op guard, exercise runbook
+  G.5): `Restore restore-acm-passive-sync` (managedClusters `skip`,
   credentials/resources `latest`, `syncRestoreWithNewBackups: true`,
   interval 10m); claims NO managed cluster while passive.
 - **sage = workload cluster**: runs OpenShift GitOps (operator, like both
@@ -58,14 +61,19 @@ runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 ~/acm-failover-guide/manifests/57-restore-activate.yaml -> spoke Restore restore-acm-activate (FAILOVER action; not applied)
 ~/acm-failover-guide/manifests/61-gitops-integration.yaml -> hub GitOpsCluster + Placements + acm-placement ConfigMap
 ~/acm-failover-guide/manifests/62-appset-pull.yaml -> hub ApplicationSet hello-failover (pull model)
+~/acm-failover-guide/manifests/63-appset-push.yaml -> hub ApplicationSet hello-failover-push (push model; APPLIED+VERIFIED 2026-08-13)
 ~/acm-failover-guide/apps/hello-failover/ -> sage ns hello-failover (Deployment/ConfigMap/Service/Route via sage-local Argo)
+~/acm-failover-guide/apps/hello-failover-push/ -> sage ns hello-failover-push (pushed by HUB's Argo via cluster-proxy; APPLIED+VERIFIED 2026-08-13)
+~/acm-failover-guide/dr/bootstrap/ -> BOTH hubs: Role/RoleBinding dr-role-backup-operator + Application dr-role in openshift-gitops (velero-excluded; APPLIED+VERIFIED 2026-08-13)
+~/acm-failover-guide/dr/{hub,spoke}/ -> per-hub git-driven DR role overlays (hub->active, spoke->passive), reconciled by each hub's LOCAL Argo
 
 ### Re-run
 
 All applies are idempotent (`oc --context <c> apply -f <file>`). Rebuild
 order on a fresh pair: import clusters (40), enable `cluster-backup` MCH
 component on both, secret + DPA (50) on both, BackupSchedule (55) on ACTIVE
-only (currently spoke), passive Restore (56) on PASSIVE only (currently hub), GitOps operator (60) on all
+only (currently hub), passive Restore (56) on PASSIVE only (currently
+spoke), GitOps operator (60) on all
 three, integration (61) + AppSet (62) on ACTIVE. Prerequisite checks that
 MUST pass first (each broke once, live):
 
@@ -78,12 +86,12 @@ oc --context <spoke-cluster> get crd routes.route.openshift.io # must NOT exist 
 ### Verify and recover
 
 ```bash
-oc --context spoke get backupschedule,backup -n open-cluster-management-backup # ACTIVE: schedule Enabled, backups Completed
-oc --context hub get restore -n open-cluster-management-backup                 # PASSIVE: phase Enabled (sync mode)
-oc --context hub get managedclusters                                           # local-cluster ONLY while passive
+oc --context hub get backupschedule,backup -n open-cluster-management-backup   # ACTIVE: schedule Enabled, backups Completed
+oc --context spoke get restore -n open-cluster-management-backup               # PASSIVE: phase Enabled (sync mode), passive-sync ONLY
+oc --context spoke get managedclusters                                         # local-cluster ONLY while passive
 oc --context sage get applications.argoproj.io -A                              # hello-failover-sage Synced/Healthy
 curl -s https://hello-failover-hello-failover.apps.sage.k8socp.com | grep REVISION
-oc --context spoke get managedserviceaccount auto-import-account -n sage \
+oc --context hub get managedserviceaccount auto-import-account -n sage \
   -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'  # ACTIVE: True (rotation live — README §3.3)
 ```
 
@@ -97,7 +105,12 @@ location; pause one. MSA `TokenReported: False` with `cannot set an
 ownerRef` → Velero-restored token secret from a past activation was never
 cleaned up; rotation is frozen with a hard deadline at token expiry —
 delete the secret (only on an already-imported cluster), the addon
-re-mints it in seconds (README §3.3; found+fixed live 2026-08-13). `oc`
+re-mints it in seconds (README §3.3; found+fixed live 2026-08-13,
+reproduced on hub post-activation the same day). Applying
+`57-restore-activate.yaml` produces no activation → a `Finished`
+`restore-acm-activate` from a previous activation still exists with an
+identical spec, so the apply is a silent no-op — delete it first (now
+exercise-runbook step G.5, done at demotion time). `oc`
 to every lab API failing `x509: unknown authority` while `curl` succeeds
 → stale internal-CA pins re-appeared in `~/.kube/config` (these APIs
 serve publicly trusted certs; entries must carry NO
@@ -142,11 +155,29 @@ Change DR wiring by editing `manifests/` + `oc apply` to the right cluster
 change. Watch the posture with the Verify block. The DR exercise ran 2026-08-12
 (README.md §3: failover 3m20s, zero downtime, v2 deployed mid-outage;
 §3.2: role-swap failback ~7 min, BackupCollision observed live). The
-posture is symmetric: to exercise the reverse direction, run §3 again with
-hub/spoke swapped (kill spoke, activate on hub, then role-swap back).
+REVERSE exercise ran 2026-08-13 (README.md §3.4: decision-to-re-home
+≈10 s, zero downtime again, v3 deployed mid-outage, §3.3 reproduced on
+hub, BackupCollision fired in the opposite direction) — restoring the
+ORIGINAL hub-active/spoke-passive posture and validating the exercise
+runbook end to end. The posture is symmetric: each exercise is the same
+procedure with the roles renamed.
 The full step-by-step exercise script — command / rationale / success /
 failure per step, parameterized for either direction — is the
 [`dr-failover-exercise`](../dr-failover-exercise/README.md) runbook.
 After ANY activation, run its Phase E.3 (delete the restored
 `auto-import-account` secret once the cluster is imported) — skipping it
 is what silently froze token rotation after the 2026-08-12 exercise.
+2026-08-13 (later): the repo carries FOUR paths (README §4 — delivery
+pull/push × operation manual/gitops). Path 1 fully verified; paths 2/3
+WIRING verified and LIVE on the clusters (dr-role apps + RBAC on both
+hubs, push app serving on sage via hub's Argo through cluster-proxy) —
+their disaster exercises (role-flip PR, delivery-RTO measurement) are the
+remaining unverified halves; path 4 composes 2+3 and runs last. The
+dr-role Applications carry `velero.io/exclude-from-backup` — verified
+absent from backups while delivery resources ride along; never remove
+that label (split-brain via restore). New failure paths from the wiring
+verification: dr-role sync `Failed` after retry exhaustion needs an
+explicit re-sync (`oc patch … '{"operation":{"sync":{}}}'`) — Argo won't
+re-try the same revision; and the openshift-gitops controller writes ACM
+backup CRs only via `dr/bootstrap/dr-role-rbac.yaml` (the managed-by
+label does NOT grant it — verified with `auth can-i`).

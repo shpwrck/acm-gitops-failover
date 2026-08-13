@@ -1,0 +1,67 @@
+# PUSH-model ApplicationSet — apply on the ACTIVE hub.
+# [Delivery wiring VERIFIED live 2026-08-13: Synced/Healthy, route serving,
+#  no extra RBAC needed — see the P.2 findings (identity = application-manager
+#  MSA, destination = cluster-proxy addon URL, sage-side rights =
+#  cluster-admin-equivalent) in docs/runbooks/dr-failover-push-manual.
+#  DR behavior (delivery RTO across a failover) still pending the path-3
+#  exercise.]
+#
+# Contrast with 62-appset-pull.yaml: NONE of the three pull markers
+# (ocm-managed-cluster annotation, skip-reconcile, pull-to-ocm label).
+# The generated Applications live on the HUB, and the hub's Argo pushes
+# to the target cluster using the ACM-minted cluster secret
+# (GitOpsCluster -> ManagedServiceAccount token). Consequences for DR:
+# - Applications + cluster secrets die with the hub; delivery is DOWN
+#   during a hub outage (workloads keep running — Argo never uninstalls
+#   on its own death — but nothing new syncs).
+# - After activation, the restored ApplicationSet + re-minted cluster
+#   secret resume pushing. Delivery-pipeline RTO = failover RTO + secret
+#   re-mint + sync; measuring it is the point of the path-3 exercise.
+# Coexists with the pull app: separate namespace + separate app name, so
+# both models can be observed through the same outage.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: hello-failover-push
+  namespace: openshift-gitops
+spec:
+  goTemplate: false
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: hello-failover-placement
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: "hello-failover-push-{{name}}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/shpwrck/acm-gitops-failover
+        targetRevision: main
+        path: apps/hello-failover-push
+      destination:
+        # {{server}} resolves to the target cluster's API URL from the
+        # ACM-minted cluster secret — this is what makes it push.
+        server: "{{server}}"
+        namespace: hello-failover-push
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+      # Same server-defaulted Route fields as the pull app (verified there).
+      ignoreDifferences:
+        - group: route.openshift.io
+          kind: Route
+          jsonPointers:
+            - /spec/host
+            - /spec/wildcardPolicy
+            - /spec/to/weight
+# RBAC: none needed (verified live) — the pushing identity's sage-side SA
+# is bound cluster-admin-equivalent by the application-manager addon
+# itself. See the security finding in the path-3 runbook P.2 before
+# selling that convenience as a feature.

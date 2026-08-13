@@ -1,0 +1,12 @@
+# ACTIVE role, git-driven variant of manifests/55-backupschedule.yaml.
+# Identical spec; kept as a separate file so the manual and gitops paths
+# cannot drift apart silently — change both or neither.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: BackupSchedule
+metadata:
+  name: schedule-acm
+  namespace: open-cluster-management-backup
+spec:
+  veleroSchedule: "*/30 * * * *"
+  veleroTtl: 72h
+  useManagedServiceAccount: true

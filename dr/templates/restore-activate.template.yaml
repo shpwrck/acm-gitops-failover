@@ -1,0 +1,23 @@
+# ACTIVATION one-shot — template. NEVER applied from this path.
+# During a failover PR, COPY into dr/<surviving-hub>/ as
+#   restore-activate-<UTCSTAMP>.yaml   (e.g. restore-activate-202608131442.yaml)
+# replacing <UTCSTAMP> in the name below, and add it to that overlay's
+# kustomization resources.
+#
+# WHY THE UNIQUE NAME (the G.5 lesson, 2026-08-13): a Restore is one-shot.
+# A fixed-name activation restore that stays in git is `Finished` forever,
+# and every later "activation" apply is a SILENT NO-OP (identical spec —
+# nothing re-triggers). Generation-stamped names make every failover PR
+# create a genuinely new object — the same reason Jobs aren't reused.
+# The matching demote PR later REMOVES the file (prune deletes the inert
+# Finished object) — housekeeping, not correctness.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Restore
+metadata:
+  name: restore-acm-activate-<UTCSTAMP>
+  namespace: open-cluster-management-backup
+spec:
+  veleroManagedClustersBackupName: latest
+  veleroCredentialsBackupName: latest
+  veleroResourcesBackupName: latest
+  cleanupBeforeRestore: CleanupRestored

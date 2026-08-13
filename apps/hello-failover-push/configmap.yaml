@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-failover-push-content
+data:
+  index.html: |
+    <html><body>
+    <h1>hello-failover-push REVISION v1</h1>
+    <p>Served from git: shpwrck/acm-gitops-failover apps/hello-failover-push (PUSH model — delivered by the hub's Argo)</p>
+    </body></html>
