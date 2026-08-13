@@ -60,7 +60,7 @@ four cells verified live ([exercise records](exercises.md) §3, §3.5,
 §3.6, §3.7; the summary table is in the [README](../README.md)). How
 the halves differ, in one line each:
 
-- **Pull vs push** is *what a hub outage costs delivery*: nothing (sage
+- **Pull vs push** is *what a hub outage costs delivery*: nothing (spoke
   syncs git itself — proven in every exercise — v2 through v7 all landed hubless) vs a
   delivery outage lasting until the new hub's Argo resumes pushing
   (path 3 measures it). It is also *what the hub is worth to an

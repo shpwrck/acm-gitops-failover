@@ -9,7 +9,7 @@ this exercises (what is deployed where and why) lives in
 verified narrative with timings is the
 [exercise records](../../exercises.md) §3.
 
-**Validated live 2026-08-13** (spoke→hub reverse exercise, exercise records §3.4):
+**Validated live 2026-08-13** (hub-y→hub-x reverse exercise, exercise records §3.4):
 every step below ran as written; measured decision-to-re-home ≈10 s, zero
 failed requests across the full window.
 
@@ -26,10 +26,10 @@ The posture is symmetric — set these once and every command below works in
 either direction (values shown are the 2026-08-13 exercise):
 
 ```bash
-export ACTIVE=spoke      # hub about to "die"
-export PASSIVE=hub       # hub that will activate
-export MANAGED=sage      # workload cluster that re-homes
-export APP_URL=https://hello-failover-hello-failover.apps.sage.k8socp.com
+export ACTIVE=hub-y      # hub about to "die"
+export PASSIVE=hub-x       # hub that will activate
+export MANAGED=spoke      # workload cluster that re-homes
+export APP_URL=https://hello-failover-hello-failover.apps.spoke.k8socp.com
 ```
 
 - All timestamps UTC (`date -u`) so probe logs and cluster conditions
@@ -250,7 +250,7 @@ git add apps/hello-failover/configmap.yaml && git commit -m "REVISION vN mid-out
 the hub orchestrates *placement*, never delivery. A deploy that lands
 while no hub exists is the pull model's entire argument, made visible.
 **Success:** Within ~3 min the availability probe's URL serves the new
-revision (`curl -s $APP_URL | grep -i revision`). Sage's local Argo can
+revision (`curl -s $APP_URL | grep -i revision`). `$MANAGED`'s local Argo can
 also be nudged: annotate the Application with
 `argocd.argoproj.io/refresh=normal`.
 **Failure:** App never updates → check `$MANAGED`'s local Argo

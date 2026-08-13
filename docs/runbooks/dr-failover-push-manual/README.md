@@ -32,11 +32,11 @@ oc --context $ACTIVE get applications.argoproj.io -n openshift-gitops
 ACM-minted cluster secret. Coexists with the pull app by design (separate
 namespace `hello-failover-push`) so one outage exercises both models
 side by side.
-**Success (observed):** `hello-failover-push-sage` appeared ON THE HUB
+**Success (observed):** `hello-failover-push-spoke` appeared ON THE HUB
 (contrast: the pull model's stub carries skip-reconcile and the workload
-Application lives on sage) and reached `Synced | Healthy` in under two
+Application lives on spoke) and reached `Synced | Healthy` in under two
 minutes with NO extra RBAC;
-`https://hello-failover-push-hello-failover-push.apps.sage.k8socp.com`
+`https://hello-failover-push-hello-failover-push.apps.spoke.k8socp.com`
 serves `REVISION v1`.
 **Failure:** `SyncFailed … forbidden` → your environment's addon RBAC
 differs from what P.2 documents; rediscover before granting anything.
@@ -45,18 +45,18 @@ differs from what P.2 documents; rediscover before granting anything.
 
 What verification found (2026-08-13, ACM 2.17):
 
-- The minted cluster secret is `sage-application-manager-cluster-secret`
+- The minted cluster secret is `spoke-application-manager-cluster-secret`
   — the token belongs to the **`application-manager`
   ManagedServiceAccount** (same MSA family as auto-import; one more
   dependent of the §3.3 token chain).
-- The Application's destination is NOT sage's API URL but the
+- The Application's destination is NOT spoke's API URL but the
   **cluster-proxy addon**
-  (`https://cluster-proxy-addon-user.multicluster-engine.svc.cluster.local:9092/sage`)
+  (`https://cluster-proxy-addon-user.multicluster-engine.svc.cluster.local:9092/spoke`)
   — push traffic tunnels through ACM's proxy, adding the proxy chain
-  (hub-side service + sage-side agent tunnel) to push delivery's
+  (hub-side service + spoke-side agent tunnel) to push delivery's
   dependency list. Note for the exercise: delivery resurrection requires
   this chain re-established on the NEW hub, not just the cluster secret.
-- **Security finding:** the sage-side SA behind that token
+- **Security finding:** the spoke-side SA behind that token
   (`open-cluster-management-agent-addon/application-manager`) is bound to
   ClusterRole `open-cluster-management:application-manager`, whose rules
   are `apiGroups:*, resources:*, verbs:*` + all nonResourceURLs —
@@ -93,7 +93,7 @@ nothing), which is itself a claim customers doubt.
 ```bash
 # bump REVISION in apps/hello-failover-push/configmap.yaml, commit, push
 date -u +%FT%TZ   # record: push-model deploy attempted
-curl -s https://hello-failover-push-hello-failover-push.apps.sage.k8socp.com | grep -i revision
+curl -s https://hello-failover-push-hello-failover-push.apps.spoke.k8socp.com | grep -i revision
 ```
 
 **Why:** Path 1's Phase C celebrates the deploy landing hubless. Path 3
@@ -119,7 +119,7 @@ GitOps cluster secret depends on the same MSA chain):
 ```bash
 oc --context $PASSIVE get applications.argoproj.io -n openshift-gitops
 oc --context $PASSIVE get secret -n openshift-gitops -l apps.open-cluster-management.io/acm-cluster=true
-watch -n10 'curl -s https://hello-failover-push-hello-failover-push.apps.sage.k8socp.com | grep -i revision'
+watch -n10 'curl -s https://hello-failover-push-hello-failover-push.apps.spoke.k8socp.com | grep -i revision'
 ```
 
 **Why:** The restored ApplicationSet must regenerate

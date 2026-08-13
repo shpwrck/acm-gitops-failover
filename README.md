@@ -15,13 +15,22 @@ evidence, and operator procedures each live in their own document below.
 
 | Cluster | API | Shape | Role |
 | --- | --- | --- | --- |
-| hub | api.hub.k8socp.com | SNO, OCP 4.21 | ACM 2.17.0 hub — currently **passive** |
-| spoke | api.spoke.k8socp.com | SNO, OCP 4.21 | ACM 2.17.0 hub — currently **active** (manages sage) |
-| sage | api.sage.k8socp.com | SNO, OCP 4.21 | workload cluster (pull-model GitOps) |
+| hub-x | api.hub-x.k8socp.com | SNO, OCP 4.21 | ACM 2.17.0 hub — currently **passive** |
+| hub-y | api.hub-y.k8socp.com | SNO, OCP 4.21 | ACM 2.17.0 hub — currently **active** (manages spoke) |
+| spoke | api.spoke.k8socp.com | SNO, OCP 4.21 | workload cluster (pull-model GitOps) |
 
 Roles are symmetric and have swapped in every exercise; the standing
 posture, with its verify and recover blocks, is the
 [posture runbook](docs/runbooks/acm-active-passive-dr/README.md).
+
+**Naming.** Clusters are referred to generically: `hub-x` and `hub-y`
+are the two ACM hubs, `spoke` is the workload cluster. The committed
+lab files predate the rename and keep the original names — `dr/hub/`
+is hub-x's role overlay, `dr/spoke/` is hub-y's,
+`manifests/40-import-sage.yaml` imports spoke, and the runbook
+directory `spoke-acm-hub` is hub-y's build record. Command outputs in
+the docs are the real recorded outputs with only the cluster names
+substituted.
 
 ## The four paths
 
@@ -61,7 +70,7 @@ per step:
 | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | Path 3: manual failover with push delivery under measurement |
 | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Path 4: the composition of paths 2 + 3 |
 | [acm-active-passive-dr](docs/runbooks/acm-active-passive-dr/README.md) | The standing posture: state, template map, verify and recover |
-| [spoke-acm-hub](docs/runbooks/spoke-acm-hub/README.md) | How spoke became a standalone ACM hub |
+| [spoke-acm-hub](docs/runbooks/spoke-acm-hub/README.md) | How hub-y became a standalone ACM hub |
 | [truenas-seaweedfs-s3](docs/runbooks/truenas-seaweedfs-s3/README.md) | The lab's S3-compatible backup store |
 
 ## Repo layout
