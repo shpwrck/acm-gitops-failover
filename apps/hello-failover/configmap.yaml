@@ -5,6 +5,6 @@ metadata:
 data:
   index.html: |
     <html><body>
-    <h1>hello-failover REVISION v2 (pushed mid-outage, hub dead)</h1>
+    <h1>hello-failover REVISION v3 (pushed mid-outage, spoke dead)</h1>
     <p>Served from git: shpwrck/acm-gitops-failover apps/hello-failover</p>
     </body></html>
