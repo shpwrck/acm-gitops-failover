@@ -118,5 +118,5 @@ shell` in `ix-seaweedfs-master-1` (`s3.configure`, `s3.bucket.*`). After any
 change, re-run the Verify block (403 anonymous + 200 signed PUT). Next
 consumer of this state: OADP `DataProtectionApplication` on both hubs
 pointing `s3Url: https://truenas.skrzypek.dev:30304`, bucket `acm-backups`,
-`s3ForcePathStyle: "true"` — record those steps in
-`~/acm-failover-guide/README.md` Phase 2 as they are verified.
+`s3ForcePathStyle: "true"` — recorded, verified, in `docs/build.md`
+(Phase 2a/2b).

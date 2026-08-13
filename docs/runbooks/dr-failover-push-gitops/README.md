@@ -1,7 +1,8 @@
 # Path 4 — DR exercise runbook: GitOps operation, push delivery
 
-**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:43–18:53Z** (README §3.7,
-run after both parents' exercises the same day). **Measured push
+**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:43–18:53Z**
+([exercise records](../../exercises.md) §3.7, run after both parents'
+exercises the same day). **Measured push
 delivery RTO: 2 min 45 s** — the composed path BEAT manual path 3's
 2:53 because the PR flow's decision-to-claim (28 s, V1 recovery
 included) undercut the manual path's operator latency; the audit trail
@@ -57,6 +58,6 @@ attribute.
 
 ## H — the deliverable
 
-The four-path comparison table (README §4) gets its final column filled
+The four-path comparison table (README, "The four paths") gets its final column filled
 from this run: identical outage, four measured recoveries. That artifact
 — not any single path — is the reason the repo holds all four.

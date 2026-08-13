@@ -19,7 +19,7 @@ and the SeaweedFS S3 store on TrueNAS (see the `truenas-seaweedfs-s3`
 runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
 - **spoke = ACTIVE ACM 2.17 hub** (since the 2026-08-13 path-4 composed
-  exercise, README §3.7 — PR-A claim 18:45:59Z, merge→claim 28 s):
+  exercise, [exercise records](../../exercises.md) §3.7 — PR-A claim 18:45:59Z, merge→claim 28 s):
   manages `local-cluster` + `sage` (all 8 addons Available);
   `BackupSchedule schedule-acm` delivered by promotion PR-B #7 (git:
   `dr/spoke → ../roles/active` + one-shot
@@ -50,7 +50,7 @@ runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 - Git repo `github.com/shpwrck/acm-gitops-failover` (= local
   `~/acm-failover-guide`, remote `origin`) holds ALL manifests
   (`manifests/`, numbered in apply order), the demo app (`apps/`), scripts,
-  the verified guide (`README.md`), and these runbooks. NO secret values in
+  the verified guide (`README.md` map + `docs/`), and these runbooks. NO secret values in
   git (verified by scan before first push).
 
 ### Template map
@@ -93,7 +93,7 @@ oc --context spoke get managedclusters                                         #
 oc --context sage get applications.argoproj.io -A                              # hello-failover-sage Synced/Healthy
 curl -s https://hello-failover-hello-failover.apps.sage.k8socp.com | grep REVISION
 oc --context hub get managedserviceaccount auto-import-account -n sage \
-  -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'  # ACTIVE: True (rotation live — README §3.3)
+  -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'  # ACTIVE: True (rotation live — exercises §3.3)
 ```
 
 Failure paths: GitOpsCluster `ClusterRegistrationFailed` → check the MSA
@@ -106,7 +106,7 @@ location; pause one. MSA `TokenReported: False` with `cannot set an
 ownerRef` → Velero-restored token secret from a past activation was never
 cleaned up; rotation is frozen with a hard deadline at token expiry —
 delete the secret (only on an already-imported cluster), the addon
-re-mints it in seconds (README §3.3; found+fixed live 2026-08-13,
+re-mints it in seconds (exercise records §3.3; found+fixed live 2026-08-13,
 reproduced on hub post-activation the same day). Applying
 `57-restore-activate.yaml` produces no activation → a `Finished`
 `restore-acm-activate` from a previous activation still exists with an
@@ -154,9 +154,10 @@ within ~3 min (or annotate the Application `argocd.argoproj.io/refresh`).
 Change DR wiring by editing `manifests/` + `oc apply` to the right cluster
 (active vs passive matters for 55/56/57), then commit+push in the same
 change. Watch the posture with the Verify block. The DR exercise ran 2026-08-12
-(README.md §3: failover 3m20s, zero downtime, v2 deployed mid-outage;
+([exercise records](../../exercises.md) §3: failover 3m20s, zero downtime,
+v2 deployed mid-outage;
 §3.2: role-swap failback ~7 min, BackupCollision observed live). The
-REVERSE exercise ran 2026-08-13 (README.md §3.4: decision-to-re-home
+REVERSE exercise ran 2026-08-13 (§3.4: decision-to-re-home
 ≈10 s, zero downtime again, v3 deployed mid-outage, §3.3 reproduced on
 hub, BackupCollision fired in the opposite direction) — restoring the
 ORIGINAL hub-active/spoke-passive posture and validating the exercise
@@ -168,15 +169,14 @@ failure per step, parameterized for either direction — is the
 After ANY activation, run its Phase E.3 (delete the restored
 `auto-import-account` secret once the cluster is imported) — skipping it
 is what silently froze token rotation after the 2026-08-12 exercise.
-2026-08-13 (later): the repo carries FOUR paths (README §4 — delivery
-pull/push × operation manual/gitops). Path 1 fully verified; paths 2/3
-WIRING verified and LIVE on the clusters (dr-role apps + RBAC on both
-hubs, push app serving on sage via hub's Argo through cluster-proxy) —
-their disaster exercises (role-flip PR, delivery-RTO measurement) are the
-remaining unverified halves; path 4 composes 2+3 and runs last. The
+2026-08-13 (later): the repo carries FOUR paths (README, The four
+paths — delivery pull/push × operation manual/gitops), and all four are
+now exercise-verified (exercise records §3.5–§3.7): path 2's two-PR
+flip, path 3's measured push delivery RTO (2:53), and path 4's composed
+run (push RTO 2:45, merge→claim 28 s). The
 dr-role Applications carry `velero.io/exclude-from-backup` — verified
 absent from backups while delivery resources ride along; never remove
-that label (split-brain via restore). New failure paths from the wiring
+that label (split-brain via restore). Durable failure paths from the wiring
 verification: dr-role sync `Failed` after retry exhaustion needs an
 explicit re-sync (`oc patch … '{"operation":{"sync":{}}}'`) — Argo won't
 re-try the same revision; and the openshift-gitops controller writes ACM
