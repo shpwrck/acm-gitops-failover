@@ -1,9 +1,9 @@
 # DR role for cluster `spoke`. Reconciled by SPOKE'S OWN local Argo CD
 # (dr/bootstrap/dr-role-spoke.yaml). See ../README.md for the flip
 # choreography.
-# CURRENT ROLE: ACTIVATING (path-4 PR-A, 2026-08-13 — activation one-shot
-# only; promotion PR-B adds ../roles/active after the claim lands).
+# CURRENT ROLE: active (path-4: PR-A claim 18:45:59Z, this PR-B promotes).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - ../roles/active
   - restore-activate-202608131843.yaml
