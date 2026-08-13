@@ -259,6 +259,26 @@ cluster-local GitOps debugging, unrelated to the dead hub.
 
 ## Phase D — Activate the passive hub
 
+### D.0 Break-glass: suspend the git-driven role reconciler (REQUIRED
+### since 2026-08-13, when the dr/ wiring went live)
+
+```bash
+oc --context $PASSIVE patch applications.argoproj.io dr-role -n openshift-gitops \
+  --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
+```
+
+**Why (verified live):** the hub's `dr-role` Application reconciles its
+role from git with selfHeal — a manually-deleted passive Restore was
+recreated in **6 seconds** (deleted 16:00:22Z, back `Enabled` 16:00:28Z).
+Without this suspend, D.1 is silently undone and D.2 refuses to run
+("only one Restore honored at a time"). Manual and git-driven operation
+do not compose on the same hub; this patch is the documented off-switch.
+**Success:** `.spec.syncPolicy.automated` gone from the app.
+**AFTERWARDS (Phase G/H):** re-align git to the new reality (flip the
+`dr/` overlays to match the roles you created manually) BEFORE restoring
+`automated: {prune: true, selfHeal: true}` — re-enabling against stale
+git would demote the new active hub.
+
 ### D.1 Remove the passive-sync restore
 
 ```bash

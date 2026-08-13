@@ -67,6 +67,20 @@ stay imperative, with their safety gates:
 - **Post-activation MSA secret cleanup** (README §3.3): conditional on
   observed `TokenReported: False`; scriptable, not declarable.
 
+## Coexistence with manual operation (VERIFIED constraint)
+
+Once this wiring is live, **manual role surgery on a hub is fought by its
+reconciler**: selfHeal recreated a manually-deleted passive Restore in
+**6 seconds** (observed 2026-08-13, 16:00:22Z→16:00:28Z). Consequences:
+
+- Manual paths (1/3) now REQUIRE the break-glass suspend first (path-1
+  runbook D.0): null out `syncPolicy.automated` on the operated hub's
+  `dr-role`, operate, re-align git to the new reality, only then
+  re-enable automation.
+- This is the customer lesson in miniature: git-driven and imperative
+  operation don't compose on the same resources — pick one as
+  authoritative and make the other an explicit, documented exception.
+
 ## Why each hub's dr-role Application must never be backed up
 
 ACM's resource backups demonstrably include argoproj objects in
@@ -94,7 +108,10 @@ Closed 2026-08-13 (wiring, no disaster required):
   backup time. Delivery resources ride the backup; the role reconciler
   does not. (Checked via `oc -n open-cluster-management-backup exec
   deploy/velero -- /velero backup describe <name> --details` — no local
-  CLI needed.)
+  CLI needed.) Re-confirmed on `…160034` after the push app went live:
+  `hello-failover-push-sage` + ApplicationSet `hello-failover-push`
+  INCLUDED (push delivery fails over), `dr-role` still absent — the
+  opposite-treatments design, proven both ways.
 
 Open — require the path-2 disaster exercise:
 
