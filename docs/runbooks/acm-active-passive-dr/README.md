@@ -83,6 +83,8 @@ oc --context hub get restore -n open-cluster-management-backup                 #
 oc --context hub get managedclusters                                           # local-cluster ONLY while passive
 oc --context sage get applications.argoproj.io -A                              # hello-failover-sage Synced/Healthy
 curl -s https://hello-failover-hello-failover.apps.sage.k8socp.com | grep REVISION
+oc --context spoke get managedserviceaccount auto-import-account -n sage \
+  -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'  # ACTIVE: True (rotation live — README §3.3)
 ```
 
 Failure paths: GitOpsCluster `ClusterRegistrationFailed` → check the MSA
@@ -91,7 +93,20 @@ token chain (global-set ns, addons, tokenSecretRef). Argo
 `backups/`). `SyncFailed routes forbidden` → managed-by label missing on the
 app namespace. App `OutOfSync` on Route only → ignoreDifferences (already in
 the AppSet). BackupCollision on the schedule → both hubs wrote the same
-location; pause one. Recovery of the whole posture = re-run from git (this
+location; pause one. MSA `TokenReported: False` with `cannot set an
+ownerRef` → Velero-restored token secret from a past activation was never
+cleaned up; rotation is frozen with a hard deadline at token expiry —
+delete the secret (only on an already-imported cluster), the addon
+re-mints it in seconds (README §3.3; found+fixed live 2026-08-13). `oc`
+to every lab API failing `x509: unknown authority` while `curl` succeeds
+→ stale internal-CA pins re-appeared in `~/.kube/config` (these APIs
+serve publicly trusted certs; entries must carry NO
+`certificate-authority-data`) — back up the kubeconfig, then
+`kubectl config unset clusters.<name>.certificate-authority-data` per
+cluster (hit 2026-08-13 after the lab cold start). First backup after a
+cluster cold start fires off-cadence (catch-up), then the cron reasserts —
+off-slot timestamps right after power-on are normal, not a stall.
+Recovery of the whole posture = re-run from git (this
 repo is the source of truth; only secrets are out-of-band).
 
 ## Decision log
@@ -129,3 +144,9 @@ change. Watch the posture with the Verify block. The DR exercise ran 2026-08-12
 §3.2: role-swap failback ~7 min, BackupCollision observed live). The
 posture is symmetric: to exercise the reverse direction, run §3 again with
 hub/spoke swapped (kill spoke, activate on hub, then role-swap back).
+The full step-by-step exercise script — command / rationale / success /
+failure per step, parameterized for either direction — is the
+[`dr-failover-exercise`](../dr-failover-exercise/README.md) runbook.
+After ANY activation, run its Phase E.3 (delete the restored
+`auto-import-account` secret once the cluster is imported) — skipping it
+is what silently froze token rotation after the 2026-08-12 exercise.
