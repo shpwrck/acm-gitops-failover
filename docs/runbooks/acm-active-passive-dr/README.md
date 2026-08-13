@@ -18,19 +18,20 @@ local `~/k8socp-le-certs` repo)
 and the SeaweedFS S3 store on TrueNAS (see the `truenas-seaweedfs-s3`
 runbook; S3 keys in `~/.acm-failover-s3-creds`, chmod 600).
 
-- **hub = ACTIVE ACM 2.17 hub** (since the 2026-08-13 path-3 manual
-  exercise, README §3.6 — activated 18:32:53Z, claim in 10 s): manages
-  `local-cluster` + `sage` (all 8 addons Available); `BackupSchedule
-  schedule-acm` created manually (F.1, 18:35:41Z) and since ADOPTED by
-  hub's dr-role Argo app (git: `dr/hub → ../roles/active`, re-aligned
-  be20031); GitOps wiring restored from backup (ApplicationSets
-  `hello-failover` + `hello-failover-push` — push delivery resumed with a
-  measured 2:53 RTO); §3.3 MSA cleanup done (token re-minted 18:34:37Z,
-  captured in the 18:35:41Z set); no stale activation restore remains.
-- **spoke = PASSIVE hub** (demoted manually at return in the path-3
-  exercise: operator-at-return break-glass, `BackupCollision` freeze
-  observed, G.2–G.5 residue cleared; git: `dr/spoke → ../roles/passive`,
-  re-aligned be20031, restore ADOPTED by its Argo): `Restore
+- **spoke = ACTIVE ACM 2.17 hub** (since the 2026-08-13 path-4 composed
+  exercise, README §3.7 — PR-A claim 18:45:59Z, merge→claim 28 s):
+  manages `local-cluster` + `sage` (all 8 addons Available);
+  `BackupSchedule schedule-acm` delivered by promotion PR-B #7 (git:
+  `dr/spoke → ../roles/active` + one-shot
+  `restore-activate-202608131843.yaml`, reconciled by spoke's own Argo);
+  ApplicationSets `hello-failover` + `hello-failover-push` restored
+  (push delivery resumed, measured RTO 2:45); §3.3 MSA cleanup done
+  (token re-minted 18:46:54Z, captured in PR-B's first set 18:48:42Z).
+- **hub = PASSIVE hub** (demoted via PR #8, merged while hub was down;
+  at boot: `BackupCollision` froze its stale schedule 18:51:30Z, its
+  Argo pruned it 18:51:41Z and applied the passive restore — V3's
+  collision-first order; stale `ManagedCluster sage` deleted in
+  `Unknown` 18:53:00Z; git: `dr/hub → ../roles/passive`): `Restore
   restore-acm-passive-sync` `Enabled` (managedClusters `skip`,
   credentials/resources `latest`, `syncRestoreWithNewBackups: true`);
   claims NO managed cluster while passive.

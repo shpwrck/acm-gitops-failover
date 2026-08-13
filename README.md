@@ -608,17 +608,45 @@ run 18:30–18:40Z, driven by the
   cluster secret → app sync → route flip; §3.3 hygiene stays FIRST (the
   push credential is the same MSA family).
 
+### 3.7 Path 4: the composed exercise (verified live, 2026-08-13)
+
+The full composition — git-driven operation with push delivery under
+measurement (ACTIVE=hub, PASSIVE=spoke), run 18:43–18:53Z, closing the
+2×2:
+
+| Clock (UTC) | Event |
+| --- | --- |
+| 18:43:48 | hub killed (self-recovering variant); API dead 18:45:06 |
+| 18:45:11 | push `v3` (RTO clock) + pull `v7` committed, no active hub |
+| 18:45:31 | **PR-A merged** (death-gate evidence in review) |
+| 18:45:37 | V1 race detected in 6 s (`ignored … passive-sync currently active`) — now a routine step |
+| 18:45:48→59 | recovery delete → selfHeal re-run → **sage `True/True` on spoke; merge→claim 28 s total** |
+| 18:46:54 | §3.3 token + cluster-secret re-mint (fourth consecutive reproduction) |
+| 18:47:56 | **push route serves `v3` — delivery RTO 2 min 45 s**, beating manual path 3's 2:53 |
+| 18:48:30 / 18:48:38 | promotion PR-B merged (first backup set `Completed` 18:48:42) / demote PR merged, hub still down |
+| 18:51:30→41 | returned hub: **`BackupCollision` first, prune 10 s later** — V3's other order, benign both ways across paths 2+4 |
+| 18:52:11 / 18:52:41 | sage `Unknown` on hub / pull `v7` serving (one slow ~7.5 min poll cycle — jitter, not outage) |
+| 18:53:00 | G.3 stale-claim delete — posture symmetric: spoke ACTIVE, hub PASSIVE |
+
+- **The matrix's slowest cell beat its manual sibling**: PR merge→claim
+  took 28 s (V1 recovery included), less than path 3's 38 s operator
+  typing latency — so the audit trail was free. In a real disaster the
+  decision dominates both, and the PR *is* the decision record.
+- Probe verdict for the whole day — §3.4 plus three exercises, four hub
+  deaths: **zero non-200 responses on either app** (710+ samples each).
+
 ## 4. The four paths
 
-The repo carries the full 2×2 of delivery model × DR operation, so the
-choice can be made on evidence rather than doctrine:
+The repo carries the full 2×2 of delivery model × DR operation — **all
+four cells now verified live** (§3, §3.5, §3.6, §3.7) — so the choice
+can be made on evidence rather than doctrine:
 
 | Path | Delivery | Operation | Runbook | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Pull | Manual | [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | **VERIFIED** both directions (§3, §3.4): ≈10 s re-home, zero downtime, deploys land mid-outage |
 | 2 | Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | **VERIFIED** 2026-08-13 (§3.5): two-PR choreography (V1 falsified the one-PR flip live, twice, then fixed); merge→claim ≈20 s of machinery; demote-at-boot race benign (V3); zero downtime |
 | 3 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | **VERIFIED** 2026-08-13 (§3.6): **push delivery RTO 2:53** vs pull's poll-only ~2:33 in the same outage; app served stale-but-up throughout; MSA chain resurrection observed end-to-end |
-| 4 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Composition of 2+3 — run after both parents' exercises |
+| 4 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | **VERIFIED** 2026-08-13 (§3.7): composed cleanly; **push RTO 2:45 — faster than manual path 3** (28 s merge→claim absorbed the PR overhead); V3 collision-first order observed |
 
 How the halves differ, in one line each:
 

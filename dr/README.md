@@ -154,7 +154,9 @@ Closed 2026-08-13 by the path-2 disaster exercise (README §3.5):
   while it was down); sage read `Unknown` at 18:13:08Z; hub's own Argo
   natural-poll sync pruned the stale BackupSchedule at 18:13:29Z before
   it ever fired a backup or a collision, and the passive restore was
-  `Enabled` by 18:13:39Z — manual G.2+G.4 fully automated.
+  `Enabled` by 18:13:39Z — manual G.2+G.4 fully automated. **Path 4
+  observed the OTHER order** (collision 18:51:30Z → prune 18:51:41Z):
+  benign both ways, as designed — the guard freezes, the prune cleans.
 - **V4 — Measured RTO delta:** merge→Argo sync ≈5 s with the refresh
   annotation (18:02:09→18:02:14Z); clean-path machinery merge→claim is
   ≈20 s (restore create→`Finished`→`Joined/Available` observed at 11 s).

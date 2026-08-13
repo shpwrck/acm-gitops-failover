@@ -1,6 +1,13 @@
 # Path 4 — DR exercise runbook: GitOps operation, push delivery
 
-**Status: UNVERIFIED — authored 2026-08-13.** This path is a COMPOSITION:
+**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:43–18:53Z** (README §3.7,
+run after both parents' exercises the same day). **Measured push
+delivery RTO: 2 min 45 s** — the composed path BEAT manual path 3's
+2:53 because the PR flow's decision-to-claim (28 s, V1 recovery
+included) undercut the manual path's operator latency; the audit trail
+cost nothing. V3's boot race was observed in the collision-first order
+(collision 18:51:30Z → prune 18:51:41Z), completing both orders across
+paths 2 and 4. This path is a COMPOSITION:
 run the [path-2 runbook](../dr-failover-gitops/README.md) (git-driven
 role flip) with the [path-3 runbook](../dr-failover-push-manual/README.md)
 delivery checks layered in. Only the interplay is documented here —
