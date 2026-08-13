@@ -100,27 +100,43 @@ oc --context $PASSIVE get application dr-role -n openshift-gitops -o jsonpath='{
 executor; a broken dr-role app discovered mid-outage is a failed exercise.
 **Success:** `Synced Healthy`.
 
-## Phase D' — Failover as a pull request
+## Phase D' — Failover as a pull request (PR-A: activation ONLY)
 
-### D'.1 Author the role-flip PR
+**FINDING (attempt 1, 2026-08-13): the one-PR flip straight to
+`../roles/active` is FALSIFIED.** The role's BackupSchedule lands in the
+same sync as the activation Restore; the operator ignores the Restore
+while any schedule is active ("This resource is ignored because
+BackupSchedule resource schedule-acm is currently active"), and the
+premature schedule then overwrites the bucket's `latest` with the
+survivor's passive (empty-fleet) state — after which even a re-run
+activation "succeeds" restoring nothing. Recovery cost a full revert PR
+and a bucket heal. Failover is therefore TWO PRs: D' (activation) and
+F' (promotion).
+
+### D'.1 Author the activation PR
 
 ```bash
 git checkout -b failover-$(date -u +%Y%m%d%H%M)
-# 1. dr/$PASSIVE/kustomization.yaml: resources -> ../roles/active
-# 2. cp dr/templates/restore-activate.template.yaml \
+# 1. cp dr/templates/restore-activate.template.yaml \
 #      dr/$PASSIVE/restore-activate-$(date -u +%Y%m%d%H%M).yaml
-#    …replace <UTCSTAMP> in metadata.name, add the file to resources
+#    …replace <UTCSTAMP> in metadata.name
+# 2. dr/$PASSIVE/kustomization.yaml: resources -> ONLY the new
+#    restore-activate-*.yaml (remove ../roles/passive; do NOT add
+#    ../roles/active — that is F''s promotion PR, after the claim lands)
 git add dr/ && git commit -m "FAILOVER: activate $PASSIVE ($ACTIVE dead $(date -u +%FT%TZ))" && git push -u origin HEAD
 # open the PR
 ```
 
-**Why:** The change is the entire failover, reviewable as a diff: role
-flip + one uniquely-named activation one-shot (the G.5 lesson baked into
-the filename). Nothing else. The dead hub's overlay is NOT touched yet —
-demotion is a separate, later decision, exactly as in the manual path.
-**Success:** PR shows a two-file diff.
-**Failure:** Anything else in the diff → wrong branch base or stray edits;
-a failover PR must be minimal enough to review in seconds.
+**Why:** The change is the entire failover *decision*, reviewable as a
+diff: drop the passive role, add one uniquely-named activation one-shot
+(the G.5 lesson baked into the filename). Nothing else — no
+BackupSchedule until the fleet is claimed. The dead hub's overlay is NOT
+touched yet — demotion is a separate, later decision, exactly as in the
+manual path.
+**Success:** PR shows a two-file diff whose kustomization lists exactly
+one resource.
+**Failure:** `../roles/active` in the diff → you are re-running attempt
+1's falsified choreography; fix before merge.
 
 ### D'.2 Review = the split-brain gate; merge = the decision
 
@@ -155,12 +171,31 @@ reaches `Finished`, then `$MANAGED` lands `Joined/Available` on
 failed; delete the passive Restore by hand, let selfHeal re-apply the
 activation, and file the two-PR choreography as the fix. Record it.
 
-## Phase E/F — as path 1, minus F.1
+## Phase E — as path 1
 
-Path-1 E (verify + §3.3 MSA hygiene) unchanged. F.1 is now AUTOMATIC —
-the BackupSchedule arrived with the role flip; verify it `Enabled` and
-its first set `Completed` (fires immediately — verified path 1). F.2
-unchanged.
+Path-1 E (verify + §3.3 MSA hygiene) unchanged.
+
+## Phase F' — Promotion PR (PR-B): the git-driven F.1
+
+```bash
+git checkout -b promote-$(date -u +%Y%m%d%H%M)
+# dr/$PASSIVE/kustomization.yaml: resources ->
+#   - ../roles/active
+#   - restore-activate-<stamp>.yaml     (keep; demote PR removes it)
+git add dr/ && git commit -m "PROMOTE: $PASSIVE to full active (claim verified)" && git push -u origin HEAD
+# PR + merge — review gate: $MANAGED Joined/Available on $PASSIVE (paste it)
+```
+
+**Why:** Delivers the BackupSchedule only AFTER the claim landed — the
+same ordering the manual path enforces with F.1, expressed in git. The
+review gate is posture evidence, not death evidence.
+**Success:** After merge+sync: schedule `Enabled`, first full set fires
+immediately and reaches `Completed` (verified path 1); no
+`BackupCollision` (the old hub is dead or already demoted).
+**Failure:** Restore refused/ignored messages at THIS point → you merged
+F' before D''s restore `Finished`; the operator's one-at-a-time rule
+also applies to schedule-vs-restore — wait, then re-sync. F.2 unchanged
+from path 1.
 
 ## Phase G' — Demote as the mirror PR
 

@@ -16,24 +16,45 @@ hub's death by construction, which is the property that makes git-driven
 failover possible at all: after a disaster, the surviving hub is both the
 decision's subject and its executor.
 
-**Failover = a pull request:**
+**Failover = TWO pull requests** (activation, then promotion — the
+one-PR version is FALSIFIED, see below):
 
-1. Branch. In `dr/<survivor>/kustomization.yaml`, point `resources` at
-   `../roles/active`. Copy
+1. **PR-A (activation).** Branch. In `dr/<survivor>/kustomization.yaml`,
+   set `resources` to ONLY the activation one-shot: copy
    `dr/templates/restore-activate.template.yaml` to
    `dr/<survivor>/restore-activate-<UTCSTAMP>.yaml` (unique name — see the
-   template header for why) and add it to the overlay's resources.
-2. Open the PR. **The PR review IS the split-brain guard**: the reviewer
+   template header for why) and make it the sole resources entry —
+   dropping `../roles/passive`, NOT adding `../roles/active`.
+2. Open PR-A. **The PR review IS the split-brain guard**: the reviewer
    (or a CI check) must verify the old active hub's API is actually dead —
    the same B.2 gate as the manual path, moved into the merge decision.
-3. Merge. The survivor's local Argo syncs (≤3 min poll, or annotate
+3. Merge PR-A. The survivor's local Argo syncs (≤3 min poll, or annotate
    `dr-role` with `argocd.argoproj.io/refresh=normal` to cut the wait),
    prunes the passive Restore first (`PruneFirst=true`), applies the
    activation one-shot, and the machinery from the verified manual path
    takes over — restore `Finished`, MSA auto-import, re-home.
-4. Post-activation hygiene (README §3.3 — delete the restored
+4. **PR-B (promotion), only after the claim is verified** (managed
+   clusters `Joined/Available` on the survivor): add `../roles/active`
+   back above the activation file in the overlay. Its merge delivers the
+   BackupSchedule — the git-driven equivalent of manual F.1, and like it,
+   deliberately AFTER activation.
+5. Post-activation hygiene (README §3.3 — delete the restored
    `auto-import-account` secrets once clusters are imported) stays a
    gated imperative step; see "Imperative residue" below.
+
+**Why two PRs (falsified live, 2026-08-13 path-2 attempt 1):** a single
+PR that flips straight to `../roles/active` delivers the BackupSchedule
+and the activation Restore in the SAME sync, and two verified failure
+modes follow. (1) The backup operator **ignores a Restore while any
+BackupSchedule is active** ("This resource is ignored because
+BackupSchedule resource schedule-acm is currently active") — the
+activation is refused, and because a Restore is one-shot, re-applying
+the identical spec later is a silent no-op. (2) Worse, the premature
+schedule immediately fires a full backup set from the not-yet-active
+survivor, writing its **passive (empty-fleet) state over the bucket's
+`latest`** — after which even a correctly re-run activation restore
+"succeeds" while restoring nothing. Both bit in one run; the split is
+load-bearing, not style.
 
 **Failback/demote = the mirror PR** (can be merged while the dead hub is
 still down): flip the dead hub's overlay to `../roles/passive` and delete
