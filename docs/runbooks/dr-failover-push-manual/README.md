@@ -5,12 +5,18 @@ Delta against the verified
 as written there. The DR *operation* is identical — what changes is the
 delivery model under test and therefore what the exercise measures: the
 Manual Pull Path proves workload delivery is IMMUNE to hub loss; this path measures exactly
-how delivery DIES with the hub and how it resurrects. Both truths belong
-in the customer conversation. Under live dr/ wiring the G phase gains
+how delivery DIES with the hub and how it resurrects. Both truths matter
+when choosing a delivery model. Under live dr/ wiring the G phase gains
 the operator-at-return break-glass (suspend the returned hub's dr-role
 before touching its role objects), then git re-align + re-enable per
 D.0's afterwards-contract. The measured timeline is the
 [exercise record](../../exercises/manual-push.md).
+
+Conventions as the Manual Pull Path, plus the push app's URL:
+
+```bash
+export PUSH_APP_URL=https://hello-failover-push-hello-failover-push.apps.spoke.example.com   # <apps domain of $MANAGED>
+```
 
 ## Phase P — One-time prerequisites
 
@@ -27,14 +33,14 @@ ACM-minted cluster secret. Coexists with the pull app by design (separate
 namespace `hello-failover-push`) so one outage exercises both models
 side by side.
 
-**Success:** `hello-failover-push-spoke` appeared ON THE HUB
+**Success:** `hello-failover-push-$MANAGED` appeared ON THE HUB
 (contrast: the pull model's stub carries skip-reconcile and the workload
-Application lives on spoke) and reached `Synced | Healthy` in under two
-minutes with NO extra RBAC;
+Application lives on `$MANAGED`) and reached `Synced | Healthy` in under
+two minutes with NO extra RBAC;
 the route serves the app:
 
 ```bash
-curl -s https://hello-failover-push-hello-failover-push.apps.spoke.example.com | grep -i revision
+curl -s $PUSH_APP_URL | grep -i revision
 # expect: the current REVISION
 ```
 
@@ -45,13 +51,13 @@ differs from what P.2 documents; rediscover before granting anything.
 
 What verification found (ACM 2.17):
 
-- The minted cluster secret is `spoke-application-manager-cluster-secret`
+- The minted cluster secret is `$MANAGED-application-manager-cluster-secret`
   — the token belongs to the **`application-manager`
   ManagedServiceAccount** (same MSA family as auto-import; one more
   dependent of the [MSA token chain](../../exercises/msa-token-hygiene.md)).
-- The Application's destination is NOT spoke's API URL but the
+- The Application's destination is NOT `$MANAGED`'s API URL but the
   **cluster-proxy addon**
-  (`https://cluster-proxy-addon-user.multicluster-engine.svc.cluster.local:9092/spoke`)
+  (`https://cluster-proxy-addon-user.multicluster-engine.svc.cluster.local:9092/$MANAGED`)
   — push traffic tunnels through ACM's proxy, adding the proxy chain
   (hub-side service + spoke-side agent tunnel) to push delivery's
   dependency list. Note for the exercise: delivery resurrection requires
@@ -65,8 +71,8 @@ What verification found (ACM 2.17):
   the push model's real price tag: a compromised hub Argo is admin
   everywhere it pushes. The pull model's namespace-scoped
   `managedNamespaceMetadata` RBAC ([build.md](../../build.md) gotcha #4) is the
-  least-privilege contrast — put both sentences in the customer
-  comparison.
+  least-privilege contrast to weigh against push's out-of-the-box
+  convenience.
 
 Re-verify in any new environment:
 
@@ -82,13 +88,13 @@ Add a second availability probe for the push app's route (same loop, own
 log file):
 
 ```bash
-while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 https://hello-failover-push-hello-failover-push.apps.spoke.example.com)"; sleep 10; done | tee -a ~/probe-push-$(date -u +%Y%m%d).log
+while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $PUSH_APP_URL)"; sleep 10; done | tee -a ~/probe-push-$(date -u +%Y%m%d).log
 ```
 
 **Why:** Two apps, two logs, one outage: the pull log should stay
 unbroken (already proven twice); the push log tells this path's actual
 story — the app KEEPS SERVING through hub death (Argo dying uninstalls
-nothing), which is itself a claim customers doubt.
+nothing), which is itself a claim worth proving.
 
 ## Phase B — as the Manual Pull Path
 
@@ -97,7 +103,7 @@ nothing), which is itself a claim customers doubt.
 ```bash
 # bump REVISION in apps/hello-failover-push/configmap.yaml, commit, push
 date -u +%FT%TZ   # record: push-model deploy attempted
-curl -s https://hello-failover-push-hello-failover-push.apps.spoke.example.com | grep -i revision
+curl -s $PUSH_APP_URL | grep -i revision
 ```
 
 **Why:** The Manual Pull Path's Phase C celebrates the deploy landing
@@ -119,19 +125,24 @@ investigate before drawing any conclusions.
 
 ## Phase E' — Manual Pull Path E, plus delivery resurrection
 
-After Manual Pull Path E.1–E.3 (including [MSA hygiene](../../exercises/msa-token-hygiene.md) — do it FIRST; the
-GitOps cluster secret depends on the same MSA chain):
+After Manual Pull Path E.1–E.3 (including [MSA hygiene](../../exercises/msa-token-hygiene.md) — first, as triage
+discipline; see Why below for what actually gates delivery):
 
 ```bash
 oc --context $PASSIVE get applications.argoproj.io -n openshift-gitops
 oc --context $PASSIVE get secret -n openshift-gitops -l apps.open-cluster-management.io/acm-cluster=true
-watch -n10 'curl -s https://hello-failover-push-hello-failover-push.apps.spoke.example.com | grep -i revision'
+watch -n10 "curl -s $PUSH_APP_URL | grep -i revision"
 ```
 
-**Why:** The restored ApplicationSet must regenerate
-`hello-failover-push-$MANAGED` on the new hub, GitOpsCluster must re-mint
-the cluster secret from the (freshly repaired) MSA token, and the first
-successful push closes the delivery outage. The moment the route flips to
+**Why:** The push Application may ALREADY exist on the new hub — the
+passive sync continuously restores the ApplicationSet and its generated
+Application. What gates delivery is the credential chain: the
+`application-manager` MSA token (a DIFFERENT MSA from auto-import,
+re-minted by the addon on its own), the GitOpsCluster cluster secret
+minted from it, then the first successful push. E.3's hygiene targets
+the auto-import account and protects the NEXT failover — it does not
+gate this resurrection (verified twice, with timestamps).
+The moment the route flips to
 the mid-outage revision, subtract Phase C''s timestamp: **that is the
 push model's delivery RTO** — the pull model's equivalent was ~0.
 
@@ -146,5 +157,6 @@ finding would itself justify the exercise.
 ## Phase F/G/H — as the Manual Pull Path
 
 H additionally records: the measured delivery RTO, the P.2 RBAC discovery
-(fold into 63/64 comments), and the side-by-side probe-log comparison —
-the single most persuasive artifact the four-path repo produces.
+(fold into `manifests/63-appset-push.yaml`'s comments), and the
+side-by-side probe-log comparison —
+the clearest evidence the four-path comparison produces.

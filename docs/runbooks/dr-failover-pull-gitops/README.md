@@ -13,11 +13,16 @@ names (`dr/hub` = hub-x, `dr/spoke` = hub-y), so set both before
 authoring any PR (values shown match the Manual Pull Path's exports):
 
 ```bash
-export ACTIVE_DIR=dr/spoke   # $ACTIVE's overlay dir  (dr/hub if $ACTIVE=hub-x, dr/spoke if hub-y)
-export PASSIVE_DIR=dr/hub    # $PASSIVE's overlay dir (dr/hub if $PASSIVE=hub-x, dr/spoke if hub-y)
+# Derive per direction — do NOT copy example values; these flip when the
+# roles flip:
+export ACTIVE_DIR=…    # $ACTIVE's overlay dir:  dr/hub if $ACTIVE=hub-x, dr/spoke if $ACTIVE=hub-y
+export PASSIVE_DIR=…   # $PASSIVE's overlay dir: dr/hub if $PASSIVE=hub-x, dr/spoke if $PASSIVE=hub-y
 ```
 
 ## Phase P — One-time prerequisites
+
+(P runs once per HUB, not per role — `hub-x`/`hub-y` below are cluster
+identities, not the `$ACTIVE`/`$PASSIVE` of any particular exercise.)
 
 ### P.0 RBAC first — the grant that makes git-driven DR possible
 
@@ -82,10 +87,10 @@ drift BEFORE trusting git-driven ops.
 ### P.2 Confirm the backup exclusion works
 
 ```bash
-NEWEST=$(oc --context hub-x get backup -n open-cluster-management-backup \
+NEWEST=$(oc --context $ACTIVE get backup -n open-cluster-management-backup \
   --sort-by=.metadata.creationTimestamp -o name | grep acm-resources-schedule | tail -1 | cut -d/ -f2)
-oc --context hub-x -n open-cluster-management-backup exec deploy/velero -- \
-  /velero backup describe "$NEWEST" --details | grep -A6 'v1alpha1/Application'
+oc --context $ACTIVE -n open-cluster-management-backup exec deploy/velero -- \
+  /velero backup describe "$NEWEST" --details | grep -A12 'v1alpha1/Application'
 ```
 
 **Why:** If `dr-role` ever lands in a backup, a future restore delivers
@@ -93,8 +98,8 @@ split-brain (the other hub reconciling the wrong role dir). Exec'ing the
 velero pod avoids needing a local CLI.
 
 **Success:** the instance list shows the delivery resources
-(`openshift-gitops/hello-failover-spoke`,
-ApplicationSet `hello-failover`, AppProject, ArgoCD CR) and NO `dr-role`
+(the `hello-failover-$MANAGED` and `hello-failover-push-$MANAGED`
+Applications, both ApplicationSets, the ArgoCD CR) and NO `dr-role`
 — which existed in that namespace at backup time. Precision exclusion,
 proven instance-level.
 
@@ -108,7 +113,7 @@ Run the Manual Pull Path's Phases 0, A, B, C unchanged (MSA check, probes, out-o
 works hubless; that claim is already verified). Add to pre-flight:
 
 ```bash
-oc --context $PASSIVE get application dr-role -n openshift-gitops -o jsonpath='{.status.sync.status}{" "}{.status.health.status}{"\n"}'
+oc --context $PASSIVE get applications.argoproj.io dr-role -n openshift-gitops -o jsonpath='{.status.sync.status}{" "}{.status.health.status}{"\n"}'
 ```
 
 **Why:** The survivor's reconciler is about to become the failover's
@@ -132,13 +137,15 @@ F' (promotion).
 ### D'.1 Author the activation PR
 
 ```bash
-git checkout -b failover-$(date -u +%Y%m%d%H%M)
-# 1. cp dr/templates/restore-activate.template.yaml \
-#      $PASSIVE_DIR/restore-activate-$(date -u +%Y%m%d%H%M).yaml
-#    …replace <UTCSTAMP> in metadata.name
-# 2. $PASSIVE_DIR/kustomization.yaml: resources -> ONLY the new
-#    restore-activate-*.yaml (remove ../roles/passive; do NOT add
-#    ../roles/active — that is F''s promotion PR, after the claim lands)
+STAMP=$(date -u +%Y%m%d%H%M)
+git checkout -b failover-$STAMP
+cp dr/templates/restore-activate.template.yaml "$PASSIVE_DIR/restore-activate-$STAMP.yaml"
+sed -i "s/<UTCSTAMP>/$STAMP/" "$PASSIVE_DIR/restore-activate-$STAMP.yaml"
+# edit $PASSIVE_DIR/kustomization.yaml so resources lists ONLY the new file:
+#   resources:
+#     - restore-activate-$STAMP.yaml
+# (remove ../roles/passive; do NOT add ../roles/active — that is F''s
+#  promotion PR, after the claim lands)
 git add dr/ && git commit -m "FAILOVER: activate $PASSIVE ($ACTIVE dead $(date -u +%FT%TZ))" && git push -u origin HEAD
 # open the PR
 ```
@@ -179,7 +186,7 @@ here is the split-brain the Manual Pull Path warns about, with better bookkeepin
 ### D'.3 Let the survivor execute, and cut the poll wait
 
 ```bash
-oc --context $PASSIVE annotate application dr-role -n openshift-gitops argocd.argoproj.io/refresh=normal --overwrite
+oc --context $PASSIVE annotate applications.argoproj.io dr-role -n openshift-gitops argocd.argoproj.io/refresh=normal --overwrite
 oc --context $PASSIVE get restore -n open-cluster-management-backup -w
 ```
 
@@ -275,6 +282,11 @@ oc --context $ACTIVE get restore,backupschedule -n open-cluster-management-backu
 **Failure:** Sync stuck on the pruned schedule → record for V3 and delete
 it by hand; the underlying BackupCollision guard has already frozen it
 regardless (verified in the Manual Pull Path, both directions).
+If the demoted hub's LAST activation was MANUAL, its fixed-name
+`restore-acm-activate` is NOT Argo-tracked and this prune will never
+remove it — delete it by hand now (verified live; same mechanism as the
+attempt-1 lesson in D'.3), or the next manual activation on this hub
+silently no-ops.
 
 ### G'.2 The imperative residue — exactly as Manual Pull Path G.1 + G.3
 
