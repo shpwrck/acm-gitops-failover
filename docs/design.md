@@ -3,7 +3,7 @@
 Why the architecture looks the way it does: two independent layers, so
 that losing the management hub costs neither workloads nor — with the
 right delivery choice — deployments. The verified build steps are in
-[build.md](build.md); the live proof is in [exercises.md](exercises.md).
+[build.md](build.md); the live proof is in [exercises/](exercises/).
 
 ## Two layers
 
@@ -56,8 +56,8 @@ placements, the GitOps wiring itself).
 ## The four paths
 
 The repo carries the full 2×2 of delivery model × DR operation — all
-four cells verified live ([exercise records](exercises.md) §3, §3.5,
-§3.6, §3.7; the summary table is in the [README](../README.md)). How
+four cells verified live ([exercise records](exercises/); the summary
+table is in the [README](../README.md)). How
 the halves differ, in one line each:
 
 - **Pull vs push** is *what a hub outage costs delivery*: nothing (spoke

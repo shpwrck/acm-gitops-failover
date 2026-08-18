@@ -2,7 +2,7 @@
 
 **Status: FLIP VERIFIED LIVE 2026-08-13** (Automated Pull Path disaster exercise,
 [runbook](../docs/runbooks/dr-failover-gitops/README.md), two attempts —
-[exercise records](../docs/exercises.md) §3.5). V0/V2 closed with wiring evidence earlier that day; the
+[exercise record](../docs/exercises/automated-pull.md)). V0/V2 closed with wiring evidence earlier that day; the
 exercise closed V1 (FALSIFIED as designed — hence the two-PR
 choreography below), V3 (benign, prune won), and V4 (measured). V5 stays
 open until hub-y's next demote.
@@ -41,7 +41,7 @@ one-PR version is FALSIFIED, see below):
    back above the activation file in the overlay. Its merge delivers the
    BackupSchedule — the git-driven equivalent of manual F.1, and like it,
    deliberately AFTER activation.
-5. Post-activation hygiene (exercise records §3.3 — delete the restored
+5. Post-activation hygiene (the [MSA token finding](../docs/exercises/msa-token-hygiene.md) — delete the restored
    `auto-import-account` secrets once clusters are imported) stays a
    gated imperative step; see "Imperative residue" below.
 
@@ -88,7 +88,7 @@ stay imperative, with their safety gates:
   runtime state, not git state, and it carries the exercise's one
   dangerous gate — `Available: Unknown` first, *never* elapsed time
   ("if the status is not Unknown, your workloads are uninstalled").
-- **Post-activation MSA secret cleanup** (exercise records §3.3): conditional on
+- **Post-activation MSA secret cleanup** (the [MSA token finding](../docs/exercises/msa-token-hygiene.md)): conditional on
   observed `TokenReported: False`; scriptable, not declarable.
 
 ## Coexistence with manual operation (VERIFIED constraint)
@@ -137,7 +137,7 @@ Closed 2026-08-13 (wiring, no disaster required):
   INCLUDED (push delivery fails over), `dr-role` still absent — the
   opposite-treatments design, proven both ways.
 
-Closed 2026-08-13 by the Automated Pull Path disaster exercise (exercise records §3.5):
+Closed 2026-08-13 by the Automated Pull Path disaster exercise ([exercise record](../docs/exercises/automated-pull.md)):
 
 - **V1 — PruneFirst ordering: FALSIFIED, twice, two different ways.**
   Attempt 1 (one-PR flip to `../roles/active`): the role's BackupSchedule

@@ -1,7 +1,7 @@
 # Automated Push Path — DR exercise runbook: GitOps operation, push delivery
 
 **Status: EXERCISE VERIFIED LIVE 2026-08-13 18:43–18:53Z**
-([exercise records](../../exercises.md) §3.7, run after both parents'
+([exercise record](../../exercises/automated-push.md), run after both parents'
 exercises the same day). **Measured push
 delivery RTO: 2 min 45 s** — the composed path BEAT the Manual Push
 Path's 2:53 because the PR flow's decision-to-claim (28 s, V1 recovery
@@ -32,7 +32,7 @@ attribute.
 | B | Manual Pull Path (kill + death gate) | — |
 | C | Manual Push Path C' (push deploy does NOT land; timestamp it) | pull deploy DOES land (Manual Pull Path C) — same window |
 | D | Automated Pull Path D' (failover PR; review = death gate; merge = decision) | — |
-| E | Manual Pull Path E + §3.3 hygiene FIRST | Manual Push Path E' (delivery resurrection; measure delivery RTO) |
+| E | Manual Pull Path E + [MSA hygiene](../../exercises/msa-token-hygiene.md) FIRST | Manual Push Path E' (delivery resurrection; measure delivery RTO) |
 | F | Automated Pull Path (F.1 automatic via role flip) | Manual Push Path's appset/secret checks |
 | G | Automated Pull Path G' (demote PR + imperative residue) | — |
 | H | evidence + V-verdicts | the four-path comparison row (below) |
@@ -51,8 +51,9 @@ attribute.
   NOT (that's how split-brain is prevented). The exclusion label is doing
   precision work here — the Automated Pull Path's P.2 check is mandatory
   pre-flight in this path, every time.
-- **One §3.3 chain, three dependents.** After activation, the repaired
-  MSA token feeds auto-import (the Manual Pull Path's claim machinery),
+- **One [MSA token](../../exercises/msa-token-hygiene.md) chain, three
+  dependents.** After activation, the repaired
+  token feeds auto-import (the Manual Pull Path's claim machinery),
   the GitOpsCluster secret (push delivery), and the next backup. E's
   hygiene step is therefore ordered FIRST in this path — before judging
   any delivery failure as a defect of this path, confirm

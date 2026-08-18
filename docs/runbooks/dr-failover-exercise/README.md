@@ -5,9 +5,9 @@ pre-flight, disaster, activation, verification, new-primary duties, and
 failback-as-role-swap. Every step gives the command, why it exists, what
 success looks like, and the failure modes with recovery. The
 verified narrative with timings is the
-[exercise records](../../exercises.md) §3.
+[exercise record](../../exercises/manual-pull.md).
 
-**Validated live 2026-08-13** (hub-y→hub-x reverse exercise, exercise records §3.4):
+**Validated live 2026-08-13** (hub-y→hub-x reverse exercise, [exercise record](../../exercises/manual-pull.md)):
 every step below ran as written; measured decision-to-re-home ≈10 s, zero
 failed requests across the full window.
 
@@ -73,7 +73,7 @@ missing, expired, or frozen, failover ends in `Pending Import` — the
 single most likely way this whole architecture fails. `TokenReported` must
 be checked explicitly: a Velero-restored-but-frozen secret passes the
 weaker "does a token exist" checks while rotation is already dead
-(exercise records §3.3, found live 2026-08-13).
+(the [MSA token finding](../../exercises/msa-token-hygiene.md), found live 2026-08-13).
 **Success:** Every `auto-import-account` row: `TOKEN-REPORTED: True`,
 expiry comfortably in the future (rotation validity is 144h; expect
 several days out).
@@ -361,7 +361,7 @@ claim.
 **Success:** Pointer log shows the new hub URL; availability log shows
 unbroken 200s.
 
-### E.3 Post-activation hygiene — the restored MSA secret (exercise records §3.3)
+### E.3 Post-activation hygiene — the restored MSA secret ([the finding](../../exercises/msa-token-hygiene.md))
 
 ```bash
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
@@ -522,5 +522,5 @@ this direction); fine, continue.
 
 - Summarize both probe logs (window, request count, failure count, flip
   timestamp) into the exercise record.
-- Update the [exercise records](../../exercises.md) with the new timings; commit everything —
+- Update the [exercise records](../../exercises/) with the new timings; commit everything —
   the repo IS the DR plan; an undocumented exercise never happened.

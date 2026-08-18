@@ -33,7 +33,7 @@ other secret store involved). The former hub is context `hub-x`
   (`console-openshift-console.apps.hub-y.k8socp.com`) → "All Clusters"
   perspective.
 - Deliverable this state serves: the verified failover guide in this
-  repo (`README.md` map, `docs/build.md`, `docs/exercises.md`) and
+  repo (`README.md` map, `docs/build.md`, `docs/exercises/`) and
   `research-notes.md` (doc citations).
 
 ### Template map
@@ -107,7 +107,7 @@ topology is wanted back.
 Edit manifests under `~/acm-failover-guide/manifests/`, apply with
 `oc --context hub-y apply -f <file>`, verify with "Verify and recover", and
 record every verified step with real outputs in
-the guide docs (`docs/build.md`, `docs/exercises.md`) — the guide is the product; this runbook is
+the guide docs (`docs/build.md`, `docs/exercises/`) — the guide is the product; this runbook is
 the operator map. Next planned change (Phase 2, pending user decision):
 choose the failover pattern (git-as-source-of-truth + pull-model Argo vs
 cluster-backup-operator + OADP to S3 vs documented manual re-import),

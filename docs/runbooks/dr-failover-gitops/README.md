@@ -3,7 +3,7 @@
 **Status: EXERCISE VERIFIED LIVE 2026-08-13** (attempt 2, 18:00–18:15Z;
 attempt 1, 17:32–17:57Z, falsified the original one-PR flip and was
 reverted — findings in the Phase D' header and dr/README.md's ledger;
-full timeline in the [exercise records](../../exercises.md) §3.5).
+full timeline in the [exercise record](../../exercises/automated-pull.md)).
 V1/V3/V4 closed; V5 open until hub-y's next
 demote. Same command / rationale / success / failure format as the
 verified [Manual Pull Path runbook](../dr-failover-exercise/README.md); this
@@ -194,7 +194,7 @@ the demote PR's prune will never clean it — attempt-1 lesson).
 
 ## Phase E — as the Manual Pull Path
 
-Manual Pull Path E (verify + §3.3 MSA hygiene) unchanged.
+Manual Pull Path E (verify + [MSA hygiene](../../exercises/msa-token-hygiene.md)) unchanged.
 
 ## Phase F' — Promotion PR (PR-B): the git-driven F.1
 
@@ -252,5 +252,5 @@ Wait for `$MANAGED` to read `Available: Unknown` on the returned hub
 dangerous moment), then delete the stale ManagedCluster (G.3). No PR
 represents this: it is runtime state, and the gate is a live reading.
 
-## Phase H — evidence, V-item verdicts (V1–V5), timings into the exercise records (§3.5),
+## Phase H — evidence, V-item verdicts (V1–V5), timings into the [exercise record](../../exercises/automated-pull.md),
 role comments in `dr/*/kustomization.yaml` updated to match the new truth.

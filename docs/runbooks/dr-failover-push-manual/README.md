@@ -1,7 +1,7 @@
 # Manual Push Path — DR exercise runbook: manual operation, push delivery
 
 **Status: EXERCISE VERIFIED LIVE 2026-08-13 18:30–18:40Z**
-([exercise records](../../exercises.md) §3.6). **Measured push-model
+([exercise record](../../exercises/manual-push.md)). **Measured push-model
 delivery RTO: 2 min 53 s** (deploy
 committed 18:32:15Z with no active hub → route serving it 18:35:08Z),
 against the pull model's ~2.5 min ordinary poll latency in the same
@@ -48,7 +48,7 @@ What verification found (2026-08-13, ACM 2.17):
 - The minted cluster secret is `spoke-application-manager-cluster-secret`
   — the token belongs to the **`application-manager`
   ManagedServiceAccount** (same MSA family as auto-import; one more
-  dependent of the §3.3 token chain).
+  dependent of the [MSA token chain](../../exercises/msa-token-hygiene.md)).
 - The Application's destination is NOT spoke's API URL but the
   **cluster-proxy addon**
   (`https://cluster-proxy-addon-user.multicluster-engine.svc.cluster.local:9092/spoke`)
@@ -113,7 +113,7 @@ investigate before drawing any conclusions.
 
 ## Phase E' — Manual Pull Path E, plus delivery resurrection
 
-After Manual Pull Path E.1–E.3 (including §3.3 MSA hygiene — do it FIRST; the
+After Manual Pull Path E.1–E.3 (including [MSA hygiene](../../exercises/msa-token-hygiene.md) — do it FIRST; the
 GitOps cluster secret depends on the same MSA chain):
 
 ```bash
