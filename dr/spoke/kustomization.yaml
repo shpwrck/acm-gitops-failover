@@ -1,9 +1,10 @@
 # DR role for cluster `spoke`. Reconciled by SPOKE'S OWN local Argo CD
 # (dr/bootstrap/dr-role-spoke.yaml). See ../README.md for the flip
 # choreography.
-# CURRENT ROLE: passive (Manual Pull Path exercise 2026-08-18: manual demote,
-# git re-aligned afterwards per D.0 AFTERWARDS; stale activation file removed).
+# CURRENT ROLE: activating (Automated Pull Path exercise 2026-08-18: PR-A —
+# activation one-shot ONLY; promotion to ../roles/active is PR-B after the
+# claim lands).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../roles/passive
+  - restore-activate-202608181848.yaml
