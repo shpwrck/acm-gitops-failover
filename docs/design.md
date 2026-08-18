@@ -5,9 +5,61 @@ that losing the management hub costs neither workloads nor — with the
 right delivery choice — deployments. The verified build steps are in
 [build.md](build.md); the live proof is in [exercises/](exercises/).
 
-## Two layers
+## Delivery models
 
-## Phase 2 — Failover design
+The two workload delivery models the matrix exercises:
+
+### Push model
+
+The hub's Argo CD syncs from git and pushes manifests to each managed
+cluster over an ACM-minted credential. New deploys stop when the hub
+dies and resume once the new active hub's Argo pushes again.
+
+```mermaid
+flowchart LR
+    git[("Git repository")]
+    s3[("S3 backup store")]
+    subgraph hub["Active hub"]
+        appset["ApplicationSet"] -->|"generates Application"| hubargo["Hub Argo CD"]
+    end
+    subgraph passive["Passive hub"]
+        dormant["Restored ApplicationSet + wiring (dormant)"]
+    end
+    subgraph managed["Managed cluster"]
+        workload["Workload"]
+    end
+    git -->|"sync"| hubargo
+    hubargo -->|"push (cluster-proxy tunnel, ACM-minted credential)"| workload
+    s3 <-.-|"scheduled backup"| hub
+    s3 -.->|"continuous restore"| passive
+```
+
+### Pull model
+
+The hub only distributes the Application definition; each managed
+cluster's local Argo CD syncs from git itself. Delivery does not depend
+on a live hub — running workloads and new deploys both survive hub loss.
+
+```mermaid
+flowchart LR
+    git[("Git repository")]
+    s3[("S3 backup store")]
+    subgraph hub["Active hub"]
+        appset["ApplicationSet"] --> stub["Application (pull stub)"]
+    end
+    subgraph passive["Passive hub"]
+        dormant["Restored ApplicationSet + wiring (dormant)"]
+    end
+    subgraph managed["Managed cluster"]
+        localargo["Local Argo CD"] --> workload["Workload"]
+    end
+    stub -->|"ManifestWork"| localargo
+    git -->|"sync"| localargo
+    s3 <-.-|"scheduled backup"| hub
+    s3 -.->|"continuous restore"| passive
+```
+
+## Two layers
 
 The design follows the pattern the public sources converge on — two layers:
 
@@ -47,7 +99,7 @@ The design follows the pattern the public sources converge on — two layers:
   [Argo CD Disaster Recovery strategy using RHACM and
   OADP](https://www.redhat.com/en/blog/argo-cd-disaster-recovery-strategy-using-red-hat-advanced-cluster-management-and-oadp).
 
-The Phase 1 observation is the load-bearing argument for the second layer:
+The load-bearing argument for the second layer is an observed fact:
 anything delivered by hub addons dies with the hub relationship, while
 GitOps-delivered state is cluster-local and survives. Hub backup/restore
 protects only the hub's *own* state (cluster inventory, policies,
@@ -75,7 +127,7 @@ the halves differ, in one line each:
   history is the audit log (expected cost: + merge + Argo poll; measured
   by the Automated Pull Path's V4).
 
-Why there is no fifth, fully-autonomous path: hub failover is
+Why there is no fully autonomous path: hub failover is
 deliberately a human decision. A passive-side monitor cannot distinguish
 "active hub died" from "network partition," and with MSA auto-import an
 activation actively re-points the fleet's klusterlets — automating a

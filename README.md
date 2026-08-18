@@ -35,8 +35,8 @@ pushes. All four combinations are verified:
 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | [exercise record](docs/exercises/manual-push.md) | push delivery RTO 2:53 vs pull's ~2.5 min poll-only; app stayed up throughout |
 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | [exercise record](docs/exercises/automated-push.md) | push RTO 2:45 — the PR beat the manual sibling (merge→claim 28 s); audit trail free |
 
-Why the halves differ — and why there is deliberately **no fifth,
-fully-autonomous path** — is argued in [docs/design.md](docs/design.md).
+Why the halves differ — and why there is deliberately **no fully
+autonomous path** — is argued in [docs/design.md](docs/design.md).
 
 ## Where everything lives
 
