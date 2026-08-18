@@ -2,9 +2,12 @@
 # (dr/bootstrap/dr-role-hub.yaml). Flipping the role = a PR changing which
 # ../roles/* this points at (plus a one-shot activation file during
 # failover — see ../README.md).
-# CURRENT ROLE: active (Manual Push Path exercise 2026-08-18: manual
-# failover spoke→hub; re-aligned to the manually-created posture).
+# CURRENT ROLE: passive (Automated Push Path exercise 2026-08-18: hub
+# killed+returned; spoke activated via PR-A/PR-B; this demote PR prunes
+# hub's schedule and applies the passive sync. NOTE: hub's previous
+# activation was MANUAL — no stamped one-shot to reap here; the
+# hand-applied fixed-name restore-acm-activate was deleted by hand.)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../roles/active
+  - ../roles/passive
