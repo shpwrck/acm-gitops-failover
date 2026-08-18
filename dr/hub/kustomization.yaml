@@ -2,9 +2,9 @@
 # (dr/bootstrap/dr-role-hub.yaml). Flipping the role = a PR changing which
 # ../roles/* this points at (plus a one-shot activation file during
 # failover — see ../README.md).
-# CURRENT ROLE: active (Manual Pull Path exercise 2026-08-18: manual failover,
-# git re-aligned afterwards per D.0 AFTERWARDS).
+# CURRENT ROLE: passive (Automated Pull Path exercise 2026-08-18: demote PR
+# after PR-A/PR-B failed hub over to spoke).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../roles/active
+  - ../roles/passive
