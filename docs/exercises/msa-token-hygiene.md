@@ -72,3 +72,14 @@ can pass the weaker checks while rotation is already dead:
 $ oc --context <active-hub> get managedserviceaccount -A \
     -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,TOKEN-REPORTED:.status.conditions[?(@.type=="TokenReported")].status,EXPIRES:.status.expirationTimestamp'
 ```
+
+**Re-verified 2026-08-18:** the freeze reproduced on newly-activated
+hubs throughout a four-exercise re-verification day, and the fix behaved
+identically every time (delete → controller-owned re-mint within
+seconds, expiry now+144h). One variation observed: on one
+freshly-activated hub the `TokenReported` condition was entirely ABSENT
+rather than `False` — same underlying signature (a restored secret with
+no `ownerReferences`), same fix. Check for "False **or missing**", not
+just `False`. Also sharpened: the `application-manager` MSA (the push
+credential) re-mints itself via its addon — this cleanup gates the next
+failover's auto-import, not push delivery's resurrection.

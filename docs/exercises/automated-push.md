@@ -25,3 +25,30 @@ measurement (ACTIVE=hub-x, PASSIVE=hub-y), run 18:43–18:53Z, closing the
 - Probe verdict for the whole day — the [reverse
   exercise](manual-pull.md) plus three exercises, four hub
   deaths: **zero non-200 responses on either app** (710+ samples each).
+
+## Re-verified 2026-08-18
+
+The composed exercise re-run end-to-end (hub-x active → hub-y
+activated) by an operator with no prior context — closing the matrix a
+second time, in a single day, with all four cells re-verified and the
+lab ending in the posture the day started with. Zero non-200s on both
+apps (92 samples each).
+
+- **Push delivery RTO 4:11** — beating the same-day manual sibling's
+  4:59, just as the 2026-08-13 pair did at 2:45 vs 2:53. The
+  "audit-trail-is-free" claim held within each same-day pair; absolute
+  numbers vary run to run (this one includes ~60 s of PR decision
+  latency, the ~29 s V1 recovery, and ~59 s of route content
+  propagation — the decomposition now in the runbook's interplay note).
+- Merge→claim ≈50 s including the V1 recovery (the race fired on the
+  first sync tick, exactly as documented; recovery 29 s).
+- PR-B merge → schedule `Enabled` + first full set `Completed` within
+  32 s. Demote PR → returned hub healed 9 s after refresh —
+  **prune-first this time; `BackupCollision` never fired**, though the
+  returned hub landed one boot catch-up backup set in the ~4 min before
+  the demote merged: the two-writer window the guard does not close
+  instantly (benign here; the new active's newer set won `latest`).
+- The [MSA token freeze](msa-token-hygiene.md) reproduced again — this
+  time with the `TokenReported` condition entirely ABSENT rather than
+  `False`; same signature (restored secret without `ownerReferences`),
+  same fix, re-mint in the same second.

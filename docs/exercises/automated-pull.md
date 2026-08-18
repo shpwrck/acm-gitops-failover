@@ -43,5 +43,27 @@ healed `latest` within a minute. Zero downtime throughout. The fix —
   documented 30-second runbook step (delete the ignored one-shot; never
   hand-apply).
 - Verdict details: [dr/README.md](../../dr/README.md) verification ledger
-  (V1 falsified→fixed, V3 benign, V4 measured; V5 open until hub-y's
-  next demote).
+  (V1 falsified→fixed, V3 benign, V4 measured; V5 then-open — closed by
+  the 2026-08-18 re-verification).
+
+## Re-verified 2026-08-18
+
+Re-run end-to-end (hub-x active → hub-y activated) by an operator with
+no prior context. All gates held; zero non-200s in both app probe logs.
+
+- Kill → API dead 82 s; the failover PR carried the death-gate evidence
+  (the DEAD curl) as a review comment and merged ~3 min after the kill.
+- PR-A merge → Argo sync 26 s → the V1 race fired exactly as documented
+  → recovery delete → selfHeal re-create → `Finished` → claim:
+  **merge→claim ≤72 s including the recovery**.
+- Mid-outage deploy served 3m39s after its hubless push (no nudge).
+- PR-B merge → schedule `Enabled` in 23 s → first full set `Completed`
+  33 s after merge.
+- The returned hub's schedule hit `BackupCollision` BEFORE the demote
+  PR landed (fired by the activation-restore marker ~3 min after its
+  return — not by newer scheduled backups); the demote sync then pruned
+  it 21 s after merge.
+- Composition residue confirmed live: a hand-applied fixed-name
+  activation restore from a prior MANUAL exercise survived the demote
+  prune (Argo-untracked) and needed a hand delete — now documented in
+  the runbooks.

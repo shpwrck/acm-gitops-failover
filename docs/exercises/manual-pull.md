@@ -142,3 +142,23 @@ record because a customer will ask.
 - End state: **hub-x ACTIVE, hub-y PASSIVE, spoke untouched — the original
   posture, restored by exercising the DR machinery in both directions on
   consecutive days.**
+
+## Re-verified 2026-08-18
+
+The full exercise re-run end-to-end (hub-y active → hub-x activated) by
+an operator with no prior context, following only this repo's runbooks
+plus a cluster-name mapping. All gates held; **zero non-200s across 210
+availability samples**; one clean pointer transition, no gaps.
+
+- Activation apply → `Finished` 10 s; apply → managed cluster
+  `Joined/Available` on the new hub ≤39 s; pointer flip 16 s after apply.
+- The [MSA token freeze](msa-token-hygiene.md) reproduced exactly as
+  documented; delete → controller-owned re-mint `True` ≤52 s.
+- First backup set on the new active hub fired immediately and
+  `Completed` in ~7 s.
+- Full exercise, pre-flight to symmetric posture: 36.5 min.
+- New wrinkle exercised: the self-recovering kill variant
+  (`shutdown -r +1`) returned the old hub BEFORE activation — benign
+  (the klusterlet re-homed anyway, and the returned hub's schedule froze
+  on `BackupCollision`, fired by the activation marker within ~1 min);
+  the runbook now orders the defusal first in that case.

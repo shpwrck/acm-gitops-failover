@@ -33,3 +33,28 @@ run 18:30–18:40Z, driven by the
   cluster secret → app sync → route flip; [MSA
   hygiene](msa-token-hygiene.md) stays FIRST (the
   push credential is the same MSA family).
+
+## Re-verified 2026-08-18
+
+Re-run end-to-end (hub-y active → hub-x activated) by an operator with
+no prior context. **Zero non-200s on BOTH apps (97 samples each)** —
+the push app served its old revision unbroken through the whole outage;
+only its delivery pipeline was down.
+
+- **Push delivery RTO 4:59** (mid-outage commit → route serving the new
+  revision); the pull app's contrast in the same window: 102 s,
+  ordinary poll, zero hub involvement.
+- Activation apply → `Finished` ~7 s; claim ≤16 s; pointer flip ≤8 s.
+- Chain as observed, with a sharper mechanism than the 2026-08-13
+  narrative above: the push Application ALREADY existed on the new hub
+  (passive sync continuously restores the ApplicationSet and its
+  generated Application) — what gated delivery was the credential
+  chain alone: `application-manager` MSA re-mint → cluster secret the
+  same second → first push sync ~10 s later → route flip. That MSA
+  re-mints itself via its addon; E.3's hygiene (auto-import) protects
+  the NEXT failover rather than gating this resurrection. The runbook's
+  E' was corrected accordingly.
+- **V5 closed here**: the demote re-align's `git rm` of the stamped
+  one-shot led Argo to prune the corresponding `Finished` restore
+  object 17 s after automation re-enable — the git-driven demote
+  cleanly reaps the automated path's activation restore.

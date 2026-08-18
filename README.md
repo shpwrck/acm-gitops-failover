@@ -26,14 +26,15 @@ forth without any additional cleanup or reset in between.
 Failover can be *operated* two ways — an operator with a runbook, or a
 pull request whose review is the split-brain gate — and workloads can be
 *delivered* two ways — each cluster pulls from git, or the hub's Argo
-pushes. All four combinations are verified:
+pushes. All four combinations are verified — and re-verified
+end-to-end by operators following only these documents:
 
 | Delivery | Operation | Runbook | Record | Verdict |
 | --- | --- | --- | --- | --- |
-| Pull | Manual | [dr-failover-pull-manual](docs/runbooks/dr-failover-pull-manual/README.md) | [exercise record](docs/exercises/manual-pull.md) | verified both directions: ≈10 s re-home, zero downtime, deploys land mid-outage |
-| Pull | Git-driven (PR) | [dr-failover-pull-gitops](docs/runbooks/dr-failover-pull-gitops/README.md) | [exercise record](docs/exercises/automated-pull.md) | two-PR choreography (one-PR flip falsified live); merge→claim ≈20 s; zero downtime |
-| Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | [exercise record](docs/exercises/manual-push.md) | push delivery RTO 2:53 vs pull's ~2.5 min poll-only; app stayed up throughout |
-| Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | [exercise record](docs/exercises/automated-push.md) | push RTO 2:45 — the PR beat the manual sibling (merge→claim 28 s); audit trail free |
+| Pull | Manual | [dr-failover-pull-manual](docs/runbooks/dr-failover-pull-manual/README.md) | [exercise record](docs/exercises/manual-pull.md) | verified both directions and re-verified: ≈10–40 s re-home, zero downtime, deploys land mid-outage |
+| Pull | Git-driven (PR) | [dr-failover-pull-gitops](docs/runbooks/dr-failover-pull-gitops/README.md) | [exercise record](docs/exercises/automated-pull.md) | two-PR choreography (one-PR flip falsified live); merge→claim 20–72 s across runs; zero downtime |
+| Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | [exercise record](docs/exercises/manual-push.md) | push delivery RTO 2:53–4:59 across runs vs pull's poll-only landing; app stayed up throughout |
+| Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | [exercise record](docs/exercises/automated-push.md) | push RTO 2:45–4:11 — beat the manual sibling in each same-day pair; audit trail effectively free |
 
 Why the halves differ — and why there is deliberately **no fully
 autonomous path** — is argued in [docs/design.md](docs/design.md).

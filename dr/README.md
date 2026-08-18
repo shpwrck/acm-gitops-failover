@@ -4,8 +4,9 @@
 [runbook](../docs/runbooks/dr-failover-pull-gitops/README.md), two attempts —
 [exercise record](../docs/exercises/automated-pull.md)). V0/V2 closed with wiring evidence earlier that day; the
 exercise closed V1 (FALSIFIED as designed — hence the two-PR
-choreography below), V3 (benign, prune won), and V4 (measured). V5 stays
-open until hub-y's next demote.
+choreography below), V3 (benign, prune won), and V4 (measured). V5
+closed 2026-08-18, when a full four-path re-verification day observed
+the demote-PR prune reap the stamped one-shot live (ledger below).
 
 ## Mechanism
 
@@ -165,10 +166,12 @@ Closed 2026-08-13 by the Automated Pull Path disaster exercise ([exercise record
   Attempt 2's 6-minute merge→claim wall clock was V1 detection+recovery,
   not machinery. The audit trail costs tens of seconds, not minutes.
 
-Open:
+Closed 2026-08-18 (four-path re-verification day):
 
-- **V5 — Restore names accumulating:** confirm demote-PR file removal
-  prunes the inert Finished restores — observe at hub-y's next demote
-  (Automated Push Path failback). Note from attempt 1: an activation restore
-  re-created by hand (`oc apply`) is NOT Argo-tracked and must be deleted
-  by hand; only Argo-created objects get pruned by the demote PR.
+- **V5 — Restore names accumulating: VERIFIED.** The demote re-align's
+  file removal pruned the demoted hub's inert `Finished` stamped
+  restore 17 s after automation re-enable — the git-driven demote
+  cleanly reaps the automated path's one-shot. The attempt-1 caveat was
+  ALSO re-confirmed live the same day: a hand-applied (`oc apply`)
+  activation restore is NOT Argo-tracked and must be deleted by hand;
+  only Argo-created objects get pruned by the demote PR.
