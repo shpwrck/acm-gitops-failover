@@ -9,7 +9,7 @@ included) undercut the manual path's operator latency; the audit trail
 cost nothing. V3's boot race was observed in the collision-first order
 (collision 18:51:30Z → prune 18:51:41Z), completing both orders across
 the automated paths. This path is a COMPOSITION:
-run the [Automated Pull Path runbook](../dr-failover-gitops/README.md) (git-driven
+run the [Automated Pull Path runbook](../dr-failover-pull-gitops/README.md) (git-driven
 role flip) with the [Manual Push Path runbook](../dr-failover-push-manual/README.md)
 delivery checks layered in. Only the interplay is documented here —
 everything else is deliberately NOT duplicated, so the composed runbooks

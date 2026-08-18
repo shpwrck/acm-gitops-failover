@@ -2,7 +2,7 @@
 
 The git-driven flip run twice against the restored posture (hub-x active,
 hub-y passive), driven by the
-[`dr-failover-gitops` runbook](../runbooks/dr-failover-gitops/README.md).
+[`dr-failover-pull-gitops` runbook](../runbooks/dr-failover-pull-gitops/README.md).
 Kill variant both times: `shutdown -r +1` (self-recovering graceful
 reboot — no out-of-band dependency; SNO stays API-dead ~8 min).
 

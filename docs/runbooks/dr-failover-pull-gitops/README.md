@@ -6,7 +6,7 @@ reverted — findings in the Phase D' header and dr/README.md's ledger;
 full timeline in the [exercise record](../../exercises/automated-pull.md)).
 V1/V3/V4 closed; V5 open until hub-y's next
 demote. Same command / rationale / success / failure format as the
-verified [Manual Pull Path runbook](../dr-failover-exercise/README.md); this
+verified [Manual Pull Path runbook](../dr-failover-pull-manual/README.md); this
 document is a DELTA — phases not listed here run exactly as the Manual
 Pull Path wrote them (and that path verified them twice).
 
@@ -154,7 +154,7 @@ one resource.
 ### D'.2 Review = the split-brain gate; merge = the decision
 
 ```bash
-curl -sk --max-time 5 https://api.$ACTIVE.k8socp.com:6443/version || echo DEAD   # reviewer runs this
+curl -sk --max-time 5 https://api.$ACTIVE.example.com:6443/version || echo DEAD   # reviewer runs this
 ```
 
 **Why:** The manual path's B.2 gate moves into the merge decision — the

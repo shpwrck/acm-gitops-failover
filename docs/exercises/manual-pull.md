@@ -3,7 +3,7 @@
 The full manual exercise, verified live in both directions on
 consecutive days: the forward run (2026-08-12), failback as a role
 swap, and the reverse run (2026-08-13). The step-by-step procedure is
-the [`dr-failover-exercise` runbook](../runbooks/dr-failover-exercise/README.md).
+the [`dr-failover-pull-manual` runbook](../runbooks/dr-failover-pull-manual/README.md).
 
 ## The forward exercise (verified live, 2026-08-12)
 
@@ -37,7 +37,7 @@ Timeline (hub-x = active, hub-y = passive, spoke = workloads):
   point](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#arch-pull),
   observed.
 - Proof of re-home: spoke's `bootstrap-hub-kubeconfig` now points at
-  `https://api.hub-y.k8socp.com:6443`; all 8 addons Available on the new
+  `https://api.hub-y.example.com:6443`; all 8 addons Available on the new
   hub.
 - Post-failover step (documented, easy to forget): [create the
   `BackupSchedule` on the NEW
@@ -92,7 +92,7 @@ Caveats verified/noted:
 The whole forward procedure run in the opposite direction the next day —
 hub-y (active since the forward exercise) killed, hub-x activated,
 role-swap failback — driven end-to-end from the
-[`dr-failover-exercise` runbook](../runbooks/dr-failover-exercise/README.md),
+[`dr-failover-pull-manual` runbook](../runbooks/dr-failover-pull-manual/README.md),
 which this run validated step by step. Two deliberate differences from the
 forward run: pre-flight found and fixed the frozen MSA rotation first (the
 [MSA token finding](msa-token-hygiene.md) — fix

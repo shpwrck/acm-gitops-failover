@@ -30,8 +30,8 @@ pushes. All four combinations are verified:
 
 | Delivery | Operation | Runbook | Record | Verdict |
 | --- | --- | --- | --- | --- |
-| Pull | Manual | [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | [exercise record](docs/exercises/manual-pull.md) | verified both directions: ≈10 s re-home, zero downtime, deploys land mid-outage |
-| Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | [exercise record](docs/exercises/automated-pull.md) | two-PR choreography (one-PR flip falsified live); merge→claim ≈20 s; zero downtime |
+| Pull | Manual | [dr-failover-pull-manual](docs/runbooks/dr-failover-pull-manual/README.md) | [exercise record](docs/exercises/manual-pull.md) | verified both directions: ≈10 s re-home, zero downtime, deploys land mid-outage |
+| Pull | Git-driven (PR) | [dr-failover-pull-gitops](docs/runbooks/dr-failover-pull-gitops/README.md) | [exercise record](docs/exercises/automated-pull.md) | two-PR choreography (one-PR flip falsified live); merge→claim ≈20 s; zero downtime |
 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | [exercise record](docs/exercises/manual-push.md) | push delivery RTO 2:53 vs pull's ~2.5 min poll-only; app stayed up throughout |
 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | [exercise record](docs/exercises/automated-push.md) | push RTO 2:45 — the PR beat the manual sibling (merge→claim 28 s); audit trail free |
 

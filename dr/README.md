@@ -1,7 +1,7 @@
 # Git-driven DR roles (the automated paths)
 
 **Status: FLIP VERIFIED LIVE 2026-08-13** (Automated Pull Path disaster exercise,
-[runbook](../docs/runbooks/dr-failover-gitops/README.md), two attempts —
+[runbook](../docs/runbooks/dr-failover-pull-gitops/README.md), two attempts —
 [exercise record](../docs/exercises/automated-pull.md)). V0/V2 closed with wiring evidence earlier that day; the
 exercise closed V1 (FALSIFIED as designed — hence the two-PR
 choreography below), V3 (benign, prune won), and V4 (measured). V5 stays

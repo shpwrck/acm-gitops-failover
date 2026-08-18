@@ -12,7 +12,7 @@ every step below ran as written; measured decision-to-re-home ≈10 s, zero
 failed requests across the full window.
 
 **This is the Manual Pull Path** (manual operation, pull delivery — README, The four paths).
-Siblings: the [Automated Pull Path](../dr-failover-gitops/README.md) git-driven operation,
+Siblings: the [Automated Pull Path](../dr-failover-pull-gitops/README.md) git-driven operation,
 the [Manual Push Path](../dr-failover-push-manual/README.md) push delivery,
 the [Automated Push Path](../dr-failover-push-gitops/README.md) both — all three are
 deltas against this document, so a change here must be checked against
@@ -27,7 +27,7 @@ either direction (values shown are the 2026-08-13 exercise):
 export ACTIVE=hub-y      # hub about to "die"
 export PASSIVE=hub-x       # hub that will activate
 export MANAGED=spoke      # workload cluster that re-homes
-export APP_URL=https://hello-failover-hello-failover.apps.spoke.k8socp.com
+export APP_URL=https://hello-failover-hello-failover.apps.spoke.example.com
 ```
 
 - All timestamps UTC (`date -u`) so probe logs and cluster conditions
@@ -214,7 +214,7 @@ unreachable.
 **Success:**
 
 ```bash
-curl -sk --max-time 5 https://api.$ACTIVE.k8socp.com:6443/version || echo DEAD
+curl -sk --max-time 5 https://api.$ACTIVE.example.com:6443/version || echo DEAD
 ```
 
 prints `DEAD` (connection refused/timeout).

@@ -11,7 +11,7 @@ break-glass (suspend the returned hub's dr-role before touching its
 role objects), then git re-align + re-enable per D.0's
 afterwards-contract — adoption verified, nothing recreated. Phase P was
 verified earlier the same day. Delta against the verified
-[Manual Pull Path runbook](../dr-failover-exercise/README.md); unlisted phases run
+[Manual Pull Path runbook](../dr-failover-pull-manual/README.md); unlisted phases run
 as written there. The DR *operation* is identical — what changes is the
 delivery model under test and therefore what the exercise measures: the
 Manual Pull Path proves workload delivery is IMMUNE to hub loss; this path measures exactly
@@ -36,7 +36,7 @@ side by side.
 (contrast: the pull model's stub carries skip-reconcile and the workload
 Application lives on spoke) and reached `Synced | Healthy` in under two
 minutes with NO extra RBAC;
-`https://hello-failover-push-hello-failover-push.apps.spoke.k8socp.com`
+`https://hello-failover-push-hello-failover-push.apps.spoke.example.com`
 serves `REVISION v1`.
 **Failure:** `SyncFailed … forbidden` → your environment's addon RBAC
 differs from what P.2 documents; rediscover before granting anything.
@@ -93,7 +93,7 @@ nothing), which is itself a claim customers doubt.
 ```bash
 # bump REVISION in apps/hello-failover-push/configmap.yaml, commit, push
 date -u +%FT%TZ   # record: push-model deploy attempted
-curl -s https://hello-failover-push-hello-failover-push.apps.spoke.k8socp.com | grep -i revision
+curl -s https://hello-failover-push-hello-failover-push.apps.spoke.example.com | grep -i revision
 ```
 
 **Why:** The Manual Pull Path's Phase C celebrates the deploy landing
@@ -119,7 +119,7 @@ GitOps cluster secret depends on the same MSA chain):
 ```bash
 oc --context $PASSIVE get applications.argoproj.io -n openshift-gitops
 oc --context $PASSIVE get secret -n openshift-gitops -l apps.open-cluster-management.io/acm-cluster=true
-watch -n10 'curl -s https://hello-failover-push-hello-failover-push.apps.spoke.k8socp.com | grep -i revision'
+watch -n10 'curl -s https://hello-failover-push-hello-failover-push.apps.spoke.example.com | grep -i revision'
 ```
 
 **Why:** The restored ApplicationSet must regenerate
