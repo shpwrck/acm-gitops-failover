@@ -45,8 +45,11 @@ prerequisite for recreating them. Why it is built this way is
   This build: SeaweedFS at `https://truenas.example.com:30304`, bucket
   `acm-backups`, identity `velero`, and in the DPA
   `s3ForcePathStyle: "true"` + `checksumAlgorithm: ""`. On ROSA/AWS the
-  identical DPA drops `s3Url`/`s3ForcePathStyle`. Store build details:
-  [the S3 runbook](runbooks/truenas-seaweedfs-s3/README.md).
+  identical DPA drops `s3Url`/`s3ForcePathStyle`. SeaweedFS sizing
+  note: with the default 30 GB `volumeSizeLimitMB`, the default
+  collection can pre-claim every volume slot on a small disk and the
+  first bucket PUT fails 500 "No writable volumes" — lower the volume
+  size limit to free slots.
 - **A git host reachable from every cluster** (this repository): the
   spoke's local Argo pulls the apps from it, and each hub's local Argo
   reconciles its DR role overlay (`dr/`) from it.
