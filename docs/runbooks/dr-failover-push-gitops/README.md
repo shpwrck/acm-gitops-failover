@@ -26,16 +26,20 @@ attribute.
 | C | Manual Push Path C' (push deploy does NOT land; timestamp it) | pull deploy DOES land (Manual Pull Path C) — same window |
 | D | Automated Pull Path D' (failover PR; review = death gate; merge = decision) | — |
 | E | Manual Pull Path E + [MSA hygiene](../../exercises/msa-token-hygiene.md) FIRST | Manual Push Path E' (delivery resurrection; measure delivery RTO) |
-| F | Automated Pull Path (F.1 automatic via role flip) | Manual Push Path's appset/secret checks |
+| F | Automated Pull Path F' (promotion PR-B) | Manual Push Path's appset/secret checks |
 | G | Automated Pull Path G' (demote PR + imperative residue) | — |
 | H | evidence + V-verdicts | the four-path comparison row (below) |
 
 ## Interplay notes (what is unique to this path)
 
-- **Delivery RTO gains the operation's latency.** The Manual Push Path
-  measures activation→first-push; this path adds merge→sync ahead of it
-  (the Automated Pull Path's V4 delta). Expected total: PR merge + Argo poll (≤3 min, refresh cuts it)
-  + ≈10 s machinery + secret re-mint + first push. This is the
+- **Delivery RTO gains the operation's latency.** The RTO clock starts
+  at the C' commit, not at the merge — the decision latency (author,
+  review, merge: ~1 min) is inside the measured number. Expected
+  components, each observed live: decision latency + merge→sync
+  (refresh cuts the ≤3 min poll to seconds) + the V1 recovery when it
+  fires (~30 s — D' treats it as the expected first outcome) + ≈10 s
+  claim machinery + cluster-secret re-mint (~1 min) + first push
+  (~30 s) + route content propagation (~1 min). This is the
   slowest-to-recover cell of the matrix — and the most auditable. Say
   both sentences together; that's the trade.
 - **Two Argo populations, opposite DR treatments, same namespace.** On
@@ -44,16 +48,25 @@ attribute.
   NOT (that's how split-brain is prevented). The exclusion label is doing
   precision work here — the Automated Pull Path's P.2 check is mandatory
   pre-flight in this path, every time.
-- **One [MSA token](../../exercises/msa-token-hygiene.md) chain, three
-  dependents.** After activation, the repaired
-  token feeds auto-import (the Manual Pull Path's claim machinery),
-  the GitOpsCluster secret (push delivery), and the next backup. E's
-  hygiene step is therefore ordered FIRST in this path — before judging
-  any delivery failure as a defect of this path, confirm
+- **One [MSA token](../../exercises/msa-token-hygiene.md) family, three
+  dependents.** After activation, MSA tokens feed auto-import (the
+  Manual Pull Path's claim machinery), the GitOpsCluster secret (push
+  delivery — via the separate `application-manager` MSA, which the
+  addon re-mints on its own), and the next backup. E's
+  hygiene step is ordered FIRST as triage discipline — delivery usually
+  resurrects regardless (verified, with timestamps) — but before
+  judging any delivery failure as a defect of this path, confirm
   `TokenReported: True`.
+- **Cross-path residue.** The demote PR's prune reaps only
+  Argo-tracked one-shots. If the hub being demoted was last activated
+  MANUALLY, its fixed-name `restore-acm-activate` is untracked — delete
+  it by hand during G (verified live), or the next manual activation on
+  that hub silently no-ops.
 
 ## H — the deliverable
 
-The four-path comparison table (README, "The four paths") gets its final column filled
-from this run: identical outage, four measured recoveries. That artifact
+The four-path comparison table (README, "The four paths") is this
+exercise's deliverable: identical outage, four measured recoveries. The
+measured numbers — and which sibling "wins" — vary run to run; keep the
+table's Verdict column tied to the run it cites. That artifact
 — not any single path — is the reason the repo holds all four.

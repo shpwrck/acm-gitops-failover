@@ -17,7 +17,10 @@ them.
 ## Conventions
 
 The posture is symmetric — set these once and every command below works in
-either direction (values shown are the 2026-08-13 exercise):
+either direction. Before anything else, write down the mapping from these
+generic names to your real kubeconfig contexts: generic names can collide
+with real cluster names (a real hub literally named "spoke" has happened),
+and a mistyped context in Phase B kills the wrong cluster.
 
 ```bash
 export ACTIVE=hub-y      # hub about to "die"
@@ -32,6 +35,8 @@ export APP_URL=https://hello-failover-hello-failover.apps.spoke.example.com
   makes the next phase safe.
 - Evidence artifacts: `~/probe-<date>.log` (availability),
   `~/hub-pointer-<date>.log` (re-home), plus pasted command outputs.
+  Any persistent background runner and log location works — the logs
+  are the evidence, not the terminals.
 
 ## Phase 0 — Pre-flight (read-only except the repair)
 
@@ -222,6 +227,13 @@ the variant in the exercise record; (2) `oc` can never power a host back
 ON — confirm out-of-band access exists BEFORE firing, or Phase G is
 unreachable.
 
+**No out-of-band access at all?** Use `shutdown -r +1` instead — a
+self-recovering reboot (~80 s to API-dead, back in ~5–9 min). Its return
+races Phases C/D: if the old hub is back BEFORE D.2, run G.2's defusal
+first. The klusterlet re-homes regardless and the returned hub's
+schedule freezes itself on `BackupCollision`, but do not leave it
+`Enabled` while you activate.
+
 **Success:**
 
 ```bash
@@ -259,7 +271,8 @@ git add apps/hello-failover/configmap.yaml && git commit -m "REVISION vN mid-out
 the hub orchestrates *placement*, never delivery. A deploy that lands
 while no hub exists is the pull model's entire argument, made visible.
 
-**Success:** Within ~3 min the availability probe's URL serves the new
+**Success:** Within ~3–7 min (Argo's poll plus configmap-volume
+propagation) the availability probe's URL serves the new
 revision (`curl -s $APP_URL | grep -i revision`). `$MANAGED`'s local Argo can
 also be nudged: annotate the Application with
 `argocd.argoproj.io/refresh=normal`.
@@ -295,7 +308,12 @@ oc --context $PASSIVE get applications.argoproj.io dr-role -n openshift-gitops \
 **AFTERWARDS (Phase G/H):** re-align git to the new reality (flip the
 `dr/` overlays to match the roles you created manually) BEFORE restoring
 `automated: {prune: true, selfHeal: true}` — re-enabling against stale
-git would demote the new active hub.
+git would demote the new active hub. And after pushing the re-align,
+hard-refresh (`argocd.argoproj.io/refresh=hard`) or verify each
+dr-role's `.status.sync.revision` equals the new commit BEFORE
+re-enabling: re-enabling on a stale revision re-creates the old role's
+objects until the next poll corrects it (observed live; benign only
+because the passive sync was already `Enabled`).
 
 ### D.1 Remove the passive-sync restore
 
@@ -324,7 +342,10 @@ oc --context $PASSIVE get restore restore-acm-activate -n open-cluster-managemen
 distinguishes activation from passive sync — restoring the managed-cluster
 resources is what makes this hub claim the fleet.
 `cleanupBeforeRestore: CleanupRestored` clears previously-synced copies so
-the restore lands clean.
+the restore lands clean. If this hub still holds ANY `Finished` restore
+from a previous activation — fixed-name or stamped — the apply is a
+silent no-op (identical spec, nothing re-triggers): check and delete it
+first (the G.5 lesson, at the moment it bites).
 
 **Success:** Phase reaches `Finished` (observed 2026-08-12: ~37 s;
 2026-08-13: seconds). The operator also stamps an
@@ -397,7 +418,8 @@ unbroken 200s.
 ```bash
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
   -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'
-# expect False with the ownerRef error → then:
+# expect False with the ownerRef error, or the condition entirely
+# absent on a freshly restored MSA → then:
 oc --context $PASSIVE delete secret auto-import-account -n $MANAGED
 sleep 30
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
@@ -498,8 +520,13 @@ oc --context $ACTIVE delete backupschedule schedule-acm -n open-cluster-manageme
 
 **Why:** Two hubs writing one bucket corrupts `latest` for every future
 restore. The collision guard freezes the returned hub's schedule
-automatically (observed live ≤4 min after power-on) — but frozen is not
-gone: delete it so the defusal is permanent and auditable.
+automatically — it fires on the new hub's `acm-restore-clusters-<ts>`
+activation marker, typically within a minute of activation and before
+any new scheduled backup exists — but it is not instantaneous (a
+returned hub has been observed landing one boot catch-up backup set
+before freezing) and frozen is not gone: delete it so the defusal is
+permanent and auditable, and check which cluster id wrote the bucket's
+`latest` before any future restore.
 
 **Success:** Schedule shows `BackupCollision`, then deletes cleanly.
 
@@ -551,22 +578,28 @@ power-off the object store connection is the usual suspect.
 ### G.5 Delete the demoted hub's stale activation restore
 
 ```bash
-oc --context $ACTIVE delete restore restore-acm-activate -n open-cluster-management-backup
+oc --context $ACTIVE get restore -n open-cluster-management-backup -o name \
+  | grep restore-acm-activate \
+  | xargs -r -n1 oc --context $ACTIVE delete -n open-cluster-management-backup
 oc --context $ACTIVE get restore -n open-cluster-management-backup
 ```
 
 **Why:** The `Finished` restore from this hub's LAST activation lingers
-after demotion. Left in place, the NEXT activation's
+after demotion — under its fixed name (`restore-acm-activate`, manual
+activation) or a generation-stamped name (`restore-acm-activate-<ts>`,
+git-driven activation). Left in place, the NEXT activation's
 `oc apply -f manifests/57-restore-activate.yaml` is a **silent no-op** —
 the object already exists with an identical spec, so nothing re-triggers:
-a "successful" apply and no failover, discovered 2026-08-13 and exactly
-the failure you don't want mid-disaster.
+a "successful" apply and no failover, exactly
+the failure you don't want mid-disaster. (On the git-driven path the
+demote PR's prune reaps its own stamped one-shot — verified — but only
+Argo-tracked objects; anything hand-applied must be deleted here.)
 
 **Success:** Exactly ONE restore remains: `restore-acm-passive-sync` at
 `Enabled`.
 
-**Failure:** `NotFound` → this hub never activated (first-ever exercise in
-this direction); fine, continue.
+**Failure:** nothing matched → this hub never activated, or its stamped
+one-shot was already reaped by a demote PR; fine, continue.
 
 **Gate:** G.4 `Enabled` + G.5 single-restore → exercise complete.
 
