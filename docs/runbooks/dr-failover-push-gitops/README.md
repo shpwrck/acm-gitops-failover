@@ -1,19 +1,12 @@
 # Automated Push Path — DR exercise runbook: GitOps operation, push delivery
 
-**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:43–18:53Z**
-([exercise record](../../exercises/automated-push.md), run after both parents'
-exercises the same day). **Measured push
-delivery RTO: 2 min 45 s** — the composed path BEAT the Manual Push
-Path's 2:53 because the PR flow's decision-to-claim (28 s, V1 recovery
-included) undercut the manual path's operator latency; the audit trail
-cost nothing. V3's boot race was observed in the collision-first order
-(collision 18:51:30Z → prune 18:51:41Z), completing both orders across
-the automated paths. This path is a COMPOSITION:
+This path is a COMPOSITION:
 run the [Automated Pull Path runbook](../dr-failover-pull-gitops/README.md) (git-driven
 role flip) with the [Manual Push Path runbook](../dr-failover-push-manual/README.md)
 delivery checks layered in. Only the interplay is documented here —
 everything else is deliberately NOT duplicated, so the composed runbooks
-can't drift.
+can't drift. The measured run is the
+[exercise record](../../exercises/automated-push.md).
 
 ## Prerequisites
 

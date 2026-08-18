@@ -7,10 +7,6 @@ success looks like, and the failure modes with recovery. The
 verified narrative with timings is the
 [exercise record](../../exercises/manual-pull.md).
 
-**Validated live 2026-08-13** (hub-y→hub-x reverse exercise, [exercise record](../../exercises/manual-pull.md)):
-every step below ran as written; measured decision-to-re-home ≈10 s, zero
-failed requests across the full window.
-
 **This is the Manual Pull Path** (manual operation, pull delivery — README, The four paths).
 Siblings: the [Automated Pull Path](../dr-failover-pull-gitops/README.md) git-driven operation,
 the [Manual Push Path](../dr-failover-push-manual/README.md) push delivery,
@@ -52,9 +48,11 @@ oc --context $PASSIVE get managedclusters
 anything. The activation procedure assumes exactly one active hub (schedule
 `Enabled`, owns `$MANAGED`) and one passive hub (restore `Enabled` in sync
 mode, owns only `local-cluster`).
+
 **Success:** Active: `schedule-acm Enabled`, recent backups `Completed`,
 `local-cluster` + `$MANAGED` both `True/True`. Passive:
 `restore-acm-passive-sync Enabled`, `local-cluster` only.
+
 **Failure:** Passive lists `$MANAGED` → you have two hubs claiming one
 cluster (split-brain posture); stop and resolve before any exercise.
 Restore not `Enabled` → passive sync is dead; fix before proceeding (a
@@ -74,9 +72,11 @@ single most likely way this whole architecture fails. `TokenReported` must
 be checked explicitly: a Velero-restored-but-frozen secret passes the
 weaker "does a token exist" checks while rotation is already dead
 (the [MSA token finding](../../exercises/msa-token-hygiene.md), found live 2026-08-13).
+
 **Success:** Every `auto-import-account` row: `TOKEN-REPORTED: True`,
 expiry comfortably in the future (rotation validity is 144h; expect
 several days out).
+
 **Failure:** `False` with `cannot set an ownerRef on a resource you can't
 delete` → the restored secret from a previous activation was never cleaned
 up. Repair (safe ONLY when the cluster is already imported and
@@ -105,8 +105,10 @@ oc --context $ACTIVE get backup -n open-cluster-management-backup \
 DR-protected until a credentials backup taken *after* it reaches
 `Completed` — the backup cadence (30 min here) is the repair-to-protection
 lag, and the same number that anchors the RPO conversation.
+
 **Success:** An `acm-credentials-schedule-*` set with `START` later than
 your newest change, `PHASE: Completed`.
+
 **Failure:** No new set past its cron slot → check
 `oc --context $ACTIVE get schedules.velero.io -n open-cluster-management-backup`
 (`LAST-BACKUP` distinguishes "hasn't fired yet" from "fired and stalled").
@@ -130,8 +132,10 @@ from — missing it silently breaks the whole MSA chain on the new hub;
 cluster caches at the worst possible moment; (3) the new hub must run the
 same GitOps operator so restored wiring lands on a working Argo; (4) the
 passive hub must already reach the shared bucket.
+
 **Success:** namespace exists / CRD `NotFound` / all Argo pods `Running` /
 BSL `Available`.
+
 **Failure:** resolve before the exercise — all four are cheap now and
 expensive mid-outage.
 
@@ -149,7 +153,9 @@ while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}'
 liveness — is only provable by an independent observer running before,
 during, and after the disaster. `--max-time 5` forces hung connections to
 log as failures instead of masquerading as slow successes.
+
 **Success:** Unbroken `200`s for the entire exercise.
+
 **Failure:** Any non-200 during the exercise is a finding — timestamp it
 and correlate (a non-200 *after* the exercise window may just be your lab
 powering down; check before writing it up as a DR failure).
@@ -165,10 +171,13 @@ from the dead hub to the new one — the managed-cluster half of your RTO,
 measured instead of estimated. It also quietly proves the managed cluster
 stays fully inspectable with no hub alive (the probe reads `$MANAGED`'s
 own API).
+
 **Success:** Steady old-hub URL now; flip to the new hub URL during Phase
 D; no gaps.
+
 **Failure:** Pointer never flips after activation `Finished` → the import
 didn't reach the agent; go to D's failure modes.
+
 **Expectation to set:** the pointer does NOT move when the active hub
 dies — only when the new hub's activation claims the cluster. A long
 stretch of old-hub entries mid-outage is correct.
@@ -181,6 +190,7 @@ curl -s $APP_URL | grep -i revision
 
 **Why:** Records what the app serves *before* the mid-outage deploy, so
 the Phase C flip is unambiguous.
+
 **Success:** Current revision noted (e.g. `v2`).
 
 **Gate:** both probes ticking + baseline noted → clear to kill the active
@@ -211,6 +221,7 @@ gentler than a power cut (kubelet terminates pods, etcd flushes) — note
 the variant in the exercise record; (2) `oc` can never power a host back
 ON — confirm out-of-band access exists BEFORE firing, or Phase G is
 unreachable.
+
 **Success:**
 
 ```bash
@@ -218,6 +229,7 @@ curl -sk --max-time 5 https://api.$ACTIVE.example.com:6443/version || echo DEAD
 ```
 
 prints `DEAD` (connection refused/timeout).
+
 **Failure:** API still answers → it isn't dead; activating the passive hub
 now creates two live hubs fighting over `$MANAGED` (the activation
 manifest's header warns exactly this). Verify death before Phase D.
@@ -231,6 +243,7 @@ tail -3 ~/probe-$(date -u +%Y%m%d).log
 **Why:** The first customer-visible datapoint: hub dead, app serving.
 ("Some features stop working, even if all managed clusters still work" —
 the docs' promise, observed.)
+
 **Success:** `200`s continuing after B.1's timestamp.
 
 ## Phase C — Mid-outage deploy (optional but the best demo beat)
@@ -245,31 +258,40 @@ git add apps/hello-failover/configmap.yaml && git commit -m "REVISION vN mid-out
 **Why:** Proves deployments flow git → cluster with zero hub involvement:
 the hub orchestrates *placement*, never delivery. A deploy that lands
 while no hub exists is the pull model's entire argument, made visible.
+
 **Success:** Within ~3 min the availability probe's URL serves the new
 revision (`curl -s $APP_URL | grep -i revision`). `$MANAGED`'s local Argo can
 also be nudged: annotate the Application with
 `argocd.argoproj.io/refresh=normal`.
+
 **Failure:** App never updates → check `$MANAGED`'s local Argo
 (`oc --context $MANAGED get applications.argoproj.io -A`) — this is
 cluster-local GitOps debugging, unrelated to the dead hub.
 
 ## Phase D — Activate the passive hub
 
-### D.0 Break-glass: suspend the git-driven role reconciler (REQUIRED
-### since 2026-08-13, when the dr/ wiring went live)
+### D.0 Break-glass: suspend the git-driven role reconciler (REQUIRED)
 
 ```bash
 oc --context $PASSIVE patch applications.argoproj.io dr-role -n openshift-gitops \
   --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
 ```
 
-**Why (verified live):** the hub's `dr-role` Application reconciles its
+**Why:** the hub's `dr-role` Application reconciles its
 role from git with selfHeal — a manually-deleted passive Restore was
 recreated in **6 seconds** (deleted 16:00:22Z, back `Enabled` 16:00:28Z).
 Without this suspend, D.1 is silently undone and D.2 refuses to run
 ("only one Restore honored at a time"). Manual and git-driven operation
 do not compose on the same hub; this patch is the documented off-switch.
-**Success:** `.spec.syncPolicy.automated` gone from the app.
+
+**Success:** `.spec.syncPolicy.automated` gone from the app:
+
+```bash
+oc --context $PASSIVE get applications.argoproj.io dr-role -n openshift-gitops \
+  -o jsonpath='{.spec.syncPolicy.automated}{"\n"}'
+# expect: empty line
+```
+
 **AFTERWARDS (Phase G/H):** re-align git to the new reality (flip the
 `dr/` overlays to match the roles you created manually) BEFORE restoring
 `automated: {prune: true, selfHeal: true}` — re-enabling against stale
@@ -285,7 +307,9 @@ oc --context $PASSIVE delete restore restore-acm-passive-sync -n open-cluster-ma
 sync (managedClusters: `skip`) must go before the activation restore
 (managedClusters: `latest`) can run. This ordering is the actual "big red
 button" moment.
+
 **Success:** `deleted`.
+
 **Failure:** NotFound → passive sync was never running; note it (posture
 drift) and continue — activation does not depend on it.
 
@@ -301,10 +325,12 @@ distinguishes activation from passive sync — restoring the managed-cluster
 resources is what makes this hub claim the fleet.
 `cleanupBeforeRestore: CleanupRestored` clears previously-synced copies so
 the restore lands clean.
+
 **Success:** Phase reaches `Finished` (observed 2026-08-12: ~37 s;
 2026-08-13: seconds). The operator also stamps an
 `acm-restore-clusters-<ts>` safety backup at activation time — expected
 artifact, not an anomaly.
+
 **Failure:** `FinishedWithErrors` → read
 `oc --context $PASSIVE describe restore restore-acm-activate -n open-cluster-management-backup`
 and the velero pod logs in the same namespace; do not re-apply blindly
@@ -320,9 +346,11 @@ oc --context $PASSIVE get managedclusters -w
 **Why:** This is auto-import doing its job: the restored MSA token lets
 the new hub create the import on `$MANAGED` without any human touching the
 managed cluster.
+
 **Success:** `$MANAGED` appears, then `Joined/Available True/True`
 (observed ≤37 s from activation). The A.2 probe flips in the same window —
 note both timestamps.
+
 **Failure:** Stuck in `Pending Import` → the MSA token in the restored
 backup was invalid/expired/frozen: exactly what pre-flight 0.2 exists to
 prevent. Recovery mid-exercise: create a classic auto-import secret on the
@@ -342,7 +370,9 @@ oc --context $PASSIVE get managedclusteraddon -n $MANAGED
 
 **Why:** `Joined/Available` proves the klusterlet; the addons prove the
 full management plane (policy, search, proxy, MSA) re-established itself.
+
 **Success:** All addons `Available: True` within a few minutes.
+
 **Failure:** `managed-serviceaccount` missing/degraded → global-set
 namespace check (0.4) on the new hub; others degraded → give them ~5 min
 before digging, addon rollout is eventually consistent.
@@ -358,6 +388,7 @@ tail -3 ~/probe-$(date -u +%Y%m%d).log
 timestamp minus the D.2 apply timestamp is your measured management-plane
 RTO; the availability log across the same window is the zero-downtime
 claim.
+
 **Success:** Pointer log shows the new hub URL; availability log shows
 unbroken 200s.
 
@@ -378,7 +409,9 @@ liability: the new hub's MSA controller cannot adopt a Velero-restored
 secret, so rotation silently freezes and the NEXT failover dies at token
 expiry. Load-bearing during activation, disposable after — delete it only
 now, never before D.3.
+
 **Success:** `True | <now + 144h>`.
+
 **Failure:** Still `False` after a minute → check the
 `managed-serviceaccount` addon is `Available` (E.1) — the re-mint is
 performed by the addon agent, not the hub.
@@ -396,12 +429,14 @@ oc --context $PASSIVE get backupschedule,backup -n open-cluster-management-backu
 BackupSchedule runs HERE, the fleet state that just changed hands is
 unprotected — and E.3's fresh token is not in any backup. ACM's
 `backup-restore-enabled` policy exists purely to nag about this step.
+
 **Success:** Schedule `Enabled`; the first full set fires IMMEDIATELY on
 creation (no wait for the cron slot — observed 2026-08-13) and reaches
 `Completed` within ~1 min, capturing E.3's fresh token. The listing will
 also show the OTHER hub's entire backup history — Velero syncs the shared
 bucket's contents into every cluster with the BSL; expected, and useful
 for auditing which cluster ID wrote `latest`.
+
 **Failure:** `BackupCollision` → the OLD hub is somehow alive and still
 writing to the bucket — you have a split-brain: kill it properly, delete
 its schedule, then re-check.
@@ -419,8 +454,10 @@ ApplicationSet — restoring them re-registers `$MANAGED` into the new
 hub's Argo (via the same MSA chain) and resumes pull-model propagation of
 *new* placement decisions. Always `applications.argoproj.io`, never bare
 `application` (ACM's `app.k8s.io` CRD shadows it).
+
 **Success:** GitOpsCluster `successful`, ApplicationSet present, app
 propagated.
+
 **Failure:** `ClusterRegistrationFailed` → MSA token chain again (E.3/0.2
 order: condition, then secret ownership).
 
@@ -438,11 +475,13 @@ oc --context $ACTIVE get managedclusters -w   # $ACTIVE = the RETURNED hub
 **Why:** The returned hub wakes with a STALE worldview — it still lists
 `$MANAGED` as `True/True` for the first ~2–4 min until the klusterlet
 lease (which now heartbeats to the OTHER hub) expires.
+
 **Success:** `$MANAGED` flips to `Available: Unknown`. If the hub was down
 longer than the lease window (observed 2026-08-13 after a ~15 min outage),
 it wakes with the cluster ALREADY `Unknown` — the 2–4 min wait applies
 only to short outages; the gate is the `Unknown` reading itself, never
 elapsed time.
+
 **Failure — the one dangerous moment of the whole exercise:** deleting the
 ManagedCluster while it still reads `True` triggers a live detach and
 **uninstalls the agent + hub-delivered workloads from `$MANAGED`** ("If
@@ -461,7 +500,9 @@ oc --context $ACTIVE delete backupschedule schedule-acm -n open-cluster-manageme
 restore. The collision guard freezes the returned hub's schedule
 automatically (observed live ≤4 min after power-on) — but frozen is not
 gone: delete it so the defusal is permanent and auditable.
+
 **Success:** Schedule shows `BackupCollision`, then deletes cleanly.
+
 **Failure:** Schedule still `Enabled` and writing → verify which backup is
 newest in the bucket before ANY future restore; delete the schedule
 immediately.
@@ -476,8 +517,15 @@ oc --context $ACTIVE delete managedcluster $MANAGED    # ONLY in Unknown (G.1)
 a cluster that now belongs to the other hub. In `Unknown` state the
 klusterlet is not listening to this hub, so the delete only removes
 hub-side bookkeeping (observed: 15 s, zero stuck finalizers).
+
 **Success:** Object gone in seconds; `$MANAGED` untouched (probe log
-unbroken).
+unbroken):
+
+```bash
+oc --context $ACTIVE get managedclusters        # expect: local-cluster only
+tail -3 ~/probe-$(date -u +%Y%m%d).log          # expect: unbroken 200s
+```
+
 **Failure:** Delete hangs on finalizers → the cluster was NOT in `Unknown`
 (see G.1's warning); investigate `$MANAGED`'s agent state immediately.
 
@@ -492,9 +540,11 @@ oc --context $ACTIVE get restore -n open-cluster-management-backup
 continuously ingests the new active's backups without ever claiming the
 fleet — a warm standby ready to be the next Phase D. The posture is now
 symmetric again, roles swapped.
+
 **Success:** `restore-acm-passive-sync` reaches `Enabled` ("restore will
 continue to sync with new backups"); managedclusters shows
 `local-cluster` only.
+
 **Failure:** Restore `Error` → check the BSL on this hub (0.4) — after a
 power-off the object store connection is the usual suspect.
 
@@ -511,8 +561,10 @@ after demotion. Left in place, the NEXT activation's
 the object already exists with an identical spec, so nothing re-triggers:
 a "successful" apply and no failover, discovered 2026-08-13 and exactly
 the failure you don't want mid-disaster.
+
 **Success:** Exactly ONE restore remains: `restore-acm-passive-sync` at
 `Enabled`.
+
 **Failure:** `NotFound` → this hub never activated (first-ever exercise in
 this direction); fine, continue.
 

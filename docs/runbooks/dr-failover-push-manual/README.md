@@ -1,24 +1,18 @@
 # Manual Push Path — DR exercise runbook: manual operation, push delivery
 
-**Status: EXERCISE VERIFIED LIVE 2026-08-13 18:30–18:40Z**
-([exercise record](../../exercises/manual-push.md)). **Measured push-model
-delivery RTO: 2 min 53 s** (deploy
-committed 18:32:15Z with no active hub → route serving it 18:35:08Z),
-against the pull model's ~2.5 min ordinary poll latency in the same
-window — pull has no outage term at all. Both probes: zero non-200s.
-Under live dr/ wiring the G phase gains the operator-at-return
-break-glass (suspend the returned hub's dr-role before touching its
-role objects), then git re-align + re-enable per D.0's
-afterwards-contract — adoption verified, nothing recreated. Phase P was
-verified earlier the same day. Delta against the verified
+Delta against the verified
 [Manual Pull Path runbook](../dr-failover-pull-manual/README.md); unlisted phases run
 as written there. The DR *operation* is identical — what changes is the
 delivery model under test and therefore what the exercise measures: the
 Manual Pull Path proves workload delivery is IMMUNE to hub loss; this path measures exactly
 how delivery DIES with the hub and how it resurrects. Both truths belong
-in the customer conversation.
+in the customer conversation. Under live dr/ wiring the G phase gains
+the operator-at-return break-glass (suspend the returned hub's dr-role
+before touching its role objects), then git re-align + re-enable per
+D.0's afterwards-contract. The measured timeline is the
+[exercise record](../../exercises/manual-push.md).
 
-## Phase P — One-time prerequisites (VERIFIED 2026-08-13)
+## Phase P — One-time prerequisites
 
 ### P.1 Deploy the push app from the active hub
 
@@ -32,18 +26,24 @@ oc --context $ACTIVE get applications.argoproj.io -n openshift-gitops
 ACM-minted cluster secret. Coexists with the pull app by design (separate
 namespace `hello-failover-push`) so one outage exercises both models
 side by side.
-**Success (observed):** `hello-failover-push-spoke` appeared ON THE HUB
+
+**Success:** `hello-failover-push-spoke` appeared ON THE HUB
 (contrast: the pull model's stub carries skip-reconcile and the workload
 Application lives on spoke) and reached `Synced | Healthy` in under two
 minutes with NO extra RBAC;
-`https://hello-failover-push-hello-failover-push.apps.spoke.example.com`
-serves `REVISION v1`.
+the route serves the app:
+
+```bash
+curl -s https://hello-failover-push-hello-failover-push.apps.spoke.example.com | grep -i revision
+# expect: the current REVISION
+```
+
 **Failure:** `SyncFailed … forbidden` → your environment's addon RBAC
 differs from what P.2 documents; rediscover before granting anything.
 
 ### P.2 The push identity — discovered, with a security finding
 
-What verification found (2026-08-13, ACM 2.17):
+What verification found (ACM 2.17):
 
 - The minted cluster secret is `spoke-application-manager-cluster-secret`
   — the token belongs to the **`application-manager`
@@ -79,7 +79,11 @@ oc --context $MANAGED get clusterrole open-cluster-management:application-manage
 ## Phase 0/A — as the Manual Pull Path, plus the second probe
 
 Add a second availability probe for the push app's route (same loop, own
-log file `~/probe-push-<date>.log`).
+log file):
+
+```bash
+while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 https://hello-failover-push-hello-failover-push.apps.spoke.example.com)"; sleep 10; done | tee -a ~/probe-push-$(date -u +%Y%m%d).log
+```
 
 **Why:** Two apps, two logs, one outage: the pull log should stay
 unbroken (already proven twice); the push log tells this path's actual
@@ -103,8 +107,10 @@ revision actually serving (Phase E') is the push model's
 delivery-pipeline RTO, the number this whole path exists to measure. Do
 the pull app's v-next in the same window: one outage, both behaviors,
 side by side.
+
 **Success (for the exercise):** Push route still serves the OLD revision;
 pull route serves its NEW one within ~3 min. Both probes: unbroken 200s.
+
 **Failure:** Push app updates mid-outage → something else is syncing it
 (a leftover local-Argo binding?) — the model separation is broken;
 investigate before drawing any conclusions.
@@ -128,8 +134,10 @@ the cluster secret from the (freshly repaired) MSA token, and the first
 successful push closes the delivery outage. The moment the route flips to
 the mid-outage revision, subtract Phase C''s timestamp: **that is the
 push model's delivery RTO** — the pull model's equivalent was ~0.
+
 **Success:** App regenerated, secret present, route serving the
 mid-outage revision; record the delta.
+
 **Failure:** App `Unknown`/cluster secret missing → the MSA/GitOpsCluster
 chain;
 app `SyncFailed forbidden` → P.2's RBAC didn't survive re-home — that
