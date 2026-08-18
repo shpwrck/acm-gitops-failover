@@ -43,7 +43,7 @@ autonomous path** — is argued in [docs/design.md](docs/design.md).
 | Document | What it holds |
 | --- | --- |
 | [docs/design.md](docs/design.md) | The two-layer design, the four-path comparison, primary sources |
-| [docs/build.md](docs/build.md) | The verified build: second hub, S3 store, backup layer + GitOps wiring |
+| [docs/build.md](docs/build.md) | The experimental build: clusters, versions, storage, and wiring — approximate it as a prerequisite |
 | [docs/exercises/](docs/exercises/) | Per-path exercise records: timelines, findings, measured RTOs |
 | [dr/](dr/README.md) | Git-driven DR roles (the automated paths): mechanism, two-PR rationale, verification ledger |
 | [research-notes.md](research-notes.md) | Annotated bibliography — every documentation claim with its exact anchor |

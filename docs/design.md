@@ -2,8 +2,9 @@
 
 Why the architecture looks the way it does: two independent layers, so
 that losing the management hub costs neither workloads nor — with the
-right delivery choice — deployments. The verified build steps are in
-[build.md](build.md); the live proof is in [exercises/](exercises/).
+right delivery choice — deployments. The environment it was proven on
+is outlined in [build.md](build.md); the live proof is in
+[exercises/](exercises/).
 
 ## Delivery models
 
