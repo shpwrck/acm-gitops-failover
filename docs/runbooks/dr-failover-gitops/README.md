@@ -1,4 +1,4 @@
-# Path 2 — DR exercise runbook: GitOps operation, pull delivery
+# Automated Pull Path — DR exercise runbook: GitOps operation, pull delivery
 
 **Status: EXERCISE VERIFIED LIVE 2026-08-13** (attempt 2, 18:00–18:15Z;
 attempt 1, 17:32–17:57Z, falsified the original one-PR flip and was
@@ -6,14 +6,14 @@ reverted — findings in the Phase D' header and dr/README.md's ledger;
 full timeline in the [exercise records](../../exercises.md) §3.5).
 V1/V3/V4 closed; V5 open until hub-y's next
 demote. Same command / rationale / success / failure format as the
-verified [path-1 runbook](../dr-failover-exercise/README.md); this
-document is a DELTA — phases not listed here run exactly as path 1 wrote
-them (and path 1 verified them twice).
+verified [Manual Pull Path runbook](../dr-failover-exercise/README.md); this
+document is a DELTA — phases not listed here run exactly as the Manual
+Pull Path wrote them (and that path verified them twice).
 
-Conventions as path 1 (`$ACTIVE`/`$PASSIVE`/`$MANAGED`, UTC, probes),
+Conventions as the Manual Pull Path (`$ACTIVE`/`$PASSIVE`/`$MANAGED`, UTC, probes),
 plus the overlay-dir mapping: the committed dirs keep the original lab
 names (`dr/hub` = hub-x, `dr/spoke` = hub-y), so set both before
-authoring any PR (values shown match path 1's exports):
+authoring any PR (values shown match the Manual Pull Path's exports):
 
 ```bash
 export ACTIVE_DIR=dr/spoke   # $ACTIVE's overlay dir  (dr/hub if $ACTIVE=hub-x, dr/spoke if hub-y)
@@ -99,9 +99,9 @@ proven instance-level.
 **Failure:** `dr-role` appears → stop; fix the label before anything
 else.
 
-## Phase 0/A/B/C — as path 1, plus one pre-flight line
+## Phase 0/A/B/C — as the Manual Pull Path, plus one pre-flight line
 
-Run path-1 Phases 0, A, B, C unchanged (MSA check, probes, out-of-band or
+Run the Manual Pull Path's Phases 0, A, B, C unchanged (MSA check, probes, out-of-band or
 `oc debug` kill, death gate, mid-outage v-next push — pull delivery still
 works hubless; that claim is already verified). Add to pre-flight:
 
@@ -163,7 +163,7 @@ on what evidence. (CI running this same check as a required status turns
 the guard into machinery; note it as an enhancement, don't block on it.)
 **Success:** `DEAD` → merge.
 **Failure:** JSON answer → the active hub LIVES; close the PR. Merging
-here is the split-brain path 1 warns about, with better bookkeeping.
+here is the split-brain the Manual Pull Path warns about, with better bookkeeping.
 
 ### D'.3 Let the survivor execute, and cut the poll wait
 
@@ -192,9 +192,9 @@ object runs clean — observed delete→`Finished`→`Joined/Available` in
 `oc apply` the manifest by hand (a hand-applied object is untracked and
 the demote PR's prune will never clean it — attempt-1 lesson).
 
-## Phase E — as path 1
+## Phase E — as the Manual Pull Path
 
-Path-1 E (verify + §3.3 MSA hygiene) unchanged.
+Manual Pull Path E (verify + §3.3 MSA hygiene) unchanged.
 
 ## Phase F' — Promotion PR (PR-B): the git-driven F.1
 
@@ -217,7 +217,7 @@ merged 18:09:05Z, set `20260813180954` Completed <1 min); no
 **Failure:** Restore refused/ignored messages at THIS point → you merged
 F' before D''s restore `Finished`; the operator's one-at-a-time rule
 also applies to schedule-vs-restore — wait, then re-sync. F.2 unchanged
-from path 1.
+from the Manual Pull Path.
 
 ## Phase G' — Demote as the mirror PR
 
@@ -243,12 +243,12 @@ passive restore `Enabled` 18:13:39Z. Prune won the race cleanly.
 (`restore-acm-passive-sync` `Enabled`), no BackupSchedule.
 **Failure:** Sync stuck on the pruned schedule → record for V3 and delete
 it by hand; the underlying BackupCollision guard has already frozen it
-regardless (verified path 1, both directions).
+regardless (verified in the Manual Pull Path, both directions).
 
-### G'.2 The imperative residue — exactly as path 1 G.1 + G.3
+### G'.2 The imperative residue — exactly as Manual Pull Path G.1 + G.3
 
 Wait for `$MANAGED` to read `Available: Unknown` on the returned hub
-(path-1 G.1's gate, including its warning — this is still the one
+(Manual Pull Path G.1's gate, including its warning — this is still the one
 dangerous moment), then delete the stale ManagedCluster (G.3). No PR
 represents this: it is runtime state, and the gate is a live reading.
 

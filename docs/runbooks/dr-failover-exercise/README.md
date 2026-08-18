@@ -3,9 +3,7 @@
 Operator-facing script for the full active/passive hub failover exercise:
 pre-flight, disaster, activation, verification, new-primary duties, and
 failback-as-role-swap. Every step gives the command, why it exists, what
-success looks like, and the failure modes with recovery. The *posture*
-this exercises (what is deployed where and why) lives in
-[`acm-active-passive-dr`](../acm-active-passive-dr/README.md); the
+success looks like, and the failure modes with recovery. The
 verified narrative with timings is the
 [exercise records](../../exercises.md) §3.
 
@@ -13,10 +11,10 @@ verified narrative with timings is the
 every step below ran as written; measured decision-to-re-home ≈10 s, zero
 failed requests across the full window.
 
-**This is Path 1 of 4** (manual operation, pull delivery — README, The four paths).
-Siblings: [path 2](../dr-failover-gitops/README.md) git-driven operation,
-[path 3](../dr-failover-push-manual/README.md) push delivery,
-[path 4](../dr-failover-push-gitops/README.md) both — all three are
+**This is the Manual Pull Path** (manual operation, pull delivery — README, The four paths).
+Siblings: the [Automated Pull Path](../dr-failover-gitops/README.md) git-driven operation,
+the [Manual Push Path](../dr-failover-push-manual/README.md) push delivery,
+the [Automated Push Path](../dr-failover-push-gitops/README.md) both — all three are
 deltas against this document, so a change here must be checked against
 them.
 
@@ -134,10 +132,8 @@ same GitOps operator so restored wiring lands on a working Argo; (4) the
 passive hub must already reach the shared bucket.
 **Success:** namespace exists / CRD `NotFound` / all Argo pods `Running` /
 BSL `Available`.
-**Failure:** Each has its fix in the
-[posture runbook](../acm-active-passive-dr/README.md) failure paths;
-resolve before the exercise — all four are cheap now and expensive
-mid-outage.
+**Failure:** resolve before the exercise — all four are cheap now and
+expensive mid-outage.
 
 **Gate:** 0.1–0.4 all green → proceed.
 
@@ -526,7 +522,5 @@ this direction); fine, continue.
 
 - Summarize both probe logs (window, request count, failure count, flip
   timestamp) into the exercise record.
-- Update the [posture runbook](../acm-active-passive-dr/README.md) header
-  if the roles swapped (it states who is active NOW).
 - Update the [exercise records](../../exercises.md) with the new timings; commit everything —
   the repo IS the DR plan; an undocumented exercise never happened.

@@ -1,36 +1,25 @@
 # ACM & OpenShift GitOps Failover
 
-What losing an ACM hub costs, and how to get it back — proven live, not
-argued. Hub state rides active/passive backup-restore through a shared
-S3 bucket; workloads ride pull-model GitOps straight from git; the hubs
-never talk to each other. Everything in this repo was run against a
-real three-cluster lab on 2026-08-12/13: every command executed, every
-timing observed, and all four cells of the delivery × operation matrix
-closed with live measurements.
+This repo describes how to handle failover of an ACM hub with
+GitOps-delivered workloads, across the full matrix of workload delivery
+(pull or push) and failover operation (manual runbook or pull request).
+Hub state is replicated active/passive with backup-restore through a
+shared S3 bucket; workloads are delivered by GitOps; this repo can
+drive all four modes independently.
 
 This README is the map. The design rationale, build record, exercise
-evidence, and operator procedures each live in their own document below.
+records, and operator runbooks each live in their own document below.
 
 ## Environment
 
 | Cluster | API | Shape | Role |
 | --- | --- | --- | --- |
-| hub-x | api.hub-x.k8socp.com | SNO, OCP 4.21 | ACM 2.17.0 hub — currently **passive** |
-| hub-y | api.hub-y.k8socp.com | SNO, OCP 4.21 | ACM 2.17.0 hub — currently **active** (manages spoke) |
-| spoke | api.spoke.k8socp.com | SNO, OCP 4.21 | workload cluster (pull-model GitOps) |
+| hub-x | api.hub-x.example.com | SNO, OCP 4.21 | ACM 2.17.0 hub |
+| hub-y | api.hub-y.example.com | SNO, OCP 4.21 | ACM 2.17.0 hub |
+| spoke | api.spoke.example.com | SNO, OCP 4.21 | workload cluster |
 
-Roles are symmetric and have swapped in every exercise; the standing
-posture, with its verify and recover blocks, is the
-[posture runbook](docs/runbooks/acm-active-passive-dr/README.md).
-
-**Naming.** Clusters are referred to generically: `hub-x` and `hub-y`
-are the two ACM hubs, `spoke` is the workload cluster. The committed
-lab files predate the rename and keep the original names — `dr/hub/`
-is hub-x's role overlay, `dr/spoke/` is hub-y's,
-`manifests/40-import-sage.yaml` imports spoke, and the runbook
-directory `spoke-acm-hub` is hub-y's build record. Command outputs in
-the docs are the real recorded outputs with only the cluster names
-substituted.
+The hub roles are interchangeable: failover can swap them back and
+forth without any additional cleanup or reset in between.
 
 ## The four paths
 
@@ -40,12 +29,12 @@ pull request whose review is the split-brain gate — and workloads can be
 pushes. All four combinations are verified; the records live in
 [docs/exercises.md](docs/exercises.md):
 
-| Path | Delivery | Operation | Runbook | Record | Verdict |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Pull | Manual | [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | §3, §3.4 | verified both directions: ≈10 s re-home, zero downtime, deploys land mid-outage |
-| 2 | Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | §3.5 | two-PR choreography (one-PR flip falsified live); merge→claim ≈20 s; zero downtime |
-| 3 | Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | §3.6 | push delivery RTO 2:53 vs pull's ~2.5 min poll-only; app stayed up throughout |
-| 4 | Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | §3.7 | push RTO 2:45 — the PR beat the manual sibling (merge→claim 28 s); audit trail free |
+| Delivery | Operation | Runbook | Record | Verdict |
+| --- | --- | --- | --- | --- |
+| Pull | Manual | [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | §3, §3.4 | verified both directions: ≈10 s re-home, zero downtime, deploys land mid-outage |
+| Pull | Git-driven (PR) | [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | §3.5 | two-PR choreography (one-PR flip falsified live); merge→claim ≈20 s; zero downtime |
+| Push | Manual | [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | §3.6 | push delivery RTO 2:53 vs pull's ~2.5 min poll-only; app stayed up throughout |
+| Push | Git-driven (PR) | [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | §3.7 | push RTO 2:45 — the PR beat the manual sibling (merge→claim 28 s); audit trail free |
 
 Why the halves differ — and why there is deliberately **no fifth,
 fully-autonomous path** — is argued in [docs/design.md](docs/design.md).
@@ -57,7 +46,7 @@ fully-autonomous path** — is argued in [docs/design.md](docs/design.md).
 | [docs/design.md](docs/design.md) | The two-layer design, the four-path comparison, primary sources |
 | [docs/build.md](docs/build.md) | The verified build: second hub, S3 store, backup layer + GitOps wiring |
 | [docs/exercises.md](docs/exercises.md) | Exercise records §3–§3.7: timelines, findings, measured RTOs |
-| [dr/](dr/README.md) | Git-driven DR roles (paths 2/4): mechanism, two-PR rationale, verification ledger |
+| [dr/](dr/README.md) | Git-driven DR roles (the automated paths): mechanism, two-PR rationale, verification ledger |
 | [research-notes.md](research-notes.md) | Annotated bibliography — every documentation claim with its exact anchor |
 
 Runbooks — operator scripts, command / rationale / success / failure
@@ -65,13 +54,10 @@ per step:
 
 | Runbook | Scope |
 | --- | --- |
-| [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | Path 1: the full manual exercise — the spine the other paths delta against |
-| [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | Path 2: failover as two pull requests |
-| [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | Path 3: manual failover with push delivery under measurement |
-| [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Path 4: the composition of paths 2 + 3 |
-| [acm-active-passive-dr](docs/runbooks/acm-active-passive-dr/README.md) | The standing posture: state, template map, verify and recover |
-| [spoke-acm-hub](docs/runbooks/spoke-acm-hub/README.md) | How hub-y became a standalone ACM hub |
-| [truenas-seaweedfs-s3](docs/runbooks/truenas-seaweedfs-s3/README.md) | The lab's S3-compatible backup store |
+| [dr-failover-exercise](docs/runbooks/dr-failover-exercise/README.md) | Manual Pull Path: the full manual exercise — the spine the other paths delta against |
+| [dr-failover-gitops](docs/runbooks/dr-failover-gitops/README.md) | Automated Pull Path: failover as two pull requests |
+| [dr-failover-push-manual](docs/runbooks/dr-failover-push-manual/README.md) | Manual Push Path: manual failover with push delivery under measurement |
+| [dr-failover-push-gitops](docs/runbooks/dr-failover-push-gitops/README.md) | Automated Push Path: the composition of the Automated Pull and Manual Push Paths |
 
 ## Repo layout
 

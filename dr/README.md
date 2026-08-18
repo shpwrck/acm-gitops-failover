@@ -1,6 +1,6 @@
-# Git-driven DR roles (paths 2 & 4)
+# Git-driven DR roles (the automated paths)
 
-**Status: FLIP VERIFIED LIVE 2026-08-13** (path-2 disaster exercise,
+**Status: FLIP VERIFIED LIVE 2026-08-13** (Automated Pull Path disaster exercise,
 [runbook](../docs/runbooks/dr-failover-gitops/README.md), two attempts —
 [exercise records](../docs/exercises.md) §3.5). V0/V2 closed with wiring evidence earlier that day; the
 exercise closed V1 (FALSIFIED as designed — hence the two-PR
@@ -45,7 +45,7 @@ one-PR version is FALSIFIED, see below):
    `auto-import-account` secrets once clusters are imported) stays a
    gated imperative step; see "Imperative residue" below.
 
-**Why two PRs (falsified live, 2026-08-13 path-2 attempt 1):** a single
+**Why two PRs (falsified live, 2026-08-13 Automated Pull Path attempt 1):** a single
 PR that flips straight to `../roles/active` delivers the BackupSchedule
 and the activation Restore in the SAME sync, and two verified failure
 modes follow. (1) The backup operator **ignores a Restore while any
@@ -97,8 +97,8 @@ Once this wiring is live, **manual role surgery on a hub is fought by its
 reconciler**: selfHeal recreated a manually-deleted passive Restore in
 **6 seconds** (observed 2026-08-13, 16:00:22Z→16:00:28Z). Consequences:
 
-- Manual paths (1/3) now REQUIRE the break-glass suspend first (path-1
-  runbook D.0): null out `syncPolicy.automated` on the operated hub's
+- The manual paths now REQUIRE the break-glass suspend first (Manual
+  Pull Path runbook D.0): null out `syncPolicy.automated` on the operated hub's
   `dr-role`, operate, re-align git to the new reality, only then
   re-enable automation.
 - This is the customer lesson in miniature: git-driven and imperative
@@ -137,7 +137,7 @@ Closed 2026-08-13 (wiring, no disaster required):
   INCLUDED (push delivery fails over), `dr-role` still absent — the
   opposite-treatments design, proven both ways.
 
-Closed 2026-08-13 by the path-2 disaster exercise (exercise records §3.5):
+Closed 2026-08-13 by the Automated Pull Path disaster exercise (exercise records §3.5):
 
 - **V1 — PruneFirst ordering: FALSIFIED, twice, two different ways.**
   Attempt 1 (one-PR flip to `../roles/active`): the role's BackupSchedule
@@ -156,8 +156,8 @@ Closed 2026-08-13 by the path-2 disaster exercise (exercise records §3.5):
   while it was down); spoke read `Unknown` at 18:13:08Z; hub-x's own Argo
   natural-poll sync pruned the stale BackupSchedule at 18:13:29Z before
   it ever fired a backup or a collision, and the passive restore was
-  `Enabled` by 18:13:39Z — manual G.2+G.4 fully automated. **Path 4
-  observed the OTHER order** (collision 18:51:30Z → prune 18:51:41Z):
+  `Enabled` by 18:13:39Z — manual G.2+G.4 fully automated. **The
+  Automated Push Path observed the OTHER order** (collision 18:51:30Z → prune 18:51:41Z):
   benign both ways, as designed — the guard freezes, the prune cleans.
 - **V4 — Measured RTO delta:** merge→Argo sync ≈5 s with the refresh
   annotation (18:02:09→18:02:14Z); clean-path machinery merge→claim is
@@ -169,6 +169,6 @@ Open:
 
 - **V5 — Restore names accumulating:** confirm demote-PR file removal
   prunes the inert Finished restores — observe at hub-y's next demote
-  (path-4 failback). Note from attempt 1: an activation restore
+  (Automated Push Path failback). Note from attempt 1: an activation restore
   re-created by hand (`oc apply`) is NOT Argo-tracked and must be deleted
   by hand; only Argo-created objects get pruned by the demote PR.

@@ -63,9 +63,9 @@ the halves differ, in one line each:
 - **Pull vs push** is *what a hub outage costs delivery*: nothing (spoke
   syncs git itself — proven in every exercise — v2 through v7 all landed hubless) vs a
   delivery outage lasting until the new hub's Argo resumes pushing
-  (path 3 measures it). It is also *what the hub is worth to an
+  (the Manual Push Path measures it). It is also *what the hub is worth to an
   attacker*: push runs on an ACM-minted credential whose managed-cluster
-  SA is cluster-admin-equivalent (verified — path-3 runbook P.2), so a
+  SA is cluster-admin-equivalent (verified — Manual Push Path runbook P.2), so a
   compromised hub Argo is admin on every cluster it pushes to; pull
   keeps the hub credential-free for delivery and the app's RBAC
   namespace-scoped.
@@ -73,7 +73,7 @@ the halves differ, in one line each:
   operator with a runbook (≈10 s of machinery after seconds of typing)
   vs a pull request whose review is the split-brain gate and whose merge
   history is the audit log (expected cost: + merge + Argo poll; measured
-  by path 2's V4).
+  by the Automated Pull Path's V4).
 
 Why there is no fifth, fully-autonomous path: hub failover is
 deliberately a human decision. A passive-side monitor cannot distinguish
@@ -84,13 +84,13 @@ guards the bucket, not cluster claims; going autonomous safely requires a
 quorum witness/fencing, and the architecture has already made hub
 downtime cheap (workloads run and — on pull — deploy hubless). Automate
 the detection, the pre-flight, and the execution; keep the decision
-human. Path 2/4's PR gate is exactly that boundary drawn in git.
+human. The automated paths' PR gate is exactly that boundary drawn in git.
 
-Delivery infrastructure shared by paths 3/4:
+Delivery infrastructure shared by the push paths:
 [manifests/63-appset-push.yaml](../manifests/63-appset-push.yaml) +
 [apps/hello-failover-push/](../apps/hello-failover-push/) (separate
 namespace — both models coexist through one outage). Role-flip
-infrastructure for paths 2/4: [dr/](../dr/README.md).
+infrastructure for the automated paths: [dr/](../dr/README.md).
 
 ## Sources
 

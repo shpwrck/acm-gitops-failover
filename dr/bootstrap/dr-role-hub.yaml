@@ -35,5 +35,5 @@ spec:
     syncOptions:
       # Passive restore must be GONE before an activation restore lands
       # (one Restore honored at a time). PruneFirst makes a single
-      # role-flip PR safe. [UNVERIFIED — path-2 exercise item V1]
+      # role-flip PR safe. [UNVERIFIED — Automated Pull Path exercise item V1]
       - PruneFirst=true

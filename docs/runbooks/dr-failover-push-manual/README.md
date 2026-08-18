@@ -1,4 +1,4 @@
-# Path 3 — DR exercise runbook: manual operation, push delivery
+# Manual Push Path — DR exercise runbook: manual operation, push delivery
 
 **Status: EXERCISE VERIFIED LIVE 2026-08-13 18:30–18:40Z**
 ([exercise records](../../exercises.md) §3.6). **Measured push-model
@@ -11,10 +11,10 @@ break-glass (suspend the returned hub's dr-role before touching its
 role objects), then git re-align + re-enable per D.0's
 afterwards-contract — adoption verified, nothing recreated. Phase P was
 verified earlier the same day. Delta against the verified
-[path-1 runbook](../dr-failover-exercise/README.md); unlisted phases run
+[Manual Pull Path runbook](../dr-failover-exercise/README.md); unlisted phases run
 as written there. The DR *operation* is identical — what changes is the
-delivery model under test and therefore what the exercise measures: path 1
-proves workload delivery is IMMUNE to hub loss; path 3 measures exactly
+delivery model under test and therefore what the exercise measures: the
+Manual Pull Path proves workload delivery is IMMUNE to hub loss; this path measures exactly
 how delivery DIES with the hub and how it resurrects. Both truths belong
 in the customer conversation.
 
@@ -76,7 +76,7 @@ oc --context $MANAGED get clusterrolebinding open-cluster-management:application
 oc --context $MANAGED get clusterrole open-cluster-management:application-manager -o jsonpath='{.rules}'
 ```
 
-## Phase 0/A — as path 1, plus the second probe
+## Phase 0/A — as the Manual Pull Path, plus the second probe
 
 Add a second availability probe for the push app's route (same loop, own
 log file `~/probe-push-<date>.log`).
@@ -86,7 +86,7 @@ unbroken (already proven twice); the push log tells this path's actual
 story — the app KEEPS SERVING through hub death (Argo dying uninstalls
 nothing), which is itself a claim customers doubt.
 
-## Phase B — as path 1
+## Phase B — as the Manual Pull Path
 
 ## Phase C' — The inverted teaching moment
 
@@ -96,8 +96,8 @@ date -u +%FT%TZ   # record: push-model deploy attempted
 curl -s https://hello-failover-push-hello-failover-push.apps.spoke.k8socp.com | grep -i revision
 ```
 
-**Why:** Path 1's Phase C celebrates the deploy landing hubless. Path 3
-documents the mirror: the commit lands in git and NOTHING HAPPENS — no
+**Why:** The Manual Pull Path's Phase C celebrates the deploy landing
+hubless. This path documents the mirror: the commit lands in git and NOTHING HAPPENS — no
 hub Argo exists to push it. The gap between this timestamp and the
 revision actually serving (Phase E') is the push model's
 delivery-pipeline RTO, the number this whole path exists to measure. Do
@@ -109,11 +109,11 @@ pull route serves its NEW one within ~3 min. Both probes: unbroken 200s.
 (a leftover local-Argo binding?) — the model separation is broken;
 investigate before drawing any conclusions.
 
-## Phase D — as path 1 (identical machinery)
+## Phase D — as the Manual Pull Path (identical machinery)
 
-## Phase E' — path-1 E, plus delivery resurrection
+## Phase E' — Manual Pull Path E, plus delivery resurrection
 
-After path-1 E.1–E.3 (including §3.3 MSA hygiene — do it FIRST; the
+After Manual Pull Path E.1–E.3 (including §3.3 MSA hygiene — do it FIRST; the
 GitOps cluster secret depends on the same MSA chain):
 
 ```bash
@@ -131,11 +131,11 @@ push model's delivery RTO** — the pull model's equivalent was ~0.
 **Success:** App regenerated, secret present, route serving the
 mid-outage revision; record the delta.
 **Failure:** App `Unknown`/cluster secret missing → the MSA/GitOpsCluster
-chain (posture runbook failure paths, `ClusterRegistrationFailed` entry);
+chain;
 app `SyncFailed forbidden` → P.2's RBAC didn't survive re-home — that
 finding would itself justify the exercise.
 
-## Phase F/G/H — as path 1
+## Phase F/G/H — as the Manual Pull Path
 
 H additionally records: the measured delivery RTO, the P.2 RBAC discovery
 (fold into 63/64 comments), and the side-by-side probe-log comparison —

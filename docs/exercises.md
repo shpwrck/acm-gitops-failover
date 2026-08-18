@@ -8,8 +8,7 @@ the design these runs prove out is [design.md](design.md).
 
 ## 3. The DR exercise (verified live, 2026-08-12)
 
-Pre-flight (all checks passed; the full checklist is in the
-`acm-active-passive-dr` runbook): the load-bearing one is the MSA token —
+Pre-flight (all checks passed): the load-bearing one is the MSA token —
 `oc get managedserviceaccount auto-import-account -n <cluster>` on the
 active hub must show `.status.tokenSecretRef`, an unexpired
 `.status.expirationTimestamp`, **and `TokenReported: True`** (§3.3 — a
@@ -210,7 +209,7 @@ record because a customer will ask.
   posture, restored by exercising the DR machinery in both directions on
   consecutive days.**
 
-### 3.5 Path 2: failover as a pull request (verified live, 2026-08-13)
+### 3.5 Automated Pull Path: failover as a pull request (verified live, 2026-08-13)
 
 The git-driven flip run twice against the restored posture (hub-x active,
 hub-y passive), driven by the
@@ -258,7 +257,7 @@ healed `latest` within a minute. Zero downtime throughout. The fix —
   (V1 falsified→fixed, V3 benign, V4 measured; V5 open until hub-y's
   next demote).
 
-### 3.6 Path 3: what a hub outage costs push delivery (verified live, 2026-08-13)
+### 3.6 Manual Push Path: what a hub outage costs push delivery (verified live, 2026-08-13)
 
 Manual failover with the push app under test (ACTIVE=hub-y, PASSIVE=hub-x),
 run 18:30–18:40Z, driven by the
@@ -293,7 +292,7 @@ run 18:30–18:40Z, driven by the
   cluster secret → app sync → route flip; §3.3 hygiene stays FIRST (the
   push credential is the same MSA family).
 
-### 3.7 Path 4: the composed exercise (verified live, 2026-08-13)
+### 3.7 Automated Push Path: the composed exercise (verified live, 2026-08-13)
 
 The full composition — git-driven operation with push delivery under
 measurement (ACTIVE=hub-x, PASSIVE=hub-y), run 18:43–18:53Z, closing the
@@ -307,14 +306,14 @@ measurement (ACTIVE=hub-x, PASSIVE=hub-y), run 18:43–18:53Z, closing the
 | 18:45:37 | V1 race detected in 6 s (`ignored … passive-sync currently active`) — now a routine step |
 | 18:45:48→59 | recovery delete → selfHeal re-run → **spoke `True/True` on hub-y; merge→claim 28 s total** |
 | 18:46:54 | §3.3 token + cluster-secret re-mint (fourth consecutive reproduction) |
-| 18:47:56 | **push route serves `v3` — delivery RTO 2 min 45 s**, beating manual path 3's 2:53 |
+| 18:47:56 | **push route serves `v3` — delivery RTO 2 min 45 s**, beating the Manual Push Path's 2:53 |
 | 18:48:30 / 18:48:38 | promotion PR-B merged (first backup set `Completed` 18:48:42) / demote PR merged, hub-x still down |
-| 18:51:30→41 | returned hub-x: **`BackupCollision` first, prune 10 s later** — V3's other order, benign both ways across paths 2+4 |
+| 18:51:30→41 | returned hub-x: **`BackupCollision` first, prune 10 s later** — V3's other order, benign both ways across the automated paths |
 | 18:52:11 / 18:52:41 | spoke `Unknown` on hub-x / pull `v7` serving (one slow ~7.5 min poll cycle — jitter, not outage) |
 | 18:53:00 | G.3 stale-claim delete — posture symmetric: hub-y ACTIVE, hub-x PASSIVE |
 
 - **The matrix's slowest cell beat its manual sibling**: PR merge→claim
-  took 28 s (V1 recovery included), less than path 3's 38 s operator
+  took 28 s (V1 recovery included), less than the Manual Push Path's 38 s operator
   typing latency — so the audit trail was free. In a real disaster the
   decision dominates both, and the PR *is* the decision record.
 - Probe verdict for the whole day — §3.4 plus three exercises, four hub

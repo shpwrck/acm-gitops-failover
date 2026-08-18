@@ -3,8 +3,8 @@
 #  no extra RBAC needed — see the P.2 findings (identity = application-manager
 #  MSA, destination = cluster-proxy addon URL, sage-side rights =
 #  cluster-admin-equivalent) in docs/runbooks/dr-failover-push-manual.
-#  DR behavior (delivery RTO across a failover) still pending the path-3
-#  exercise.]
+#  DR behavior (delivery RTO across a failover) still pending the
+#  Manual Push Path exercise.]
 #
 # Contrast with 62-appset-pull.yaml: NONE of the three pull markers
 # (ocm-managed-cluster annotation, skip-reconcile, pull-to-ocm label).
@@ -16,7 +16,8 @@
 #   on its own death — but nothing new syncs).
 # - After activation, the restored ApplicationSet + re-minted cluster
 #   secret resume pushing. Delivery-pipeline RTO = failover RTO + secret
-#   re-mint + sync; measuring it is the point of the path-3 exercise.
+#   re-mint + sync; measuring it is the point of the Manual Push Path
+#   exercise.
 # Coexists with the pull app: separate namespace + separate app name, so
 # both models can be observed through the same outage.
 apiVersion: argoproj.io/v1alpha1
@@ -63,5 +64,5 @@ spec:
             - /spec/to/weight
 # RBAC: none needed (verified live) — the pushing identity's sage-side SA
 # is bound cluster-admin-equivalent by the application-manager addon
-# itself. See the security finding in the path-3 runbook P.2 before
-# selling that convenience as a feature.
+# itself. See the security finding in the Manual Push Path runbook P.2
+# before selling that convenience as a feature.
