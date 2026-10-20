@@ -1,4 +1,4 @@
-# Passive-hub posture — PASSIVE hub (spoke) only.
+# Passive-hub posture — PASSIVE hub only (hub-y at the start).
 # skip = do NOT activate managed clusters here; sync = keep pulling new
 # backups as they land. Flipping veleroManagedClustersBackupName to `latest`
 # (manifests/57-restore-activate.yaml) IS the failover action.
