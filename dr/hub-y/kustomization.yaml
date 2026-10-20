@@ -1,8 +1,6 @@
 # DR role for hub-y, reconciled by hub-y's OWN local Argo CD
 # (dr/bootstrap/dr-role-hub-y.yaml). See ../README.md for the flip
 # choreography.
-# Keep the line below in step with the live role.
-# CURRENT ROLE: passive
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
