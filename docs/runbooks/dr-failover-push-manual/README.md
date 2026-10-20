@@ -6,11 +6,10 @@ as written there. The DR *operation* is identical — what changes is the
 delivery model under test and therefore what the exercise measures: the
 Manual Pull Path proves workload delivery is IMMUNE to hub loss; this path measures exactly
 how delivery DIES with the hub and how it resurrects. Both truths matter
-when choosing a delivery model. Under live dr/ wiring the G phase gains
-the operator-at-return break-glass (suspend the returned hub's dr-role
-before touching its role objects), then git re-align + re-enable per
-D.0's afterwards-contract. The measured timeline is the
-[exercise record](../../exercises/manual-push.md).
+when choosing a delivery model. Under live dr/ wiring the G phase starts
+with the returned hub's break-glass (Manual Pull Path G.0), then git
+re-align + re-enable per D.0's afterwards-contract. Measured delivery
+RTOs are in [results.md](../../results.md).
 
 Conventions as the Manual Pull Path, plus the push app's URL:
 
@@ -54,7 +53,7 @@ What verification found (ACM 2.17):
 - The minted cluster secret is `$MANAGED-application-manager-cluster-secret`
   — the token belongs to the **`application-manager`
   ManagedServiceAccount** (same MSA family as auto-import; one more
-  dependent of the [MSA token chain](../../exercises/msa-token-hygiene.md)).
+  dependent of the [MSA token chain](../../msa-token-hygiene.md)).
 - The Application's destination is NOT `$MANAGED`'s API URL but the
   **cluster-proxy addon**
   (`https://cluster-proxy-addon-user.multicluster-engine.svc.cluster.local:9092/$MANAGED`)
@@ -125,7 +124,7 @@ investigate before drawing any conclusions.
 
 ## Phase E' — Manual Pull Path E, plus delivery resurrection
 
-After Manual Pull Path E.1–E.3 (including [MSA hygiene](../../exercises/msa-token-hygiene.md) — first, as triage
+After Manual Pull Path E.1–E.3 (including [MSA hygiene](../../msa-token-hygiene.md) — first, as triage
 discipline; see Why below for what actually gates delivery):
 
 ```bash
@@ -156,7 +155,8 @@ finding would itself justify the exercise.
 
 ## Phase F/G/H — as the Manual Pull Path
 
-H additionally records: the measured delivery RTO, the P.2 RBAC discovery
-(fold into `manifests/63-appset-push.yaml`'s comments), and the
-side-by-side probe-log comparison —
-the clearest evidence the four-path comparison produces.
+H additionally records: the measured delivery RTO, whether P.2's RBAC
+findings still hold in your environment (if not, update
+`manifests/63-appset-push.yaml`'s comments), and the side-by-side
+probe-log comparison — the clearest evidence the four-path comparison
+produces.

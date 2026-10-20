@@ -1,8 +1,7 @@
-# Bootstrap: apply ONCE, MANUALLY, on cluster `spoke` only — AFTER
-# dr-role-rbac.yaml:
-#   oc --context spoke apply -f dr/bootstrap/dr-role-rbac.yaml
-#   oc --context spoke apply -f dr/bootstrap/dr-role-spoke.yaml
-# See dr-role-hub.yaml for the full rationale (imperative bootstrap,
+# Bootstrap: apply ONCE, MANUALLY, on hub-y only — AFTER dr-role-rbac.yaml:
+#   oc --context hub-y apply -f dr/bootstrap/dr-role-rbac.yaml
+#   oc --context hub-y apply -f dr/bootstrap/dr-role-hub-y.yaml
+# See dr-role-hub-x.yaml for the full rationale (imperative bootstrap,
 # RBAC-first ordering, exclude-from-backup criticality, PruneFirst).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -14,9 +13,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/shpwrck/acm-gitops-failover
+    repoURL: https://github.com/redhat-na-ssa/acm-gitops-failover
     targetRevision: main
-    path: dr/spoke
+    path: dr/hub-y
   destination:
     server: https://kubernetes.default.svc
     namespace: open-cluster-management-backup

@@ -1,6 +1,13 @@
-# ACM operator install for the spoke cluster (making it a standalone hub).
-# Channel release-2.17 matches the existing hub's MultiClusterHub 2.17.0 —
-# required if hub-backup restore compatibility is ever wanted between the two.
+# ACM operator install — apply on BOTH hubs (hub-x and hub-y).
+# SKIP this file on a cluster that already runs ACM: OLM allows one
+# OperatorGroup per namespace, and adding this one next to an existing one
+# fails every CSV in the namespace (TooManyOperatorGroups). Check first:
+#   oc get operatorgroup -n open-cluster-management
+# Both hubs must run the SAME ACM version: a backup cannot be restored on a
+# hub running an older version than the hub that wrote it. With
+# installPlanApproval: Automatic the hubs can drift apart by a z-stream
+# (e.g. while one is down); in production prefer Manual approval and
+# upgrade both hubs together.
 apiVersion: v1
 kind: Namespace
 metadata:

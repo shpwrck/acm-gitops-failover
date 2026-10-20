@@ -2,8 +2,8 @@
 # The three pull-model markers: ocm-managed-cluster annotation (route via
 # ManifestWork), skip-reconcile (hub Argo must not push it), and the
 # pull-to-ocm-managed-cluster label (propagation controller selector).
-# The generated Application lands ON sage, whose local Argo CD syncs it from
-# git — so syncing survives hub loss.
+# The generated Application lands ON the managed cluster, whose local Argo CD
+# syncs it from git — so syncing survives hub loss.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -29,7 +29,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/shpwrck/acm-gitops-failover
+        repoURL: https://github.com/redhat-na-ssa/acm-gitops-failover
         targetRevision: main
         path: apps/hello-failover
       destination:

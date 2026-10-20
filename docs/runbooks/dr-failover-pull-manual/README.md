@@ -3,11 +3,10 @@
 Operator-facing script for the full active/passive hub failover exercise:
 pre-flight, disaster, activation, verification, new-primary duties, and
 failback-as-role-swap. Every step gives the command, why it exists, what
-success looks like, and the failure modes with recovery. The
-verified narrative with timings is the
-[exercise record](../../exercises/manual-pull.md).
+success looks like, and the failure modes with recovery. Measured
+timings from the live runs are in [results.md](../../results.md).
 
-**This is the Manual Pull Path** (manual operation, pull delivery — README, The four paths).
+**This is the Manual Pull Path** (manual operation, pull delivery — see [the four paths](../../../README.md#the-four-paths)).
 Siblings: the [Automated Pull Path](../dr-failover-pull-gitops/README.md) git-driven operation,
 the [Manual Push Path](../dr-failover-push-manual/README.md) push delivery,
 the [Automated Push Path](../dr-failover-push-gitops/README.md) both — all three are
@@ -23,10 +22,37 @@ with real cluster names (a real hub literally named "spoke" has happened),
 and a mistyped context in Phase B kills the wrong cluster.
 
 ```bash
-export ACTIVE=hub-y      # hub about to "die"
-export PASSIVE=hub-x       # hub that will activate
+export ACTIVE=hub-x       # hub about to "die" (hub-x in the repo's starting posture)
+export PASSIVE=hub-y      # hub that will activate
 export MANAGED=spoke      # workload cluster that re-homes
-export APP_URL=https://hello-failover-hello-failover.apps.spoke.example.com
+export APP_URL=https://hello-failover-hello-failover.apps.spoke.example.com   # <apps domain of $MANAGED>
+export ACTIVE_API=$(oc --context $ACTIVE whoami --show-server)   # read from kubeconfig while the hub is alive
+```
+
+The whole exercise at a glance (the hub-pointer flip in Phase D is the
+re-home):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Op as Operator
+    participant A as $ACTIVE hub
+    participant S3 as S3 bucket
+    participant P as $PASSIVE hub
+    participant M as $MANAGED
+    Note over A,M: Phase 0/A — pre-flight checks, probes running
+    A->>S3: scheduled backups (BackupSchedule)
+    S3->>P: passive sync restore
+    Op-xA: Phase B — power off
+    Note over M: apps keep serving, local Argo keeps syncing git (Phase C)
+    Op->>P: Phase D — delete passive restore, apply activation restore
+    S3->>P: restore managed-cluster data + MSA token
+    P->>M: auto-import: klusterlet re-points to $PASSIVE
+    Op->>P: Phase E — verify addons, delete restored MSA secret
+    Op->>P: Phase F — apply BackupSchedule (new active)
+    P->>S3: backups resume
+    Op->>A: Phase G — power on, delete stale schedule and claim, apply passive restore
+    S3->>A: passive sync restore (roles swapped)
 ```
 
 - All timestamps UTC (`date -u`) so probe logs and cluster conditions
@@ -76,9 +102,10 @@ missing, expired, or frozen, failover ends in `Pending Import` — the
 single most likely way this whole architecture fails. `TokenReported` must
 be checked explicitly: a Velero-restored-but-frozen secret passes the
 weaker "does a token exist" checks while rotation is already dead
-(the [MSA token finding](../../exercises/msa-token-hygiene.md), found live 2026-08-13).
+(see [MSA token hygiene](../../msa-token-hygiene.md)).
 
-**Success:** Every `auto-import-account` row: `TOKEN-REPORTED: True`,
+**Success:** Every `auto-import-account` row: `TOKEN-REPORTED: True` (`False`
+or empty both fail),
 expiry comfortably in the future (rotation validity is 144h; expect
 several days out).
 
@@ -212,7 +239,7 @@ command here.
 killing the API out-of-band is the honest simulation. Do NOT cordon/drain
 first — that would be a migration, not a disaster.
 
-**API variant (used 2026-08-13):** on SNO the cluster dies with its one
+**API variant:** on SNO the cluster dies with its one
 node, so a debug pod can pull the trigger:
 
 ```bash
@@ -223,21 +250,21 @@ oc --context $ACTIVE debug node/<node> -- chroot /host shutdown -h 1
 `-h 1` (not `now`) lets the debug pod detach cleanly and leaves a 60 s
 `shutdown -c` abort window. Two caveats: (1) this is a GRACEFUL shutdown —
 gentler than a power cut (kubelet terminates pods, etcd flushes) — note
-the variant in the exercise record; (2) `oc` can never power a host back
+the variant in the exercise notes; (2) `oc` can never power a host back
 ON — confirm out-of-band access exists BEFORE firing, or Phase G is
 unreachable.
 
 **No out-of-band access at all?** Use `shutdown -r +1` instead — a
 self-recovering reboot (~80 s to API-dead, back in ~5–9 min). Its return
-races Phases C/D: if the old hub is back BEFORE D.2, run G.2's defusal
-first. The klusterlet re-homes regardless and the returned hub's
+races Phases C/D: if the old hub is back BEFORE D.2, run G.0 and G.2's
+defusal first. The klusterlet re-homes regardless and the returned hub's
 schedule freezes itself on `BackupCollision`, but do not leave it
 `Enabled` while you activate.
 
 **Success:**
 
 ```bash
-curl -sk --max-time 5 https://api.$ACTIVE.example.com:6443/version || echo DEAD
+curl -sk --max-time 5 $ACTIVE_API/version || echo DEAD
 ```
 
 prints `DEAD` (connection refused/timeout).
@@ -283,7 +310,7 @@ cluster-local GitOps debugging, unrelated to the dead hub.
 
 ## Phase D — Activate the passive hub
 
-### D.0 Break-glass: suspend the git-driven role reconciler (REQUIRED)
+### D.0 Break-glass: suspend the git-driven role reconciler (REQUIRED once `dr/` is bootstrapped)
 
 ```bash
 oc --context $PASSIVE patch applications.argoproj.io dr-role -n openshift-gitops \
@@ -292,9 +319,10 @@ oc --context $PASSIVE patch applications.argoproj.io dr-role -n openshift-gitops
 
 **Why:** the hub's `dr-role` Application reconciles its
 role from git with selfHeal — a manually-deleted passive Restore was
-recreated in **6 seconds** (deleted 16:00:22Z, back `Enabled` 16:00:28Z).
+recreated in **6 seconds** in a live run.
 Without this suspend, D.1 is silently undone and D.2 refuses to run
-("only one Restore honored at a time"). Manual and git-driven operation
+("only one Restore honored at a time"). Skip this step only when `dr/`
+was never bootstrapped (the patch returns NotFound). Manual and git-driven operation
 do not compose on the same hub; this patch is the documented off-switch.
 
 **Success:** `.spec.syncPolicy.automated` gone from the app:
@@ -347,8 +375,8 @@ from a previous activation — fixed-name or stamped — the apply is a
 silent no-op (identical spec, nothing re-triggers): check and delete it
 first (the G.5 lesson, at the moment it bites).
 
-**Success:** Phase reaches `Finished` (observed 2026-08-12: ~37 s;
-2026-08-13: seconds). The operator also stamps an
+**Success:** Phase reaches `Finished` (7–40 s in the live runs). The
+operator also stamps an
 `acm-restore-clusters-<ts>` safety backup at activation time — expected
 artifact, not an anomaly.
 
@@ -401,7 +429,7 @@ before digging, addon rollout is eventually consistent.
 ### E.2 Re-home evidence
 
 ```bash
-grep -v "$(printf 'api.%s' $ACTIVE)" ~/hub-pointer-$(date -u +%Y%m%d).log | head -3
+grep -v "$ACTIVE_API" ~/hub-pointer-$(date -u +%Y%m%d).log | head -3
 tail -3 ~/probe-$(date -u +%Y%m%d).log
 ```
 
@@ -413,7 +441,7 @@ claim.
 **Success:** Pointer log shows the new hub URL; availability log shows
 unbroken 200s.
 
-### E.3 Post-activation hygiene — the restored MSA secret ([the finding](../../exercises/msa-token-hygiene.md))
+### E.3 Post-activation hygiene — the restored MSA secret ([why](../../msa-token-hygiene.md))
 
 ```bash
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
@@ -453,7 +481,7 @@ unprotected — and E.3's fresh token is not in any backup. ACM's
 `backup-restore-enabled` policy exists purely to nag about this step.
 
 **Success:** Schedule `Enabled`; the first full set fires IMMEDIATELY on
-creation (no wait for the cron slot — observed 2026-08-13) and reaches
+creation (no wait for the cron slot) and reaches
 `Completed` within ~1 min, capturing E.3's fresh token. The listing will
 also show the OTHER hub's entire backup history — Velero syncs the shared
 bucket's contents into every cluster with the BSL; expected, and useful
@@ -488,6 +516,20 @@ failback may begin whenever the old hub returns.
 
 ## Phase G — Failback as role swap
 
+### G.0 Break-glass on the returned hub (only once `dr/` is bootstrapped)
+
+```bash
+oc --context $ACTIVE patch applications.argoproj.io dr-role -n openshift-gitops \
+  --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'   # $ACTIVE = the RETURNED hub
+```
+
+**Why:** git still says the returned hub is active, so its `dr-role`
+would re-create the BackupSchedule that G.2 deletes, within seconds. Run
+this as soon as the returned hub's API answers, before touching any of
+its role objects. Skip it when `dr/` was never bootstrapped (the patch
+returns NotFound). D.0's afterwards-contract (re-align git, then
+re-enable) now covers both hubs.
+
 ### G.1 Power the old hub back on; wait out the lease
 
 ```bash
@@ -499,7 +541,7 @@ oc --context $ACTIVE get managedclusters -w   # $ACTIVE = the RETURNED hub
 lease (which now heartbeats to the OTHER hub) expires.
 
 **Success:** `$MANAGED` flips to `Available: Unknown`. If the hub was down
-longer than the lease window (observed 2026-08-13 after a ~15 min outage),
+longer than the lease window (for example a ~15 min outage),
 it wakes with the cluster ALREADY `Unknown` — the 2–4 min wait applies
 only to short outages; the gate is the `Unknown` reading itself, never
 elapsed time.
@@ -606,6 +648,10 @@ one-shot was already reaped by a demote PR; fine, continue.
 ## Phase H — Evidence and docs
 
 - Summarize both probe logs (window, request count, failure count, flip
-  timestamp) into the exercise record.
-- Update the [exercise records](../../exercises/) with the new timings; commit everything —
+  timestamp) and keep them with the exercise's notes.
+- If a timing falls outside the ranges in [results.md](../../results.md),
+  or a step behaved differently, update that page and this runbook —
   the repo IS the DR plan; an undocumented exercise never happened.
+- If `dr/` is bootstrapped, finish D.0's afterwards-contract: re-align
+  the `dr/` overlays with the roles you created by hand, then re-enable
+  automation on both hubs.

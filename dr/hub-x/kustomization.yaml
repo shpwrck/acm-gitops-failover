@@ -1,0 +1,8 @@
+# DR role for hub-x, reconciled by hub-x's OWN local Argo CD
+# (dr/bootstrap/dr-role-hub-x.yaml). Flipping the role is a pull request
+# that changes which ../roles/* this lists (plus a one-shot activation file
+# during failover — see ../README.md for the two-PR choreography).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../roles/active

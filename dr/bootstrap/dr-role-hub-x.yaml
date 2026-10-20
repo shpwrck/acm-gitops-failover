@@ -1,0 +1,41 @@
+# Bootstrap: apply ONCE, MANUALLY, on hub-x only — AFTER dr-role-rbac.yaml
+# (without it the first sync fails on the ACM backup CRs and stays Failed
+# until explicitly re-synced):
+#   oc --context hub-x apply -f dr/bootstrap/dr-role-rbac.yaml
+#   oc --context hub-x apply -f dr/bootstrap/dr-role-hub-x.yaml
+# Bootstrap is imperative BY DESIGN — the thing that applies a hub's DR
+# role must be the hub itself (its local Argo), or failover has a
+# chicken-and-egg dependency on the cluster that just died.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dr-role
+  namespace: openshift-gitops
+  labels:
+    # CRITICAL — do not remove. ACM's resource backups include argoproj
+    # objects in openshift-gitops (the ApplicationSets are restored
+    # cross-hub). If THIS Application were restored onto the other hub,
+    # that hub would start reconciling dr/hub-x — the WRONG role — which is
+    # split-brain delivered by the backup system. Each hub's dr-role app
+    # must exist on that hub alone, forever. (CI checks this label.)
+    velero.io/exclude-from-backup: "true"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/redhat-na-ssa/acm-gitops-failover
+    targetRevision: main
+    path: dr/hub-x
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: open-cluster-management-backup
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Prune the passive Restore before applying an activation Restore
+      # (the backup operator honors one Restore at a time). This alone does
+      # NOT win the race: the operator can evaluate the new activation
+      # before the prune completes and ignore it — see the D'.3 recovery
+      # step in docs/runbooks/dr-failover-pull-gitops.
+      - PruneFirst=true

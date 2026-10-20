@@ -3,8 +3,9 @@ kind: ConfigMap
 metadata:
   name: hello-failover-push-content
 data:
+  # Bump REVISION to demonstrate a deploy (push runbook Phase C').
   index.html: |
     <html><body>
-    <h1>hello-failover-push REVISION v5 (pushed mid-outage, hub dead — Automated Push Path delivery-RTO clock)</h1>
-    <p>Served from git: shpwrck/acm-gitops-failover apps/hello-failover-push (PUSH model — delivered by the hub's Argo)</p>
+    <h1>hello-failover-push REVISION v1</h1>
+    <p>Served from git: apps/hello-failover-push (PUSH model — delivered by the active hub's Argo CD)</p>
     </body></html>

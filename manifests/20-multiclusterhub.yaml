@@ -1,8 +1,11 @@
-# MultiClusterHub for the spoke cluster.
-# PREREQUISITE: spoke must be fully detached from the old hub first — the
-# self-import of local-cluster creates a klusterlet named "klusterlet", which
-# collides with the one the old hub installed.
-# availabilityConfig Basic = single replicas; spoke is a single-node cluster.
+# MultiClusterHub — apply on BOTH hubs, after 10-acm-operator.yaml.
+# cluster-backup is disabled by default; enabling it installs the backup
+# operator and OADP into open-cluster-management-backup (needed by every
+# file from 50- onward). availabilityConfig Basic = single replicas, the
+# documented setting for single-node OpenShift; use High on multi-node hubs.
+# A cluster that is still managed by another hub must be detached from it
+# first: the hub's self-import creates a klusterlet named "klusterlet",
+# which collides with the one the other hub installed.
 apiVersion: operator.open-cluster-management.io/v1
 kind: MultiClusterHub
 metadata:
@@ -10,3 +13,7 @@ metadata:
   namespace: open-cluster-management
 spec:
   availabilityConfig: Basic
+  overrides:
+    components:
+      - name: cluster-backup
+        enabled: true

@@ -10,7 +10,9 @@ spec:
   clusterSet: default
 ---
 # Registers every cluster in the default clusterset into Argo CD (ACM mints
-# the Argo cluster secrets from rotated ManagedServiceAccount tokens).
+# the Argo cluster secrets from rotated ManagedServiceAccount tokens). On a
+# hub that already manages other clusters, that means all of them: use a
+# dedicated ManagedClusterSet for the demo instead of `default`.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -47,7 +49,8 @@ data:
   statusListKey: decisions
   matchKey: clusterName
 ---
-# App-targeting placement: the demo app goes to sage only.
+# App-targeting placement: the demo apps go to the `spoke` cluster only
+# (selects on the `name` label ACM sets on every ManagedCluster).
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
@@ -60,4 +63,4 @@ spec:
     - requiredClusterSelector:
         labelSelector:
           matchLabels:
-            name: sage
+            name: spoke

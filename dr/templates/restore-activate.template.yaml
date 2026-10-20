@@ -1,10 +1,10 @@
 # ACTIVATION one-shot — template. NEVER applied from this path.
-# During a failover PR, COPY into dr/<surviving-hub>/ as
+# During a failover PR (PR-A), COPY into dr/<surviving-hub>/ as
 #   restore-activate-<UTCSTAMP>.yaml   (e.g. restore-activate-202608131442.yaml)
-# replacing <UTCSTAMP> in the name below, and add it to that overlay's
-# kustomization resources.
+# replacing <UTCSTAMP> in the name below, and make it that overlay's ONLY
+# kustomization resource — see ../README.md for the two-PR choreography.
 #
-# WHY THE UNIQUE NAME (the G.5 lesson, 2026-08-13): a Restore is one-shot.
+# WHY THE UNIQUE NAME (runbook step G.5): a Restore is one-shot.
 # A fixed-name activation restore that stays in git is `Finished` forever,
 # and every later "activation" apply is a SILENT NO-OP (identical spec —
 # nothing re-triggers). Generation-stamped names make every failover PR
