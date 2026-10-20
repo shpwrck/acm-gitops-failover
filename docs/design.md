@@ -3,8 +3,8 @@
 Why the architecture looks the way it does: two independent layers, so
 that losing the management hub costs neither workloads nor — with the
 right delivery choice — deployments. The environment it was proven on
-is outlined in [build.md](build.md); the live proof is in
-[exercises/](exercises/).
+is described in [build.md](build.md); the live proof is in
+[results.md](results.md).
 
 ## Delivery models
 
@@ -78,7 +78,7 @@ The design follows the pattern the public sources converge on — two layers:
   [part 3](https://www.redhat.com/en/blog/rhacm-high-availability-and-disaster-recovery-part-3),
   and the [backup-and-restore hub clusters
   blog](https://www.redhat.com/en/blog/backup-and-restore-hub-clusters-with-red-hat-advanced-cluster-management-for-kubernetes)).
-  Because this lab's clusters are *imported* (not Hive-created),
+  Because the managed clusters here are *imported* (not Hive-created),
   [**ManagedServiceAccount auto-import** is effectively
   mandatory](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#restore-imported-managed-clusters)
   (`useManagedServiceAccount: true`) — [without it every failover ends in
@@ -109,12 +109,12 @@ placements, the GitOps wiring itself).
 ## The four paths
 
 The repo carries the full 2×2 of delivery model × DR operation — all
-four cells verified live ([exercise records](exercises/); the summary
+four cells verified live ([results](results.md); the summary
 table is in the [README](../README.md)). How
 the halves differ, in one line each:
 
 - **Pull vs push** is *what a hub outage costs delivery*: nothing (spoke
-  syncs git itself — proven in every exercise — v2 through v7 all landed hubless) vs a
+  syncs git itself — every mid-outage deploy in every exercise landed hubless) vs a
   delivery outage lasting until the new hub's Argo resumes pushing
   (the Manual Push Path measures it). It is also *what the hub is worth to an
   attacker*: push runs on an ACM-minted credential whose managed-cluster
@@ -125,8 +125,8 @@ the halves differ, in one line each:
 - **Manual vs git-driven** is *what a failover decision looks like*: an
   operator with a runbook (≈10 s of machinery after seconds of typing)
   vs a pull request whose review is the split-brain gate and whose merge
-  history is the audit log (expected cost: + merge + Argo poll; measured
-  by the Automated Pull Path's V4).
+  history is the audit log (measured cost: tens of seconds of merge and
+  Argo sync on top of the same machinery).
 
 Why there is no fully autonomous path: hub failover is
 deliberately a human decision. A passive-side monitor cannot distinguish
@@ -145,11 +145,51 @@ Delivery infrastructure shared by the push paths:
 namespace — both models coexist through one outage). Role-flip
 infrastructure for the automated paths: [dr/](../dr/README.md).
 
+## Know before you adapt it
+
+Documented behavior that this repo relies on or deliberately avoids, worth
+checking before changing the design:
+
+- **What the hub backup carries.** [All `*.open-cluster-management.io`
+  resources plus the `argoproj.io` API group](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#backed-up-resources),
+  so hub-side Applications and ApplicationSets fail over with the hub.
+  Excluded: everything in the MultiClusterHub namespace, ManifestWorks
+  (`work.open-cluster-management.io`; the restored owners regenerate
+  them), and the BackupSchedule and Restore objects themselves.
+- **Argo CD repository credentials are not in the default backup
+  scope.** This repo is public, so nothing is needed. With a private repo,
+  label its repository Secret `cluster.open-cluster-management.io/backup`
+  so it is restored too, as [Red Hat's Argo CD DR
+  reference](https://www.redhat.com/en/blog/argo-cd-disaster-recovery-strategy-using-red-hat-advanced-cluster-management-and-oadp)
+  does, or recreate it on the new hub before failover.
+- **Pull-model Applications live on the spoke as ManifestWork output.**
+  After the spoke re-homes, its work agent evicts work that the new hub
+  does not recreate, after a grace period that defaults to [60 minutes
+  upstream](https://github.com/open-cluster-management-io/ocm/blob/main/pkg/work/spoke/options.go).
+  In the timed run the new hub regenerated the app's ManifestWork about a
+  minute after activation; a new hub that cannot do that within the hour
+  takes the pull-model Application away.
+- **Both hubs must be configured identically**: [same ACM version, same
+  operators in the same namespaces](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#prepare-new-hub), and the same
+  bucket. A backup cannot be restored onto an older ACM version.
+- **Do not enable the GitOps addon on the GitOpsCluster** if you want
+  push delivery: [enabling it disables the push model for all
+  applications](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#manage-gitops-addon).
+- **Velero skips resources that already exist on restore**, which is why
+  the docs [prefer a clean restore hub](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#prepare-new-hub). The role
+  swap used here works because a returned hub's leftover GitOps wiring is
+  byte-identical to the backup (both come from the same git commits);
+  audit leftovers on a hub that drifted.
+- **Testing without killing the active hub** has its own documented
+  procedure ([pause the schedule and mark ManagedClusters
+  `disable-auto-import`](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#keep-hub-active-restore-prepare)). The
+  runbooks here kill the hub instead, because that is the case the design
+  exists for.
+
 ## Sources
 
 Primary documentation (ACM 2.17; every claim above links to its exact
-section — the annotated fact-by-fact bibliography with anchors is in
-[research-notes.md](../research-notes.md)):
+section):
 
 - [Business continuity (backup/restore, active-passive, disaster recovery)](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index)
 - [Clusters (import, detach, cleanup procedures)](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/clusters/index)

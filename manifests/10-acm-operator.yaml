@@ -1,4 +1,8 @@
 # ACM operator install — apply on BOTH hubs (hub-x and hub-y).
+# SKIP this file on a cluster that already runs ACM: OLM allows one
+# OperatorGroup per namespace, and adding this one next to an existing one
+# fails every CSV in the namespace (TooManyOperatorGroups). Check first:
+#   oc get operatorgroup -n open-cluster-management
 # Both hubs must run the SAME ACM version: a backup cannot be restored on a
 # hub running an older version than the hub that wrote it. With
 # installPlanApproval: Automatic the hubs can drift apart by a z-stream

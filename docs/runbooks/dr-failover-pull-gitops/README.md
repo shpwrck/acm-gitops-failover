@@ -3,20 +3,17 @@
 Same command / rationale / success / failure format as the
 verified [Manual Pull Path runbook](../dr-failover-pull-manual/README.md); this
 document is a DELTA — phases not listed here run exactly as the Manual
-Pull Path wrote them (and that path verified them twice). The measured
-timeline, including the falsified one-PR attempt, is the
-[exercise record](../../exercises/automated-pull.md).
+Pull Path wrote them. How the git-driven roles work, and why failover
+takes two PRs, is [dr/README.md](../../../dr/README.md); measured timings
+are in [results.md](../../results.md).
 
-Conventions as the Manual Pull Path (`$ACTIVE`/`$PASSIVE`/`$MANAGED`, UTC, probes),
-plus the overlay-dir mapping: the committed dirs keep the original lab
-names (`dr/hub` = hub-x, `dr/spoke` = hub-y), so set both before
-authoring any PR (values shown match the Manual Pull Path's exports):
+Conventions as the Manual Pull Path (`$ACTIVE`/`$PASSIVE`/`$MANAGED`,
+`$ACTIVE_API`, UTC, probes), plus each hub's overlay directory, which is
+named after the hub's context:
 
 ```bash
-# Derive per direction — do NOT copy example values; these flip when the
-# roles flip:
-export ACTIVE_DIR=…    # $ACTIVE's overlay dir:  dr/hub if $ACTIVE=hub-x, dr/spoke if $ACTIVE=hub-y
-export PASSIVE_DIR=…   # $PASSIVE's overlay dir: dr/hub if $PASSIVE=hub-x, dr/spoke if $PASSIVE=hub-y
+export ACTIVE_DIR=dr/$ACTIVE
+export PASSIVE_DIR=dr/$PASSIVE
 ```
 
 ## Phase P — One-time prerequisites
@@ -27,7 +24,7 @@ identities, not the `$ACTIVE`/`$PASSIVE` of any particular exercise.)
 ### P.0 RBAC first — the grant that makes git-driven DR possible
 
 ```bash
-oc --context hub-x   apply -f dr/bootstrap/dr-role-rbac.yaml
+oc --context hub-x apply -f dr/bootstrap/dr-role-rbac.yaml
 oc --context hub-y apply -f dr/bootstrap/dr-role-rbac.yaml
 oc --context hub-x auth can-i patch backupschedules.cluster.open-cluster-management.io \
   -n open-cluster-management-backup \
@@ -51,15 +48,11 @@ failed sync and align.
 ### P.1 Bootstrap each hub's dr-role Application
 
 ```bash
-oc --context hub-x   apply -f dr/bootstrap/dr-role-hub.yaml
-oc --context hub-y apply -f dr/bootstrap/dr-role-spoke.yaml
-oc --context hub-x   get applications.argoproj.io dr-role -n openshift-gitops
+oc --context hub-x apply -f dr/bootstrap/dr-role-hub-x.yaml
+oc --context hub-y apply -f dr/bootstrap/dr-role-hub-y.yaml
+oc --context hub-x get applications.argoproj.io dr-role -n openshift-gitops
 oc --context hub-y get applications.argoproj.io dr-role -n openshift-gitops
 ```
-
-(The committed bootstrap filenames keep the original lab names:
-`dr-role-hub.yaml` is hub-x's Application, `dr-role-spoke.yaml` is
-hub-y's — likewise the `dr/hub/` and `dr/spoke/` overlay dirs.)
 
 **Why:** Each hub's own Argo must reconcile its own role — the applier of
 a failover cannot be the hub that just died. Imperative once, declarative
@@ -123,7 +116,7 @@ executor; a broken dr-role app discovered mid-outage is a failed exercise.
 
 ## Phase D' — Failover as a pull request (PR-A: activation ONLY)
 
-**FINDING (attempt 1, 2026-08-13): the one-PR flip straight to
+**FINDING (found live): the one-PR flip straight to
 `../roles/active` is FALSIFIED.** The role's BackupSchedule lands in the
 same sync as the activation Restore; the operator ignores the Restore
 while any schedule is active ("This resource is ignored because
@@ -164,16 +157,16 @@ one resource:
 git diff --stat origin/main...HEAD   # expect: exactly the two files under $PASSIVE_DIR
 ```
 
-**Failure:** `../roles/active` in the diff → you are re-running attempt
-1's falsified choreography; fix before merge.
+**Failure:** `../roles/active` in the diff → you are re-running the
+falsified one-PR choreography; fix before merge.
 
 ### D'.2 Review = the split-brain gate; merge = the decision
 
 ```bash
-curl -sk --max-time 5 https://api.$ACTIVE.example.com:6443/version || echo DEAD   # reviewer runs this
+curl -sk --max-time 5 $ACTIVE_API/version || echo DEAD   # reviewer runs this
 ```
 
-**Why:** The manual path's B.2 gate moves into the merge decision — the
+**Why:** The manual path's death check (B.1) moves into the merge decision — the
 reviewer verifies death, and the merge commit records who decided, when,
 on what evidence. (CI running this same check as a required status turns
 the guard into machinery; note it as an enhancement, don't block on it.)
@@ -190,9 +183,9 @@ oc --context $PASSIVE annotate applications.argoproj.io dr-role -n openshift-git
 oc --context $PASSIVE get restore -n open-cluster-management-backup -w
 ```
 
-**Why:** Argo's ≤3 min poll is the only new latency vs the manual path
-(V4); the refresh annotation removes most of it. PruneFirst should remove
-the passive Restore before the activation applies (V1 — WATCH for this:
+**Why:** Argo's ≤3 min poll is the only new latency vs the manual path;
+the refresh annotation cuts merge-to-sync to seconds. PruneFirst should
+remove the passive Restore before the activation applies (WATCH for this:
 the passive restore should disappear, then the activation appear and run
 to `Finished`).
 
@@ -217,11 +210,11 @@ oc --context $PASSIVE get restore -n open-cluster-management-backup -w
 
 Do NOT touch the passive restore (already pruned) and do NOT
 `oc apply` the manifest by hand (a hand-applied object is untracked and
-the demote PR's prune will never clean it — attempt-1 lesson).
+the demote PR's prune will never clean it — learned live).
 
 ## Phase E — as the Manual Pull Path
 
-Manual Pull Path E (verify + [MSA hygiene](../../exercises/msa-token-hygiene.md)) unchanged.
+Manual Pull Path E (verify + [MSA hygiene](../../msa-token-hygiene.md)) unchanged.
 
 ## Phase F' — Promotion PR (PR-B): the git-driven F.1
 
@@ -259,15 +252,16 @@ from the Manual Pull Path.
 ```bash
 git checkout -b demote-$(date -u +%Y%m%d%H%M)
 # 1. $ACTIVE_DIR/kustomization.yaml: resources -> ../roles/passive
-# 2. git rm $ACTIVE_DIR/restore-activate-*.yaml   (if any — V5 housekeeping)
+# 2. git rm $ACTIVE_DIR/restore-activate-*.yaml   (if any; the prune then reaps the Finished one-shot)
 git add -A dr/ && git commit -m "DEMOTE: $ACTIVE to passive" && git push -u origin HEAD
 # PR + merge — review gate here is posture correctness, not death
 ```
 
 **Why:** Merging while the hub is down means it boots into current truth:
 its Argo prunes the stale BackupSchedule (automating manual G.2) and
-applies the passive Restore (manual G.4). V3 observes the boot-time race
-(collision-fire vs prune) — expected benign in either order.
+applies the passive Restore (manual G.4). The boot-time race between the
+`BackupCollision` freeze and the prune was observed both ways, benign
+each time.
 
 **Success:** After the hub boots: `dr-role` `Synced`, exactly one restore
 (`restore-acm-passive-sync` `Enabled`), no BackupSchedule.
@@ -279,13 +273,12 @@ oc --context $ACTIVE get restore,backupschedule -n open-cluster-management-backu
 # expect: restore-acm-passive-sync Enabled and NO BackupSchedule
 ```
 
-**Failure:** Sync stuck on the pruned schedule → record for V3 and delete
-it by hand; the underlying BackupCollision guard has already frozen it
+**Failure:** Sync stuck on the pruned schedule → delete it by hand; the underlying BackupCollision guard has already frozen it
 regardless (verified in the Manual Pull Path, both directions).
 If the demoted hub's LAST activation was MANUAL, its fixed-name
 `restore-acm-activate` is NOT Argo-tracked and this prune will never
 remove it — delete it by hand now (verified live; same mechanism as the
-attempt-1 lesson in D'.3), or the next manual activation on this hub
+hand-apply warning in D'.3), or the next manual activation on this hub
 silently no-ops.
 
 ### G'.2 The imperative residue — exactly as Manual Pull Path G.1 + G.3
@@ -300,5 +293,8 @@ oc --context $ACTIVE get managedclusters -w    # gate: $MANAGED reads Available=
 oc --context $ACTIVE delete managedcluster $MANAGED
 ```
 
-## Phase H — evidence, V-item verdicts (V1–V5), timings into the [exercise record](../../exercises/automated-pull.md),
-role comments in `dr/*/kustomization.yaml` updated to match the new truth.
+## Phase H — evidence
+
+As the Manual Pull Path's Phase H. Also confirm `hack/validate.py` (CI)
+reports the posture you expect: after the demote PR, exactly one hub
+`active` and the other `passive`.

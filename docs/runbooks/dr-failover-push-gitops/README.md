@@ -5,8 +5,7 @@ run the [Automated Pull Path runbook](../dr-failover-pull-gitops/README.md) (git
 role flip) with the [Manual Push Path runbook](../dr-failover-push-manual/README.md)
 delivery checks layered in. Only the interplay is documented here —
 everything else is deliberately NOT duplicated, so the composed runbooks
-can't drift. The measured run is the
-[exercise record](../../exercises/automated-push.md).
+can't drift. Measured delivery RTOs are in [results.md](../../results.md).
 
 ## Prerequisites
 
@@ -25,7 +24,7 @@ attribute.
 | B | Manual Pull Path (kill + death gate) | — |
 | C | Manual Push Path C' (push deploy does NOT land; timestamp it) | pull deploy DOES land (Manual Pull Path C) — same window |
 | D | Automated Pull Path D' (failover PR; review = death gate; merge = decision) | — |
-| E | Manual Pull Path E + [MSA hygiene](../../exercises/msa-token-hygiene.md) FIRST | Manual Push Path E' (delivery resurrection; measure delivery RTO) |
+| E | Manual Pull Path E + [MSA hygiene](../../msa-token-hygiene.md) FIRST | Manual Push Path E' (delivery resurrection; measure delivery RTO) |
 | F | Automated Pull Path F' (promotion PR-B) | Manual Push Path's appset/secret checks |
 | G | Automated Pull Path G' (demote PR + imperative residue) | — |
 | H | evidence + V-verdicts | the four-path comparison row (below) |
@@ -36,19 +35,21 @@ attribute.
   at the C' commit, not at the merge — the decision latency (author,
   review, merge: ~1 min) is inside the measured number. Expected
   components, each observed live: decision latency + merge→sync
-  (refresh cuts the ≤3 min poll to seconds) + the V1 recovery when it
-  fires (~30 s — D' treats it as the expected first outcome) + ≈10 s
-  claim machinery + cluster-secret re-mint (~1 min) + first push
-  (~30 s) + route content propagation (~1 min). This is the
-  slowest-to-recover cell of the matrix — and the most auditable. Say
-  both sentences together; that's the trade.
+  (refresh cuts the ≤3 min poll to seconds) + the activation-race
+  recovery when it fires (~30 s — D'.3 treats it as the expected first
+  outcome) + ≈10 s claim machinery + cluster-secret re-mint (~1 min) +
+  first push (~30 s) + route content propagation (~1 min). On paper this
+  is the slowest cell of the matrix; measured, it beat the manual push
+  run on the same day both times, because merging a reviewed PR took
+  less time than an operator typing the activation. Either way it is the
+  most auditable cell.
 - **Two Argo populations, opposite DR treatments, same namespace.** On
   each hub's `openshift-gitops`: the push ApplicationSet MUST ride the
   backup/restore (that's how delivery fails over), while `dr-role` MUST
   NOT (that's how split-brain is prevented). The exclusion label is doing
   precision work here — the Automated Pull Path's P.2 check is mandatory
   pre-flight in this path, every time.
-- **One [MSA token](../../exercises/msa-token-hygiene.md) family, three
+- **One [MSA token](../../msa-token-hygiene.md) family, three
   dependents.** After activation, MSA tokens feed auto-import (the
   Manual Pull Path's claim machinery), the GitOpsCluster secret (push
   delivery — via the separate `application-manager` MSA, which the
@@ -65,8 +66,9 @@ attribute.
 
 ## H — the deliverable
 
-The four-path comparison table (README, "The four paths") is this
-exercise's deliverable: identical outage, four measured recoveries. The
-measured numbers — and which sibling "wins" — vary run to run; keep the
-table's Verdict column tied to the run it cites. That artifact
-— not any single path — is the reason the repo holds all four.
+The four-path comparison ([README](../../../README.md#the-four-paths)
+and [results.md](../../results.md)) is this exercise's deliverable:
+identical outage, four measured recoveries. The measured numbers — and
+which sibling "wins" — vary run to run; update the ranges when a new run
+falls outside them. That comparison — not any single path — is the reason
+the repo holds all four.

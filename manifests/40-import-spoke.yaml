@@ -5,7 +5,9 @@
 #   oc --context hub-x create secret generic auto-import-secret -n spoke \
 #     --from-file=kubeconfig=/tmp/spoke-kubeconfig
 # Using a different cluster name? Change every `spoke` below AND the
-# `name: spoke` selector in 61-gitops-integration.yaml.
+# `name: spoke` selector in 61-gitops-integration.yaml. If the hub already
+# has a ManagedCluster with this name, applying this file takes it over
+# (including moving it into the `default` clusterset) — pick a free name.
 apiVersion: cluster.open-cluster-management.io/v1
 kind: ManagedCluster
 metadata:

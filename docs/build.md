@@ -1,121 +1,226 @@
-# The experimental build
+# Building the environment
 
-What the exercises ran against — the clusters, versions, storage, and
-wiring — so the environment can be roughly approximated as a
-prerequisite for recreating them. Why it is built this way is
-[design.md](design.md); the operator procedures are the
-[runbooks](runbooks/); the measured results are the
-[exercise records](exercises/).
+What the failover exercises run against, and how to build it: the
+clusters, versions, storage, and the order to apply `manifests/` and
+`dr/`. Why it is built this way is [design.md](design.md); the operator
+procedures are the [runbooks](runbooks/); the measured results are in
+[results.md](results.md).
 
 ## Clusters
 
-| Cluster | Role | Shape | Version |
-| --- | --- | --- | --- |
-| hub-x | ACM hub | SNO | OCP 4.21 |
-| hub-y | ACM hub | SNO | OCP 4.21 |
-| spoke | workload cluster | SNO | OCP 4.21 |
+| Cluster | Role | Verified shape |
+| --- | --- | --- |
+| hub-x | ACM hub, starts active | single-node OpenShift 4.21 |
+| hub-y | ACM hub, starts passive | single-node OpenShift 4.21 |
+| spoke | workload cluster, imported into the active hub | single-node OpenShift 4.21 |
 
-- Hub sizing (observed): SNO with 19.5 CPU / 95 Gi allocatable ran the
-  full hub at ~11% CPU / 42% memory (~47 pods across
-  `multicluster-engine` + `open-cluster-management`).
+The names are the kubeconfig contexts every command below and every
+runbook uses. If your clusters have other names, either rename the
+contexts (`oc config rename-context`) or substitute your names; the
+values to change in the repo are listed in the [README](../README.md#getting-started).
+The hub roles are interchangeable: failover swaps them back and forth
+with no extra cleanup in between.
+
+- Hub sizing (observed): a single node with 19.5 CPU / 95 GiB allocatable
+  ran the full hub at about 11% CPU and 42% memory (about 47 pods across
+  `multicluster-engine` and `open-cluster-management`).
   `availabilityConfig: Basic` on the MultiClusterHub is [the install
-  docs' explicit guidance for single-node
-  OpenShift](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/install/index#advanced-config-hub).
-- This build's API endpoints serve publicly trusted certs. With
-  self-signed certs, include `certificate-authority-data` in the import
-  kubeconfig and the CA in the DPA's `objectStorage.caCert`.
+  docs' guidance for single-node
+  OpenShift](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/install/index#advanced-config-hub);
+  use `High` on multi-node hubs.
+- The verified build's API endpoints served publicly trusted
+  certificates. With self-signed certificates, include
+  `certificate-authority-data` in the import kubeconfig and the CA in the
+  DPA's `objectStorage.caCert`.
 
 ## Software and versions
 
 | Component | Version | Where | Notes |
 | --- | --- | --- | --- |
-| ACM | 2.17.0 | both hubs | [Same version on both hubs is a hard backup/restore requirement](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#enabling-backup-operator-clusters) |
-| `cluster-backup` MCH component | with ACM | both hubs | Enabled [via the MCH component override](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/install/index#advanced-config-hub); OADP auto-installs in `open-cluster-management-backup` |
-| OpenShift GitOps operator | channel `latest` | all three clusters | [Identical operators on both hubs is a restore-hub requirement](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#prepare-new-hub) |
-| SeaweedFS | 4.41 (chart 1.2.32) | NAS, outside the clusters | Apache-2.0 (MinIO and Garage are AGPL — excluded); on ROSA/AWS use real S3 instead |
+| ACM | 2.17 (verified on 2.17.0) | both hubs | [The same version on both hubs is a hard backup/restore requirement](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#enabling-backup-operator-clusters) |
+| `cluster-backup` MCH component | with ACM | both hubs | Enabled in `manifests/20-multiclusterhub.yaml` ([MCH component override](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/install/index#advanced-config-hub)); ACM then installs OADP in `open-cluster-management-backup` |
+| `managedserviceaccount` MCE component | with ACM | both hubs | On by default; MSA auto-import depends on it |
+| OpenShift GitOps operator | channel `latest` (verified on 1.21) | all three clusters | [Identical operators on both hubs is a restore-hub requirement](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#prepare-new-hub) |
+| S3-compatible object store | any | outside the clusters | Verified with SeaweedFS 4.41; on AWS use real S3 |
 
 ## Network and storage
 
-- **S3-compatible store, external to every cluster, reachable from both
-  hubs** — [the backup operator needs OADP and an S3-compatible
+- **An S3-compatible store, external to every cluster, reachable from both
+  hubs.** [The backup operator needs OADP and an S3-compatible
   location](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#backup-restore-architecture),
   and ["active and passive hub clusters are connected to the same
   storage
   location"](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#active-passive-config).
-  This build: SeaweedFS at `https://truenas.example.com:30304`, bucket
-  `acm-backups`, identity `velero`, and in the DPA
-  `s3ForcePathStyle: "true"` + `checksumAlgorithm: ""`. On ROSA/AWS the
-  identical DPA drops `s3Url`/`s3ForcePathStyle`. SeaweedFS sizing
-  note: with the default 30 GB `volumeSizeLimitMB`, the default
+  Create one bucket (`acm-backups` here) and one access key for Velero.
+  For non-AWS stores the DPA sets `s3ForcePathStyle: "true"` and
+  `checksumAlgorithm: ""`; on AWS drop `s3Url` and `s3ForcePathStyle`.
+  SeaweedFS note: with the default 30 GB `volumeSizeLimitMB`, the default
   collection can pre-claim every volume slot on a small disk and the
-  first bucket PUT fails 500 "No writable volumes" — lower the volume
-  size limit to free slots.
-- **A git host reachable from every cluster** (this repository): the
-  spoke's local Argo pulls the apps from it, and each hub's local Argo
-  reconciles its DR role overlay (`dr/`) from it.
-- **The hubs never talk to each other** — their only shared state is
-  the bucket.
-- **Push delivery needs no extra ingress**: the hub's Argo reaches the
+  first bucket PUT fails with 500 "No writable volumes"; lower the volume
+  size limit.
+- **A git host reachable from every cluster** (your copy of this repo):
+  the spoke's local Argo CD pulls the apps from it, and each hub's local
+  Argo CD reconciles its DR role (`dr/`) from it.
+- **The hubs never talk to each other.** Their only shared state is the
+  bucket.
+- **Push delivery needs no extra ingress.** The hub's Argo CD reaches the
   spoke through ACM's cluster-proxy tunnel.
-- Verifying the S3 endpoint by hand needs **curl ≥ 8** (RHCOS's curl
-  7.76 `--aws-sigv4` is buggy and returns `SignatureDoesNotMatch`
-  against a healthy endpoint); Velero itself is unaffected.
+- Checking the S3 endpoint by hand with `curl --aws-sigv4` needs
+  **curl 8 or newer** (the curl 7.76 shipped in RHCOS returns
+  `SignatureDoesNotMatch` against a healthy endpoint). Velero itself is
+  unaffected.
 
-## Wiring — `manifests/` in apply order
+## Build steps
 
-Committed filenames keep the original lab names
-(`40-import-sage.yaml` imports spoke; `backups/route-crd-{spoke,sage}.yaml`
-are the gotcha #3 CRD backups).
+Apply from the repo root. `manifests/` is numbered in apply order.
 
-| Manifest | Target | Purpose |
+| Manifest | Apply on | Purpose |
 | --- | --- | --- |
-| `10-acm-operator.yaml` | second hub | ACM operator |
-| `20-multiclusterhub.yaml` | second hub | MultiClusterHub (`availabilityConfig: Basic`) |
-| `40-import-sage.yaml` | active hub | Import spoke ([auto-import-secret flow](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/clusters/index#importing-clusters-auto-import-secret); secret out-of-band) |
-| `50-dpa.yaml` | both hubs | DataProtectionApplication → the S3 store |
-| `55-backupschedule.yaml` | ACTIVE hub only | [BackupSchedule](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#using-backup-restore), every 30 min, `useManagedServiceAccount: true` — [effectively mandatory for imported clusters](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#restore-imported-managed-clusters) |
-| `56-restore-passive.yaml` | PASSIVE hub only | [Continuous sync restore](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#restore-passive-resources-check-backups) |
-| `57-restore-activate.yaml` | staged | The failover action — NOT applied in steady state |
+| `10-acm-operator.yaml` | both hubs | ACM operator |
+| `20-multiclusterhub.yaml` | both hubs | MultiClusterHub with `cluster-backup` enabled |
+| `40-import-spoke.yaml` | active hub | Import the spoke ([auto-import-secret flow](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/clusters/index#importing-clusters-auto-import-secret); secret created out-of-band) |
+| `50-dpa.yaml` | both hubs | DataProtectionApplication pointing at the shared bucket |
+| `55-backupschedule.yaml` | active hub only | [BackupSchedule](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#using-backup-restore) every 30 min with `useManagedServiceAccount: true`, [effectively mandatory for imported clusters](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#restore-imported-managed-clusters) |
+| `56-restore-passive.yaml` | passive hub only | [Continuous sync restore](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#restore-passive-resources-check-backups) |
+| `57-restore-activate.yaml` | nowhere yet | The manual failover action (runbook step D.2) |
 | `60-gitops-operator.yaml` | all three clusters | OpenShift GitOps operator |
-| `61-gitops-integration.yaml` | active hub | [GitOpsCluster + Placements](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#gitops-register) ([cluster secrets minted from rotated MSA tokens](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#secret-gitops)) |
-| `62-appset-pull.yaml` | active hub | [Pull-model ApplicationSet](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#crd-pull-model) → `apps/hello-failover` |
-| `63-appset-push.yaml` | active hub | Push-model ApplicationSet → `apps/hello-failover-push` |
-| `dr/bootstrap/` | both hubs | dr-role RBAC + Application (the automated paths — see [dr/](../dr/README.md)) |
+| `61-gitops-integration.yaml` | active hub | [GitOpsCluster and Placements](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#gitops-register) ([cluster secrets minted from rotated MSA tokens](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#secret-gitops)) |
+| `62-appset-pull.yaml` | active hub | [Pull-model ApplicationSet](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#crd-pull-model) for `apps/hello-failover` |
+| `63-appset-push.yaml` | active hub | Push-model ApplicationSet for `apps/hello-failover-push` |
+| `dr/bootstrap/` | each hub | dr-role RBAC and Application, needed only for the git-driven paths |
+
+### 1. Hubs: ACM with the backup component
+
+```bash
+for hub in hub-x hub-y; do
+  oc --context $hub apply -f manifests/10-acm-operator.yaml
+done
+# wait until the ACM CSV reports Succeeded on both hubs:
+oc --context hub-x get csv -n open-cluster-management
+for hub in hub-x hub-y; do
+  oc --context $hub apply -f manifests/20-multiclusterhub.yaml
+done
+oc --context hub-x get mch -n open-cluster-management -w      # until Running
+oc --context hub-x get csv -n open-cluster-management-backup  # OADP installed by ACM
+```
+
+Skip `10-acm-operator.yaml` on a cluster that already runs ACM: a second
+OperatorGroup in `open-cluster-management` makes OLM fail every CSV there
+(`TooManyOperatorGroups`). A cluster that is still managed by another hub
+must be detached from it before it becomes a hub (see the note in
+`20-multiclusterhub.yaml`).
+
+These manifests assume dedicated clusters. On a hub that already manages
+other clusters, pick a ManagedCluster name that is not taken (applying
+`40-import-spoke.yaml` over an existing `spoke` takes that cluster over)
+and bind a dedicated ManagedClusterSet instead of `default` in
+`61-gitops-integration.yaml`, or every cluster in `default` gets
+registered with Argo CD.
+
+### 2. All clusters: OpenShift GitOps
+
+```bash
+for c in hub-x hub-y spoke; do
+  oc --context $c apply -f manifests/60-gitops-operator.yaml
+done
+```
+
+### 3. Hubs: backup storage
+
+Edit `manifests/50-dpa.yaml` for your bucket first. Then, on each hub:
+
+```bash
+printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' "$S3_ACCESS_KEY" "$S3_SECRET_KEY" > /tmp/cloud
+for hub in hub-x hub-y; do
+  oc --context $hub create secret generic cloud-credentials \
+    -n open-cluster-management-backup --from-file=cloud=/tmp/cloud
+  oc --context $hub apply -f manifests/50-dpa.yaml
+done
+rm /tmp/cloud
+oc --context hub-x get backupstoragelocation -n open-cluster-management-backup   # Available
+```
+
+### 4. Active hub: import the spoke
+
+```bash
+oc --context hub-x apply -f manifests/40-import-spoke.yaml
+oc --context spoke config view --flatten --minify > /tmp/spoke-kubeconfig
+oc --context hub-x create secret generic auto-import-secret -n spoke \
+  --from-file=kubeconfig=/tmp/spoke-kubeconfig
+rm /tmp/spoke-kubeconfig
+oc --context hub-x get managedclusters -w        # spoke: Joined, Available True
+```
+
+(If the `KlusterletAddonConfig` is rejected because namespace `spoke`
+does not exist yet, re-apply the file once the ManagedCluster has created
+it.)
+
+### 5. Backup roles
+
+```bash
+oc --context hub-x apply -f manifests/55-backupschedule.yaml
+oc --context hub-y apply -f manifests/56-restore-passive.yaml
+oc --context hub-x get backupschedule,backup -n open-cluster-management-backup
+oc --context hub-y get restore -n open-cluster-management-backup   # Enabled
+```
+
+### 6. Active hub: GitOps wiring and the demo apps
+
+```bash
+oc --context hub-x apply -f manifests/61-gitops-integration.yaml
+oc --context hub-x apply -f manifests/62-appset-pull.yaml
+oc --context hub-x apply -f manifests/63-appset-push.yaml
+oc --context spoke get applications.argoproj.io -A   # hello-failover-spoke, synced by the spoke's Argo
+oc --context hub-x get applications.argoproj.io -n openshift-gitops   # hello-failover-push-spoke, on the hub
+```
+
+Everything applied in this step is in a backed-up API group, so hub-y
+picks it up through its passive restore; there is nothing to apply there.
+
+### 7. Git-driven paths only: bootstrap `dr/`
+
+Follow Phase P of the [Automated Pull Path
+runbook](runbooks/dr-failover-pull-gitops/README.md#phase-p--one-time-prerequisites):
+RBAC first, then each hub's `dr-role` Application. Each hub's Argo CD
+adopts the BackupSchedule or Restore applied in step 5. From then on the
+manual runbooks need their break-glass step (D.0) before touching a hub's
+role objects.
 
 ## Build-time gotchas
 
-Each cost real time and each is invisible in the docs (numbering is
-stable — other documents cite these by number):
+Each cost real time and none is in the product docs (the numbering is
+stable; other documents cite these by number):
 
 1. **A missing `open-cluster-management-global-set` namespace on the
-   hub** silently prevents the `managed-serviceaccount`/`cluster-proxy`/
-   `work-manager` addons from reaching any cluster — no MSA tokens, so
-   GitOpsCluster registration fails AND `useManagedServiceAccount`
+   hub** silently prevents the `managed-serviceaccount`, `cluster-proxy`
+   and `work-manager` addons from reaching any cluster: no MSA tokens, so
+   GitOpsCluster registration fails and `useManagedServiceAccount`
    auto-import would fail at failover. Fix: recreate the namespace (MCE
-   regenerates the binding/placement instantly). **DR pre-flight
-   check:** `oc get managedserviceaccount -A` on the active hub must
-   show `auto-import-account` per imported cluster WITH a
+   regenerates the binding and placement instantly). **DR pre-flight
+   check:** `oc get managedserviceaccount -A` on the active hub must show
+   `auto-import-account` for each imported cluster with a
    `.status.tokenSecretRef` ([automatic import
    considerations](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#auto-import-considerations)).
-2. On an ACM hub, bare `application` resolves to ACM's `app.k8s.io` CRD
-   — always query `applications.argoproj.io` or you'll chase phantom
+2. On an ACM hub, bare `application` resolves to ACM's `app.k8s.io` CRD.
+   Always query `applications.argoproj.io`, or you will chase phantom
    disappearances.
-3. **A stray `routes.route.openshift.io` CRD** (installed on former
-   spokes by the old hub's GitOps addon) collides with the real
-   aggregated Route API and 503s the cluster's entire `/openapi/v2`,
-   wedging Argo's cluster cache (`ComparisonError: failed to load open
-   api schema`). Delete the CRD (real Routes live in
-   openshift-apiserver and are unaffected; backups in `backups/`).
-   Check ALL former gitops-addon spokes.
+3. **A stray `routes.route.openshift.io` CRD** (installed on a cluster
+   that was once a spoke with a hub's GitOps addon) collides with the
+   real aggregated Route API and makes the cluster's whole `/openapi/v2`
+   return 503, which wedges Argo's cluster cache (`ComparisonError:
+   failed to load open api schema`). Save a copy
+   (`oc get crd routes.route.openshift.io -o yaml`) and delete the CRD;
+   real Routes are served by openshift-apiserver and are unaffected.
+   Check every cluster that ever had the gitops addon.
 4. **Route creation forbidden** for the spoke's Argo
-   application-controller (`SyncFailed: routes ... is forbidden`) — [the
+   application-controller (`SyncFailed: routes ... is forbidden`): [the
    pull-model RBAC
    prerequisite](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/gitops/index#prereqs-pull-model).
-   Least-privilege fix (chosen): `managedNamespaceMetadata` labels the
-   app namespace `argocd.argoproj.io/managed-by=openshift-gitops` and
-   the GitOps operator mints namespace-scoped RoleBindings; the docs'
-   alternative is a cluster-admin CRB for the controller SA.
+   The least-privilege fix used here: `managedNamespaceMetadata` labels
+   the app namespace `argocd.argoproj.io/managed-by=openshift-gitops`, and
+   the GitOps operator mints namespace-scoped RoleBindings. The docs'
+   alternative is a cluster-admin binding for the controller.
 5. **Routes are permanently OutOfSync without `ignoreDifferences`** for
-   `/spec/host`, `/spec/wildcardPolicy`, `/spec/to/weight` (server-side
-   defaults). An explicit host in git is wrong for ApplicationSets (it
-   would pin one cluster's apps domain).
+   `/spec/host`, `/spec/wildcardPolicy` and `/spec/to/weight`
+   (server-side defaults). An explicit host in git is wrong for an
+   ApplicationSet, because it would pin one cluster's apps domain.
