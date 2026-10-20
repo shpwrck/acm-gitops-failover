@@ -3,7 +3,9 @@
 # (paused BackupSchedule + disable-auto-import annotations) first, or it
 # will fight to reclaim the managed clusters.
 # Note: only one Restore is honored at a time — delete
-# restore-acm-passive-sync before applying this one.
+# restore-acm-passive-sync before applying this one, and delete any
+# Finished activation restore left from an earlier failover (re-applying
+# an identical spec is a silent no-op).
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Restore
 metadata:

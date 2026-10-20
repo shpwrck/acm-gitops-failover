@@ -4,11 +4,11 @@
 # role. It cannot be delivered by the dr-role Application itself (RBAC
 # escalation prevention: the controller can only grant what it holds).
 #
-# Why explicit and not the managed-by label (verified 2026-08-13): the
+# Why explicit and not the managed-by label (verified live): the
 # GitOps operator's minted namespace role is an allowlist of known API
 # groups — `oc auth can-i` shows it does NOT include
 # cluster.open-cluster-management.io backupschedules/restores. The label
-# trick works for the demo app's core/Route kinds on sage; it does not
+# trick works for the demo app's core/Route kinds on the spoke; it does not
 # work here. This Role is also the tighter statement: git-driven DR may
 # touch exactly two resource types in exactly one namespace, nothing else.
 apiVersion: rbac.authorization.k8s.io/v1
