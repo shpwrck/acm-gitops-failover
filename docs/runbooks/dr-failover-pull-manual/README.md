@@ -85,7 +85,7 @@ sequenceDiagram
 ### 0.1 Posture sanity
 
 ```bash
-oc --context $ACTIVE  get backupschedule,backup -n open-cluster-management-backup | head
+oc --context $ACTIVE  get backupschedule -n open-cluster-management-backup
 oc --context $ACTIVE  get managedclusters
 oc --context $PASSIVE get restore -n open-cluster-management-backup
 oc --context $PASSIVE get managedclusters
@@ -145,7 +145,7 @@ oc --context $ACTIVE get secret auto-import-account -n $MANAGED \
 
 ```bash
 oc --context $ACTIVE get backup -n open-cluster-management-backup \
-  --sort-by=.metadata.creationTimestamp \
+  --sort-by=.status.startTimestamp \
   -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -6
 ```
 
@@ -253,7 +253,7 @@ NODE=$(oc --context $ACTIVE get nodes -l node-role.kubernetes.io/master -o jsonp
 oc --context $ACTIVE debug node/$NODE -- chroot /host /usr/local/bin/cluster-backup.sh /home/core/assets/backup
 # just before the cut: the newest set must be Completed, not InProgress
 oc --context $ACTIVE get backup -n open-cluster-management-backup \
-  --sort-by=.metadata.creationTimestamp \
+  --sort-by=.status.startTimestamp \
   -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -6
 ```
 
