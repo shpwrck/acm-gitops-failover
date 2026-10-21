@@ -379,17 +379,23 @@ oc --context hub-y get restores.cluster.open-cluster-management.io -n open-clust
 oc --context hub-x apply -f manifests/61-gitops-integration.yaml
 oc --context hub-x apply -f manifests/62-appset-pull.yaml
 oc --context hub-x apply -f manifests/63-appset-push.yaml
-# the pull app, synced by the spoke's own Argo CD:
-until oc --context spoke get applications.argoproj.io hello-failover-spoke -n openshift-gitops >/dev/null 2>&1; do sleep 10; done
-oc --context spoke wait applications.argoproj.io/hello-failover-spoke -n openshift-gitops \
-  --for=jsonpath='{.status.health.status}'=Healthy --timeout=10m
-# the push app, synced by the hub's Argo CD through cluster-proxy:
-until oc --context hub-x get applications.argoproj.io hello-failover-push-spoke -n openshift-gitops >/dev/null 2>&1; do sleep 10; done
-oc --context hub-x wait applications.argoproj.io/hello-failover-push-spoke -n openshift-gitops \
-  --for=jsonpath='{.status.health.status}'=Healthy --timeout=10m
+# the pull app, synced by the spoke's own Argo CD; the push app, synced by
+# the hub's Argo CD through cluster-proxy. An Application reads Healthy
+# before its first sync (it has no resources yet), so wait for the sync first:
+for app in spoke/hello-failover-spoke hub-x/hello-failover-push-spoke; do
+  c=${app%/*}; a=${app#*/}
+  until oc --context $c get applications.argoproj.io $a -n openshift-gitops >/dev/null 2>&1; do sleep 10; done
+  oc --context $c wait applications.argoproj.io/$a -n openshift-gitops \
+    --for=jsonpath='{.status.operationState.phase}'=Succeeded --timeout=10m
+  oc --context $c wait applications.argoproj.io/$a -n openshift-gitops \
+    --for=jsonpath='{.status.health.status}'=Healthy --timeout=10m
+done
 oc --context spoke get applications.argoproj.io -A
 oc --context hub-x get applications.argoproj.io -n openshift-gitops
 ```
+
+On the hub, the pull app's copy reads `Unknown`: it carries
+`argocd.argoproj.io/skip-reconcile`, and its status comes from the spoke.
 
 Everything applied in this step is in a backed-up API group, so hub-y
 picks it up through its passive restore; there is nothing to apply there.
