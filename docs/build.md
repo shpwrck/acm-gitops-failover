@@ -144,18 +144,31 @@ done
 ```
 
 If one hub already runs an older z-stream than the catalog's latest, pin
-the new hub to it: in `10-acm-operator.yaml` set `installPlanApproval:
-Manual` and `startingCSV: advanced-cluster-management.v<version>`, apply
-it, and approve the one InstallPlan it creates
-(`oc --context hub-y get installplan -n open-cluster-management`, then
-`oc --context hub-y patch installplan <name> -n open-cluster-management
---type merge -p '{"spec":{"approved":true}}'`). Set the existing hub's
-ACM Subscription to `installPlanApproval: Manual` too, or a z-stream
-release during the exercise upgrades only that hub:
+the new hub to it. Apply a copy of `10-acm-operator.yaml` with
+`installPlanApproval: Manual` and a `startingCSV`, approve the one
+InstallPlan it creates, and wait for the CSV before applying
+`20-multiclusterhub.yaml` there (here hub-y, pinned to 2.17.3):
 
 ```bash
-oc --context hub-x get subscription.operators.coreos.com -n open-cluster-management   # find the ACM subscription
-oc --context hub-x patch subscription.operators.coreos.com <name> -n open-cluster-management \
+V=2.17.3
+sed "s/installPlanApproval: Automatic/installPlanApproval: Manual\n  startingCSV: advanced-cluster-management.v$V/" \
+  manifests/10-acm-operator.yaml > /tmp/10-acm-operator-pinned.yaml
+grep -A1 installPlanApproval /tmp/10-acm-operator-pinned.yaml   # Manual, then the startingCSV
+oc --context hub-y apply -f /tmp/10-acm-operator-pinned.yaml
+until oc --context hub-y get installplan -n open-cluster-management -o name | grep -q .; do sleep 10; done
+IP=$(oc --context hub-y get installplan -n open-cluster-management -o jsonpath='{.items[0].metadata.name}')
+oc --context hub-y patch installplan "$IP" -n open-cluster-management --type merge -p '{"spec":{"approved":true}}'
+until [ "$(oc --context hub-y get csv advanced-cluster-management.v$V -n open-cluster-management \
+  -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
+```
+
+Set the existing hub's ACM Subscription to `installPlanApproval: Manual`
+too, or a z-stream release during the exercise upgrades only that hub:
+
+```bash
+SUB=$(oc --context hub-x get subscription.operators.coreos.com -n open-cluster-management \
+  -o jsonpath='{.items[?(@.spec.name=="advanced-cluster-management")].metadata.name}')
+oc --context hub-x patch subscription.operators.coreos.com "$SUB" -n open-cluster-management \
   --type merge -p '{"spec":{"installPlanApproval":"Manual"}}'
 ```
 
