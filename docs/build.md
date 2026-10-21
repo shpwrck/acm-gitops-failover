@@ -248,7 +248,17 @@ it.)
 
 If hub-x already manages the spoke, apply `40-import-spoke.yaml` anyway,
 because it sets the clusterset, the `name` label and the add-ons the
-rest of the build relies on, and skip the auto-import secret.
+rest of the build relies on, and skip the auto-import secret. If another
+tool imported it with a kept auto-import secret (annotation
+`managedcluster-import-controller.open-cluster-management.io/keeping-auto-import-secret`),
+delete that secret. That leaves the ManagedServiceAccount token from the
+backups as the only import credential, which is the state the runbooks
+assume:
+
+```bash
+oc --context hub-x get secret auto-import-secret -n spoke   # NotFound is what you want
+oc --context hub-x delete secret auto-import-secret -n spoke
+```
 
 ### 5. Backup roles
 
