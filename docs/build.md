@@ -354,11 +354,23 @@ oc --context hub-x delete secret auto-import-secret -n spoke
 
 ### 5. Backup roles
 
+The schedule takes its first backups right away. Let them finish before
+the passive hub starts restoring, so its first restore has something to
+read:
+
 ```bash
 oc --context hub-x apply -f manifests/55-backupschedule.yaml
+while :; do
+  P=$(oc --context hub-x get backup.velero.io -n open-cluster-management-backup -o jsonpath='{.items[*].status.phase}')
+  echo "$(date -u +%T) ${P:-no backups yet}"
+  [ -n "$P" ] && [ -z "$(echo "$P" | tr ' ' '\n' | grep -v '^Completed$')" ] && break
+  sleep 20
+done                                    # Ctrl-C and investigate if a phase reads Failed or PartiallyFailed
+oc --context hub-x get backupschedule -n open-cluster-management-backup   # Enabled
 oc --context hub-y apply -f manifests/56-restore-passive.yaml
-oc --context hub-x get backupschedule,backup -n open-cluster-management-backup
-oc --context hub-y get restore -n open-cluster-management-backup   # Enabled
+oc --context hub-y wait restores.cluster.open-cluster-management.io/restore-acm-passive-sync \
+  -n open-cluster-management-backup --for=jsonpath='{.status.phase}'=Enabled --timeout=15m
+oc --context hub-y get restores.cluster.open-cluster-management.io -n open-cluster-management-backup
 ```
 
 ### 6. Active hub: GitOps wiring and the demo apps
