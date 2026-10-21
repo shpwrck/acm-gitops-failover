@@ -149,7 +149,15 @@ Manual` and `startingCSV: advanced-cluster-management.v<version>`, apply
 it, and approve the one InstallPlan it creates
 (`oc --context hub-y get installplan -n open-cluster-management`, then
 `oc --context hub-y patch installplan <name> -n open-cluster-management
---type merge -p '{"spec":{"approved":true}}'`).
+--type merge -p '{"spec":{"approved":true}}'`). Set the existing hub's
+ACM Subscription to `installPlanApproval: Manual` too, or a z-stream
+release during the exercise upgrades only that hub:
+
+```bash
+oc --context hub-x get subscription.operators.coreos.com -n open-cluster-management   # find the ACM subscription
+oc --context hub-x patch subscription.operators.coreos.com <name> -n open-cluster-management \
+  --type merge -p '{"spec":{"installPlanApproval":"Manual"}}'
+```
 
 #### A hub that already runs ACM
 
