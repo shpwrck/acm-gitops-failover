@@ -595,16 +595,21 @@ failback may begin whenever the old hub returns.
 ### G.0 Break-glass on the returned hub (only once `dr/` is bootstrapped)
 
 ```bash
-oc --context $ACTIVE patch applications.argoproj.io dr-role -n openshift-gitops \
-  --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'   # $ACTIVE = the RETURNED hub
+# $ACTIVE = the RETURNED hub. Power it on, then:
+until curl -sk --max-time 5 $ACTIVE_API/version >/dev/null; do sleep 15; done; date -u +%FT%TZ   # record: API back
+until oc --context $ACTIVE patch applications.argoproj.io dr-role -n openshift-gitops \
+  --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'; do sleep 10; done
 ```
 
 **Why:** git still says the returned hub is active, so its `dr-role`
 would re-create the BackupSchedule that G.2 deletes, within seconds. Run
 this as soon as the returned hub's API answers, before touching any of
-its role objects. Skip it when `dr/` was never bootstrapped (the patch
-returns NotFound). D.0's afterwards-contract (re-align git, then
-re-enable) now covers both hubs.
+its role objects (the patch retries while the API is still settling).
+Then run G.2 straight away: G.1's wait gates only G.3, and the sooner
+the stale schedule is gone, the less chance it lands a catch-up backup
+set. Skip the patch when `dr/` was never bootstrapped (it returns
+NotFound; interrupt the retry). D.0's afterwards-contract (re-align
+git, then re-enable) now covers both hubs.
 
 ### G.1 Power the old hub back on; wait out the lease
 
@@ -652,6 +657,7 @@ exact warning). If in doubt, wait; `Unknown` costs nothing.
 oc --context $ACTIVE get backupschedule -n open-cluster-management-backup
 # expect: BackupCollision (it saw the new hub's newer backups in the shared bucket)
 oc --context $ACTIVE delete backupschedule schedule-acm -n open-cluster-management-backup
+oc --context $PASSIVE get backupschedule -n open-cluster-management-backup   # the NEW active hub: expect Enabled
 ```
 
 **Why:** Two hubs writing one bucket corrupts `latest` for every future
@@ -664,7 +670,9 @@ before freezing) and frozen is not gone: delete it so the defusal is
 permanent and auditable, and check which cluster id wrote the bucket's
 `latest` before any future restore.
 
-**Success:** Schedule shows `BackupCollision`, then deletes cleanly.
+**Success:** Schedule shows `BackupCollision` (or still `Enabled`, if
+you got there before the guard fired), then deletes cleanly; the new
+active hub's schedule stays `Enabled`.
 
 **Failure:** Schedule still `Enabled` and writing → verify which backup is
 newest in the bucket before ANY future restore; delete the schedule
