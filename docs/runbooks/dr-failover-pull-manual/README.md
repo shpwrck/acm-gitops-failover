@@ -771,6 +771,48 @@ one-shot was already reaped by a demote PR; fine, continue.
 - If a timing falls outside the ranges in [results.md](../../results.md),
   or a step behaved differently, update that page and this runbook —
   the repo IS the DR plan; an undocumented exercise never happened.
-- If `dr/` is bootstrapped, finish D.0's afterwards-contract: re-align
-  the `dr/` overlays with the roles you created by hand, then re-enable
-  automation on both hubs.
+- If `dr/` is bootstrapped, finish D.0's afterwards-contract with H.1.
+
+### H.1 Re-align `dr/` with the new roles, then re-enable automation (only once `dr/` is bootstrapped)
+
+```bash
+# in the git repo, on the branch the dr-role apps track (targetRevision)
+git branch --show-current
+sed -i 's#^  - ../roles/active$#  - ../roles/passive#' dr/$ACTIVE/kustomization.yaml    # the demoted hub
+sed -i 's#^  - ../roles/passive$#  - ../roles/active#' dr/$PASSIVE/kustomization.yaml   # the new active hub
+git diff --stat   # expect: exactly the two kustomization.yaml files
+git add dr/ && git commit -m "Re-align dr/: $PASSIVE active, $ACTIVE passive (manual failover)" && git push
+REV=$(git rev-parse HEAD)
+for hub in $ACTIVE $PASSIVE; do
+  oc --context $hub annotate applications.argoproj.io dr-role -n openshift-gitops \
+    argocd.argoproj.io/refresh=hard --overwrite
+  until [ "$(oc --context $hub get applications.argoproj.io dr-role -n openshift-gitops \
+    -o jsonpath='{.status.sync.revision}')" = "$REV" ]; do sleep 5; done
+  echo "$hub dr-role now compares against $REV"
+done
+for hub in $ACTIVE $PASSIVE; do
+  oc --context $hub patch applications.argoproj.io dr-role -n openshift-gitops --type merge \
+    -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
+done
+sleep 30
+for hub in $ACTIVE $PASSIVE; do
+  oc --context $hub get applications.argoproj.io dr-role -n openshift-gitops
+  oc --context $hub get backupschedule,restores.cluster.open-cluster-management.io \
+    -n open-cluster-management-backup \
+    -o custom-columns='KIND:.kind,NAME:.metadata.name,CREATED:.metadata.creationTimestamp'
+done
+```
+
+**Why:** Until git says what the hubs now are, re-enabling automation
+would undo the failover: selfHeal would bring back the passive Restore
+on the new active hub and the BackupSchedule on the demoted one. The
+revision wait is the guard against re-enabling on a stale revision
+(see D.0). The hand-made role objects already match the new git, so
+the first sync adopts them rather than recreating them.
+
+**Success:** Both `dr-role` apps `Synced | Healthy`. The new active hub
+lists only `schedule-acm` (plus the `Finished` activation restore from
+D.2, which git does not track; G.5 deletes it at this hub's next
+demotion), the demoted hub only `restore-acm-passive-sync`, and the
+creation times are the ones from F.1 and G.4 (adopted, not recreated).
+`hack/validate.py` prints the new posture.
