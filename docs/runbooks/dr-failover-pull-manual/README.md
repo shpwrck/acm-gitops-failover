@@ -311,8 +311,13 @@ the docs' promise, observed.)
 ### C.1 Push a new revision with no hub alive
 
 ```bash
-# in the git repo: bump REVISION in apps/hello-failover/configmap.yaml, then
-git add apps/hello-failover/configmap.yaml && git commit -m "REVISION vN mid-outage" && git push
+# in the git repo, on the branch the clusters track (targetRevision, see the README's settings table)
+git branch --show-current
+N=2   # the next revision number
+sed -i "s/REVISION v[0-9]*/REVISION v$N/" apps/hello-failover/configmap.yaml
+git add apps/hello-failover/configmap.yaml && git commit -m "REVISION v$N mid-outage" && git push
+date -u +%FT%TZ   # record: deploy pushed
+until curl -s $APP_URL | grep -q "REVISION v$N"; do sleep 10; done; date -u +%FT%TZ   # record: new revision served
 ```
 
 **Why:** Proves deployments flow git → cluster with zero hub involvement:
@@ -384,7 +389,10 @@ drift) and continue — activation does not depend on it.
 
 ```bash
 oc --context $PASSIVE apply -f manifests/57-restore-activate.yaml
-oc --context $PASSIVE get restore restore-acm-activate -n open-cluster-management-backup -w
+date -u +%FT%TZ   # record: activation applied
+until oc --context $PASSIVE get restore restore-acm-activate -n open-cluster-management-backup \
+  -o jsonpath='{.status.phase}' | grep -q '^Finished'; do sleep 5; done
+oc --context $PASSIVE get restore restore-acm-activate -n open-cluster-management-backup
 ```
 
 **Why:** `veleroManagedClustersBackupName: latest` is the one field that
@@ -410,7 +418,10 @@ failed).
 ### D.3 Watch the claim land
 
 ```bash
-oc --context $PASSIVE get managedclusters -w
+oc --context $PASSIVE wait managedcluster/$MANAGED \
+  --for=condition=ManagedClusterConditionAvailable --timeout=15m
+date -u +%FT%TZ   # record: claim landed
+oc --context $PASSIVE get managedclusters
 ```
 
 **Why:** This is auto-import doing its job: the restored MSA token lets
@@ -554,7 +565,10 @@ re-enable) now covers both hubs.
 ### G.1 Power the old hub back on; wait out the lease
 
 ```bash
-oc --context $ACTIVE get managedclusters -w   # $ACTIVE = the RETURNED hub
+# $ACTIVE = the RETURNED hub; the loop also waits out the API coming back
+until [ "$(oc --context $ACTIVE get managedcluster $MANAGED --request-timeout=5s \
+  -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)" = Unknown ]; do sleep 15; done
+oc --context $ACTIVE get managedclusters
 ```
 
 **Why:** The returned hub wakes with a STALE worldview — it still lists

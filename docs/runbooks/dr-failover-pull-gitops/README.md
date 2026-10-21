@@ -192,7 +192,9 @@ here is the split-brain the Manual Pull Path warns about, with better bookkeepin
 
 ```bash
 oc --context $PASSIVE annotate applications.argoproj.io dr-role -n openshift-gitops argocd.argoproj.io/refresh=normal --overwrite
-oc --context $PASSIVE get restore -n open-cluster-management-backup -w
+until oc --context $PASSIVE get restore restore-acm-activate-$STAMP -n open-cluster-management-backup \
+  -o jsonpath='{.status.phase}' 2>/dev/null | grep -q '^Finished'; do sleep 5; done
+oc --context $PASSIVE get restore -n open-cluster-management-backup   # $STAMP from D'.1
 ```
 
 **Why:** Argo's ≤3 min poll is the only new latency vs the manual path;
@@ -215,9 +217,11 @@ activation Restore; selfHeal re-creates it within ~6 s and the fresh
 object runs clean:
 
 ```bash
-oc --context $PASSIVE delete restore restore-acm-activate-<stamp> -n open-cluster-management-backup
-oc --context $PASSIVE get restore -n open-cluster-management-backup -w
-# selfHeal re-creates the one-shot in seconds; expect it to reach Finished
+oc --context $PASSIVE delete restore restore-acm-activate-$STAMP -n open-cluster-management-backup
+sleep 15   # selfHeal re-creates the one-shot in seconds; expect it to reach Finished
+until oc --context $PASSIVE get restore restore-acm-activate-$STAMP -n open-cluster-management-backup \
+  -o jsonpath='{.status.phase}' 2>/dev/null | grep -q '^Finished'; do sleep 5; done
+oc --context $PASSIVE get restore -n open-cluster-management-backup
 ```
 
 Do NOT touch the passive restore (already pruned) and do NOT
@@ -301,7 +305,9 @@ dangerous moment), then delete the stale ManagedCluster (G.3). No PR
 represents this: it is runtime state, and the gate is a live reading.
 
 ```bash
-oc --context $ACTIVE get managedclusters -w    # gate: $MANAGED reads Available=Unknown
+until [ "$(oc --context $ACTIVE get managedcluster $MANAGED --request-timeout=5s \
+  -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)" = Unknown ]; do sleep 15; done
+oc --context $ACTIVE get managedclusters        # gate: $MANAGED reads Available=Unknown
 oc --context $ACTIVE delete managedcluster $MANAGED
 ```
 
