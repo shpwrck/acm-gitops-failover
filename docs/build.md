@@ -151,9 +151,9 @@ InstallPlan it creates, and wait for the CSV before applying
 
 ```bash
 V=2.17.3
-sed "s/installPlanApproval: Automatic/installPlanApproval: Manual\n  startingCSV: advanced-cluster-management.v$V/" \
+sed "s/^  installPlanApproval: Automatic\$/  installPlanApproval: Manual\n  startingCSV: advanced-cluster-management.v$V/" \
   manifests/10-acm-operator.yaml > /tmp/10-acm-operator-pinned.yaml
-grep -A1 installPlanApproval /tmp/10-acm-operator-pinned.yaml   # Manual, then the startingCSV
+grep -A1 '^  installPlanApproval' /tmp/10-acm-operator-pinned.yaml   # Manual, then the startingCSV
 oc --context hub-y apply -f /tmp/10-acm-operator-pinned.yaml
 until oc --context hub-y get installplan -n open-cluster-management -o name | grep -q .; do sleep 10; done
 IP=$(oc --context hub-y get installplan -n open-cluster-management -o jsonpath='{.items[0].metadata.name}')
