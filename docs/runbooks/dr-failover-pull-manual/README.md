@@ -611,6 +611,14 @@ set. Skip the patch when `dr/` was never bootstrapped (it returns
 NotFound; interrupt the retry). D.0's afterwards-contract (re-align
 git, then re-enable) now covers both hubs.
 
+**Success:** after G.2, automation is off and the schedule stays gone:
+
+```bash
+oc --context $ACTIVE get applications.argoproj.io dr-role -n openshift-gitops \
+  -o jsonpath='{.spec.syncPolicy.automated}{"\n"}'          # expect: an empty line
+oc --context $ACTIVE get backupschedule -n open-cluster-management-backup   # expect: No resources found
+```
+
 ### G.1 Power the old hub back on; wait out the lease
 
 ```bash
@@ -704,6 +712,8 @@ tail -3 ~/probe-$(date -u +%Y%m%d).log          # expect: unbroken 200s
 
 ```bash
 oc --context $ACTIVE apply -f manifests/56-restore-passive.yaml
+oc --context $ACTIVE wait restores.cluster.open-cluster-management.io/restore-acm-passive-sync \
+  -n open-cluster-management-backup --for=jsonpath='{.status.phase}'=Enabled --timeout=10m
 oc --context $ACTIVE get restore -n open-cluster-management-backup
 ```
 
