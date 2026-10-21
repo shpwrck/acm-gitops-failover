@@ -22,8 +22,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/redhat-na-ssa/acm-gitops-failover
-    targetRevision: main
+    repoURL: https://github.com/shpwrck/acm-gitops-failover
+    targetRevision: dr-run
     path: dr/hub-x
   destination:
     server: https://kubernetes.default.svc
