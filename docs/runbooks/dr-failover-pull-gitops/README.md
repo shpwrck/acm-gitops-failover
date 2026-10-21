@@ -24,11 +24,12 @@ identities, not the `$ACTIVE`/`$PASSIVE` of any particular exercise.)
 ### P.0 RBAC first — the grant that makes git-driven DR possible
 
 ```bash
-oc --context hub-x apply -f dr/bootstrap/dr-role-rbac.yaml
-oc --context hub-y apply -f dr/bootstrap/dr-role-rbac.yaml
-oc --context hub-x auth can-i patch backupschedules.cluster.open-cluster-management.io \
-  -n open-cluster-management-backup \
-  --as=system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller
+for hub in hub-x hub-y; do
+  oc --context $hub apply -f dr/bootstrap/dr-role-rbac.yaml
+  oc --context $hub auth can-i patch backupschedules.cluster.open-cluster-management.io \
+    -n open-cluster-management-backup \
+    --as=system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller
+done
 ```
 
 **Why:** Discovered live: the default openshift-gitops
