@@ -772,7 +772,13 @@ one-shot was already reaped by a demote PR; fine, continue.
 ## Phase H — Evidence and docs
 
 - Summarize both probe logs (window, request count, failure count, flip
-  timestamp) and keep them with the exercise's notes.
+  timestamp) and keep them with the exercise's notes:
+
+  ```bash
+  head -1 ~/probe-$RUN.log; tail -1 ~/probe-$RUN.log
+  echo "samples: $(wc -l < ~/probe-$RUN.log)  failures: $(grep -c -v ' 200$' ~/probe-$RUN.log)"
+  grep -v "$ACTIVE_API" ~/hub-pointer-$RUN.log | head -1   # the flip
+  ```
 - If a timing falls outside the ranges in [results.md](../../results.md),
   or a step behaved differently, update that page and this runbook —
   the repo IS the DR plan; an undocumented exercise never happened.
