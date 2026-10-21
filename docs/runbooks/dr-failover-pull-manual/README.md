@@ -276,6 +276,12 @@ command here.
 killing the API out-of-band is the honest simulation. Do NOT cordon/drain
 first — that would be a migration, not a disaster.
 
+A short press of a physical power button is not a power cut: it sends
+an ACPI shutdown, and the host shuts down gracefully (observed live:
+the API died at once, the host stopped answering ping about 3 min
+later). For a hard cut, hold the button (about 5 s), pull the plug, or
+use the BMC's hard power-off. Record which one you used.
+
 **API variant:** on SNO the cluster dies with its one
 node, so a debug pod can pull the trigger:
 
