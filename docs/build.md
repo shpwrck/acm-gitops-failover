@@ -301,8 +301,8 @@ sed "s#s3Url: https://s3.example.com#s3Url: $S3_URL#" manifests/50-dpa.yaml > /t
 grep s3Url /tmp/50-dpa.yaml
 printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' "$S3_ACCESS_KEY" "$S3_SECRET_KEY" > /tmp/cloud
 for hub in hub-x hub-y; do
-  oc --context $hub create secret generic cloud-credentials \
-    -n open-cluster-management-backup --from-file=cloud=/tmp/cloud
+  oc --context $hub create secret generic cloud-credentials -n open-cluster-management-backup \
+    --from-file=cloud=/tmp/cloud --dry-run=client -o yaml | oc --context $hub apply -f -
   oc --context $hub apply -f /tmp/50-dpa.yaml
 done
 rm /tmp/cloud
@@ -311,6 +311,9 @@ for hub in hub-x hub-y; do
     --for=jsonpath='{.status.phase}'=Available --timeout=5m
 done
 ```
+
+The secret is created through `apply`, so running the block again (for
+example with a new key) updates it in place.
 
 A certificate error from curl means the store's certificate is not
 publicly trusted: add its CA to the copy as `objectStorage.caCert`
