@@ -500,9 +500,19 @@ unbroken 200s.
 
 ```bash
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
-  -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'
-# expect False with the ownerRef error, or the condition entirely
-# absent on a freshly restored MSA → then:
+  -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{" | "}{.status.expirationTimestamp}{"\n"}'
+oc --context $PASSIVE get secret auto-import-account -n $MANAGED \
+  -o jsonpath='{.metadata.ownerReferences[0].kind}{"\n"}'
+```
+
+Two outcomes:
+
+- `True | <now + 144h>` and `ManagedServiceAccount`: the controller
+  adopted the restored secret and rotated it. Nothing to delete.
+- `False` with the ownerRef error, or the condition absent, and no
+  owner: the frozen restored copy. Delete it and check again:
+
+```bash
 oc --context $PASSIVE delete secret auto-import-account -n $MANAGED
 sleep 30
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
@@ -510,12 +520,15 @@ oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED 
 ```
 
 **Why:** The restored secret just did its job (D.3) and is now a
-liability: the new hub's MSA controller cannot adopt a Velero-restored
-secret, so rotation silently freezes and the NEXT failover dies at token
-expiry. Load-bearing during activation, disposable after — delete it only
-now, never before D.3.
+liability if the new hub's MSA controller cannot adopt it: rotation
+silently freezes and the NEXT failover dies at token expiry. The ACM
+2.17.0 runs hit that every time; the 2.17.3 run on 2026-10-21 found the
+secret already adopted and rotated a minute after the claim (expiry
+reset to now + 144h, owner `ManagedServiceAccount`). Check rather than
+assume. If you delete, delete only now, never before D.3: until the
+claim lands the restored secret is load-bearing.
 
-**Success:** `True | <now + 144h>`.
+**Success:** `True | <now + 144h>` and owner `ManagedServiceAccount`.
 
 **Failure:** Still `False` after a minute → check the
 `managed-serviceaccount` addon is `Available` (E.1) — the re-mint is
@@ -527,8 +540,16 @@ performed by the addon agent, not the hub.
 
 ```bash
 oc --context $PASSIVE apply -f manifests/55-backupschedule.yaml
-oc --context $PASSIVE get backupschedule,backup -n open-cluster-management-backup
+oc --context $PASSIVE wait backupschedule/schedule-acm -n open-cluster-management-backup \
+  --for=jsonpath='{.status.phase}'=Enabled --timeout=5m
+sleep 60   # the first set fires on creation
+oc --context $PASSIVE get backup -n open-cluster-management-backup --sort-by=.status.startTimestamp \
+  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -6
 ```
+
+(Sort by start time, not creation time: the other hub's backups are
+synced in from the bucket, so their objects here are only as old as
+the sync.)
 
 **Why:** Failover is deliberately manual and so is this: until a
 BackupSchedule runs HERE, the fleet state that just changed hands is
