@@ -67,7 +67,8 @@ runbook step are in [docs/results.md](docs/results.md).
 You need three OpenShift clusters (two that can run ACM 2.17 as hubs, and
 one workload cluster; this repo was verified on OpenShift 4.21, so check
 the ACM support matrix for other versions), an S3-compatible bucket both
-hubs can reach, and a git repository every cluster can reach.
+hubs can reach, a git repository every cluster can reach, and a
+workstation with `oc`, `git`, `jq` and curl 8 or newer.
 
 1. **Fork or copy this repo** and change the values below to match your
    environment.

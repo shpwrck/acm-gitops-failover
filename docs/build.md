@@ -15,11 +15,24 @@ procedures are the [runbooks](runbooks/); the measured results are in
 | spoke | workload cluster, imported into the active hub | single-node OpenShift 4.21 |
 
 The names are the kubeconfig contexts every command below and every
-runbook uses. If your clusters have other names, either rename the
-contexts (`oc config rename-context`) or substitute your names; the
-values to change in the repo are listed in the [README](../README.md#getting-started).
-The hub roles are interchangeable: failover swaps them back and forth
-with no extra cleanup in between.
+runbook uses. If your clusters have other names, give them these names in
+a copy of your kubeconfig, so other tools that use your contexts are
+unaffected:
+
+```bash
+mkdir -p ~/acm-dr && oc config view --flatten > ~/acm-dr/kubeconfig
+chmod 600 ~/acm-dr/kubeconfig                 # it holds cluster credentials
+export KUBECONFIG=~/acm-dr/kubeconfig         # in every terminal of the exercise
+oc config rename-context <your active hub> hub-x
+oc config rename-context <your passive hub> hub-y
+oc config rename-context <your workload cluster> spoke   # skip if it is already named spoke
+oc config get-contexts                        # hub-x, hub-y and spoke are listed
+```
+
+The values to change in the repo are listed in the
+[README](../README.md#getting-started). The hub roles are
+interchangeable: failover swaps them back and forth with no extra cleanup
+in between.
 
 - Hub sizing (observed): a single node with 19.5 CPU / 95 GiB allocatable
   ran the full hub at about 11% CPU and 42% memory (about 47 pods across
@@ -104,11 +117,62 @@ oc --context hub-x get mch -n open-cluster-management -w      # until Running
 oc --context hub-x get csv -n open-cluster-management-backup  # OADP installed by ACM
 ```
 
-Skip `10-acm-operator.yaml` on a cluster that already runs ACM: a second
-OperatorGroup in `open-cluster-management` makes OLM fail every CSV there
-(`TooManyOperatorGroups`). A cluster that is still managed by another hub
-must be detached from it before it becomes a hub (see the note in
-`20-multiclusterhub.yaml`).
+**Both hubs must report the same ACM version** before you go on:
+
+```bash
+for hub in hub-x hub-y; do
+  oc --context $hub get csv -n open-cluster-management -o name | grep advanced-cluster-management
+done
+```
+
+If one hub already runs an older z-stream than the catalog's latest, pin
+the new hub to it: in `10-acm-operator.yaml` set `installPlanApproval:
+Manual` and `startingCSV: advanced-cluster-management.v<version>`, apply
+it, and approve the one InstallPlan it creates
+(`oc --context hub-y get installplan -n open-cluster-management`, then
+`oc --context hub-y patch installplan <name> -n open-cluster-management
+--type merge -p '{"spec":{"approved":true}}'`).
+
+#### A hub that already runs ACM
+
+Skip `10-acm-operator.yaml` there: a second OperatorGroup in
+`open-cluster-management` makes OLM fail every CSV in the namespace
+(`TooManyOperatorGroups`). Do not apply `20-multiclusterhub.yaml` either:
+the operator has filled the existing MultiClusterHub's
+`spec.overrides.components` with every component, and `oc apply`
+replaces that whole list. Turn on `cluster-backup` in place instead,
+keeping every other entry:
+
+```bash
+oc --context hub-x get mch multiclusterhub -n open-cluster-management -o json \
+  | jq -c '{spec: {overrides: {components:
+      ((.spec.overrides.components // [] | map(select(.name != "cluster-backup")))
+       + [{name: "cluster-backup", enabled: true}])}}}' > /tmp/mch-patch.json
+oc --context hub-x patch mch multiclusterhub -n open-cluster-management \
+  --type merge --patch-file /tmp/mch-patch.json
+oc --context hub-x get mch multiclusterhub -n open-cluster-management \
+  -o jsonpath='{.spec.overrides.components[?(@.name=="cluster-backup")].enabled}'   # true
+```
+
+#### A cluster that is managed by another hub
+
+It must be detached before it becomes a hub: the hub's self-import
+creates a klusterlet named `klusterlet`, which collides with the one the
+other hub installed. Detaching removes the add-ons and ManifestWork
+payloads that hub delivered to it; anything another tool deployed (Argo
+CD push, Helm) stays.
+
+```bash
+oc --context <managing hub> delete managedcluster <cluster name>
+oc --context hub-y get klusterlet                         # NotFound, after a few minutes
+oc --context hub-y get ns open-cluster-management-agent   # NotFound
+```
+
+If the klusterlet stays, follow the cleanup in the ACM
+[Clusters guide](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/clusters/index)
+("Removing a cluster from management").
+
+#### Shared clusters
 
 These manifests assume dedicated clusters. On a hub that already manages
 other clusters, pick a ManagedCluster name that is not taken (applying
@@ -116,6 +180,15 @@ other clusters, pick a ManagedCluster name that is not taken (applying
 and bind a dedicated ManagedClusterSet instead of `default` in
 `61-gitops-integration.yaml`, or every cluster in `default` gets
 registered with Argo CD.
+
+A hub that runs other Argo CD applications fails them over too:
+everything in the `argoproj.io` group is in the backup, so the other hub
+restores them and starts syncing them, including the ones that deploy to
+the hub itself. And if another setup already registers the workload
+cluster with that hub's Argo CD under the same name, the GitOpsCluster's
+cluster secret makes two clusters with one name, and Argo CD stops
+syncing the applications that target it by name. For an exercise, move
+other GitOps work off the hubs first.
 
 ### 2. All clusters: OpenShift GitOps
 
@@ -154,6 +227,10 @@ oc --context hub-x get managedclusters -w        # spoke: Joined, Available True
 (If the `KlusterletAddonConfig` is rejected because namespace `spoke`
 does not exist yet, re-apply the file once the ManagedCluster has created
 it.)
+
+If hub-x already manages the spoke, apply `40-import-spoke.yaml` anyway,
+because it sets the clusterset, the `name` label and the add-ons the
+rest of the build relies on, and skip the auto-import secret.
 
 ### 5. Backup roles
 

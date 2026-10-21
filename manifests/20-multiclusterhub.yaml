@@ -6,6 +6,9 @@
 # A cluster that is still managed by another hub must be detached from it
 # first: the hub's self-import creates a klusterlet named "klusterlet",
 # which collides with the one the other hub installed.
+# On a hub that already runs ACM, do not apply this file: `oc apply`
+# replaces the existing hub's whole component list. docs/build.md
+# ("A hub that already runs ACM") patches cluster-backup in place.
 apiVersion: operator.open-cluster-management.io/v1
 kind: MultiClusterHub
 metadata:

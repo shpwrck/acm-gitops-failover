@@ -20,6 +20,10 @@ either direction. Before anything else, write down the mapping from these
 generic names to your real kubeconfig contexts: generic names can collide
 with real cluster names (a real hub literally named "spoke" has happened),
 and a mistyped context in Phase B kills the wrong cluster.
+If you work from the kubeconfig copy in
+[build.md](../../build.md#clusters), run
+`export KUBECONFIG=~/acm-dr/kubeconfig` in every terminal first,
+including the probe terminals.
 
 ```bash
 export ACTIVE=hub-x       # hub about to "die" (hub-x in the repo's starting posture)
