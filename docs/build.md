@@ -255,6 +255,34 @@ for c in hub-x hub-y spoke; do
 done
 ```
 
+If one hub already runs GitOps, check its version first. Channel `latest`
+installs the newest z-stream on a new cluster, so pin the other hub to the
+existing hub's CSV, the same way as ACM in step 1. The spoke can take
+`latest`. A Manual Subscription holds every upgrade in its namespace (OLM
+resolves `openshift-operators` as one unit), so other operators there
+wait for approval too until you switch it back:
+
+```bash
+oc --context hub-x apply -f manifests/60-gitops-operator.yaml   # no change if it is the same Subscription
+oc --context spoke apply -f manifests/60-gitops-operator.yaml
+GV=$(oc --context hub-x get subscription.operators.coreos.com openshift-gitops-operator \
+  -n openshift-operators -o jsonpath='{.status.installedCSV}')
+echo "$GV"
+sed "s/^  installPlanApproval: Automatic\$/  installPlanApproval: Manual\n  startingCSV: $GV/" \
+  manifests/60-gitops-operator.yaml > /tmp/60-gitops-operator-pinned.yaml
+grep -A1 '^  installPlanApproval' /tmp/60-gitops-operator-pinned.yaml   # Manual, then the startingCSV
+oc --context hub-y apply -f /tmp/60-gitops-operator-pinned.yaml
+IP=""; until [ -n "$IP" ]; do sleep 10
+  IP=$(oc --context hub-y get installplan -n openshift-operators -o json | jq -r --arg csv "$GV" \
+    '.items[] | select(.spec.approved==false and (.spec.clusterServiceVersionNames | index($csv))) | .metadata.name')
+done
+oc --context hub-y patch installplan "$IP" -n openshift-operators --type merge -p '{"spec":{"approved":true}}'
+until [ "$(oc --context hub-y get csv "$GV" -n openshift-operators -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
+for c in hub-x hub-y spoke; do
+  echo "== $c"; oc --context $c get csv -n openshift-operators -o name | grep gitops
+done
+```
+
 ### 3. Hubs: backup storage
 
 Edit `manifests/50-dpa.yaml` for your bucket first. Then, on each hub:
