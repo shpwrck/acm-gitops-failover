@@ -313,7 +313,11 @@ done
 ```
 
 The secret is created through `apply`, so running the block again (for
-example with a new key) updates it in place.
+example with a new key) updates it in place; then run `oc --context <hub>
+rollout restart deploy/velero -n open-cluster-management-backup` on each
+hub so Velero picks up the new key at once. A location that stays
+`Unavailable` with `SignatureDoesNotMatch` in `oc get
+backupstoragelocation -o yaml` has a wrong secret key in that secret.
 
 A certificate error from curl means the store's certificate is not
 publicly trusted: add its CA to the copy as `objectStorage.caCert`
