@@ -48,10 +48,21 @@ failed sync and align.
 ### P.1 Bootstrap each hub's dr-role Application
 
 ```bash
+ts() {   # creationTimestamp of each hub's role object, before and after
+  oc --context hub-x get backupschedule schedule-acm -n open-cluster-management-backup \
+    -o jsonpath='hub-x BackupSchedule {.metadata.creationTimestamp}{"\n"}'
+  oc --context hub-y get restores.cluster.open-cluster-management.io restore-acm-passive-sync \
+    -n open-cluster-management-backup -o jsonpath='hub-y Restore {.metadata.creationTimestamp}{"\n"}'
+}
+ts
 oc --context hub-x apply -f dr/bootstrap/dr-role-hub-x.yaml
 oc --context hub-y apply -f dr/bootstrap/dr-role-hub-y.yaml
-oc --context hub-x get applications.argoproj.io dr-role -n openshift-gitops
-oc --context hub-y get applications.argoproj.io dr-role -n openshift-gitops
+for hub in hub-x hub-y; do
+  oc --context $hub wait applications.argoproj.io/dr-role -n openshift-gitops \
+    --for=jsonpath='{.status.operationState.phase}'=Succeeded --timeout=10m
+  oc --context $hub get applications.argoproj.io dr-role -n openshift-gitops
+done
+ts
 ```
 
 **Why:** Each hub's own Argo must reconcile its own role — the applier of
