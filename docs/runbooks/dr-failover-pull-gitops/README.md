@@ -305,8 +305,9 @@ dangerous moment), then delete the stale ManagedCluster (G.3). No PR
 represents this: it is runtime state, and the gate is a live reading.
 
 ```bash
-until [ "$(oc --context $ACTIVE get managedcluster $MANAGED --request-timeout=5s \
-  -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)" = Unknown ]; do sleep 15; done
+until curl -sk --max-time 5 $ACTIVE_API/version >/dev/null; do sleep 15; done   # the returned hub's API
+oc --context $ACTIVE wait managedcluster/$MANAGED \
+  --for=condition=ManagedClusterConditionAvailable=Unknown --timeout=15m
 oc --context $ACTIVE get managedclusters        # gate: $MANAGED reads Available=Unknown
 oc --context $ACTIVE delete managedcluster $MANAGED
 ```

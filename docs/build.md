@@ -161,8 +161,7 @@ oc --context hub-y apply -f /tmp/10-acm-operator-pinned.yaml
 until oc --context hub-y get installplan -n open-cluster-management -o name | grep -q .; do sleep 10; done
 IP=$(oc --context hub-y get installplan -n open-cluster-management -o jsonpath='{.items[0].metadata.name}')
 oc --context hub-y patch installplan "$IP" -n open-cluster-management --type merge -p '{"spec":{"approved":true}}'
-until [ "$(oc --context hub-y get csv advanced-cluster-management.v$V -n open-cluster-management \
-  -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
+until [ "$(oc --context hub-y get csv advanced-cluster-management.v$V -n open-cluster-management -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
 ```
 
 The multicluster engine Subscription that ACM creates inherits the

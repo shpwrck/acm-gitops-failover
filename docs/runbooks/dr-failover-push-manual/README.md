@@ -87,7 +87,7 @@ Add a second availability probe for the push app's route (same loop, own
 log file):
 
 ```bash
-while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $PUSH_APP_URL)"; sleep 10; done | tee -a ~/probe-push-$(date -u +%Y%m%d).log
+while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $PUSH_APP_URL)"; sleep 10; done | tee -a ~/probe-push-$RUN.log
 ```
 
 **Why:** Two apps, two logs, one outage: the pull log should stay

@@ -31,6 +31,7 @@ export PASSIVE=hub-y      # hub that will activate
 export MANAGED=spoke      # workload cluster that re-homes
 export APP_URL=https://hello-failover-hello-failover.apps.spoke.example.com   # <apps domain of $MANAGED>
 export ACTIVE_API=$(oc --context $ACTIVE whoami --show-server)   # read from kubeconfig while the hub is alive
+export RUN=$(date -u +%Y%m%d)-1   # names this run's probe logs: same value in every terminal, bump -1 per run
 ```
 
 Every terminal you run commands in needs these exports. With
@@ -39,7 +40,7 @@ context name and fails with `flags cannot be placed before plugin
 name`. Check a terminal before using it:
 
 ```bash
-echo "ACTIVE=${ACTIVE:?unset} PASSIVE=${PASSIVE:?unset} MANAGED=${MANAGED:?unset} ACTIVE_API=${ACTIVE_API:?unset}"
+echo "ACTIVE=${ACTIVE:?unset} PASSIVE=${PASSIVE:?unset} MANAGED=${MANAGED:?unset} ACTIVE_API=${ACTIVE_API:?unset} RUN=${RUN:?unset}"
 ```
 
 The whole exercise at a glance (the hub-pointer flip in Phase D is the
@@ -72,8 +73,10 @@ sequenceDiagram
   correlate.
 - Never skip a **Gate** line — each phase's gate is the condition that
   makes the next phase safe.
-- Evidence artifacts: `~/probe-<date>.log` (availability),
-  `~/hub-pointer-<date>.log` (re-home), plus pasted command outputs.
+- Evidence artifacts: `~/probe-$RUN.log` (availability),
+  `~/hub-pointer-$RUN.log` (re-home), plus pasted command outputs.
+  One log pair per run keeps E.2's flip search honest when you run
+  several exercises in a day.
   Any persistent background runner and log location works — the logs
   are the evidence, not the terminals.
 
@@ -191,7 +194,7 @@ expensive mid-outage.
 ### A.1 Availability probe (own terminal, runs through the whole exercise)
 
 ```bash
-while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $APP_URL)"; sleep 10; done | tee -a ~/probe-$(date -u +%Y%m%d).log
+while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $APP_URL)"; sleep 10; done | tee -a ~/probe-$RUN.log
 ```
 
 **Why:** The architecture's core claim — workloads decoupled from hub
@@ -208,7 +211,7 @@ powering down; check before writing it up as a DR failure).
 ### A.2 Hub-pointer probe (second terminal)
 
 ```bash
-while true; do echo "$(date -u +%FT%TZ) $(oc --context $MANAGED get secret bootstrap-hub-kubeconfig -n open-cluster-management-agent -o jsonpath='{.data.kubeconfig}' --request-timeout=5s 2>/dev/null | base64 -d | awk '/server:/{print $2}')"; sleep 10; done | tee -a ~/hub-pointer-$(date -u +%Y%m%d).log
+while true; do echo "$(date -u +%FT%TZ) $(oc --context $MANAGED get secret bootstrap-hub-kubeconfig -n open-cluster-management-agent -o jsonpath='{.data.kubeconfig}' --request-timeout=5s 2>/dev/null | base64 -d | awk '/server:/{print $2}')"; sleep 10; done | tee -a ~/hub-pointer-$RUN.log
 ```
 
 **Why:** Timestamps the exact second `$MANAGED`'s klusterlet re-points
@@ -320,7 +323,7 @@ manifest's header warns exactly this). Verify death before Phase D.
 ### B.2 Confirm the workload does not care
 
 ```bash
-tail -3 ~/probe-$(date -u +%Y%m%d).log
+tail -3 ~/probe-$RUN.log
 ```
 
 **Why:** The first customer-visible datapoint: hub dead, app serving.
@@ -484,8 +487,9 @@ before digging, addon rollout is eventually consistent.
 ### E.2 Re-home evidence
 
 ```bash
-grep -v "$ACTIVE_API" ~/hub-pointer-$(date -u +%Y%m%d).log | head -3
-tail -3 ~/probe-$(date -u +%Y%m%d).log
+grep -v "$ACTIVE_API" ~/hub-pointer-$RUN.log | head -3
+tail -3 ~/probe-$RUN.log
+grep -v ' 200$' ~/probe-$RUN.log || echo "no failures"
 ```
 
 **Why:** The two probe logs are the exercise's proof: the first flip
@@ -622,9 +626,9 @@ oc --context $ACTIVE get backupschedule -n open-cluster-management-backup   # ex
 ### G.1 Power the old hub back on; wait out the lease
 
 ```bash
-# $ACTIVE = the RETURNED hub; the loop also waits out the API coming back
-until [ "$(oc --context $ACTIVE get managedcluster $MANAGED --request-timeout=5s \
-  -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)" = Unknown ]; do sleep 15; done
+# $ACTIVE = the RETURNED hub, its API already answering (G.0)
+oc --context $ACTIVE wait managedcluster/$MANAGED \
+  --for=condition=ManagedClusterConditionAvailable=Unknown --timeout=15m
 oc --context $ACTIVE get managedclusters
 ```
 
@@ -684,10 +688,11 @@ permanent and auditable, and check which cluster id wrote the bucket's
 **Success:** Schedule shows `BackupCollision` (or still `Enabled`, if
 you got there before the guard fired), then deletes cleanly; no Velero
 schedules remain on the returned hub; the new active hub's schedule
-stays `Enabled`. (Observed live: four minutes after the BackupSchedule
-delete on a just-rebooted hub, all five Velero schedules it owned were
-still there and due at the next slot. Deleting them is what the
-BackupSchedule delete is meant to do.)
+stays `Enabled`. (Observed live: on a just-rebooted hub, all five
+Velero schedules the BackupSchedule owned were still there a minute
+after its delete, with the next slot minutes away; garbage collection
+removed them about four minutes after the delete. Deleting them by
+hand closes that window.)
 
 **Failure:** Schedule still `Enabled` and writing → verify which backup is
 newest in the bucket before ANY future restore; delete the schedule
@@ -709,7 +714,7 @@ unbroken):
 
 ```bash
 oc --context $ACTIVE get managedclusters        # expect: local-cluster only
-tail -3 ~/probe-$(date -u +%Y%m%d).log          # expect: unbroken 200s
+tail -3 ~/probe-$RUN.log          # expect: unbroken 200s
 ```
 
 **Failure:** Delete hangs on finalizers → the cluster was NOT in `Unknown`
@@ -786,8 +791,8 @@ REV=$(git rev-parse HEAD)
 for hub in $ACTIVE $PASSIVE; do
   oc --context $hub annotate applications.argoproj.io dr-role -n openshift-gitops \
     argocd.argoproj.io/refresh=hard --overwrite
-  until [ "$(oc --context $hub get applications.argoproj.io dr-role -n openshift-gitops \
-    -o jsonpath='{.status.sync.revision}')" = "$REV" ]; do sleep 5; done
+  oc --context $hub wait applications.argoproj.io/dr-role -n openshift-gitops \
+    --for=jsonpath='{.status.sync.revision}'="$REV" --timeout=5m
   echo "$hub dr-role now compares against $REV"
 done
 for hub in $ACTIVE $PASSIVE; do
