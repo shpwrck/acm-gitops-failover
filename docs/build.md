@@ -134,7 +134,7 @@ done
 for hub in hub-x hub-y; do
   oc --context $hub wait mch/multiclusterhub -n open-cluster-management \
     --for=jsonpath='{.status.phase}'=Running --timeout=30m
-  oc --context $hub get csv -n open-cluster-management-backup   # OADP installed by ACM
+  oc --context $hub get csv -n open-cluster-management-backup -o name | grep oadp   # OADP installed by ACM
 done
 ```
 
@@ -285,18 +285,36 @@ done
 
 ### 3. Hubs: backup storage
 
-Edit `manifests/50-dpa.yaml` for your bucket first. Then, on each hub:
+Check the bucket and key from your workstation first (curl 8 or newer),
+then point a copy of `manifests/50-dpa.yaml` at your endpoint, so the
+endpoint stays out of git. If the bucket name, prefix or region differ
+from `acm-backups`, `acm` and `us-east-1`, change them in the copy too.
+Then, on each hub:
 
 ```bash
+read -rp 'S3 endpoint URL: ' S3_URL            # e.g. https://s3.example.com
+read -rp 'S3 access key: ' S3_ACCESS_KEY
+read -rsp 'S3 secret key: ' S3_SECRET_KEY; echo
+curl -sS -o /dev/null -w '%{http_code}\n' --aws-sigv4 "aws:amz:us-east-1:s3" \
+  --user "$S3_ACCESS_KEY:$S3_SECRET_KEY" "$S3_URL/acm-backups?list-type=2"   # 200
+sed "s#s3Url: https://s3.example.com#s3Url: $S3_URL#" manifests/50-dpa.yaml > /tmp/50-dpa.yaml
+grep s3Url /tmp/50-dpa.yaml
 printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' "$S3_ACCESS_KEY" "$S3_SECRET_KEY" > /tmp/cloud
 for hub in hub-x hub-y; do
   oc --context $hub create secret generic cloud-credentials \
     -n open-cluster-management-backup --from-file=cloud=/tmp/cloud
-  oc --context $hub apply -f manifests/50-dpa.yaml
+  oc --context $hub apply -f /tmp/50-dpa.yaml
 done
 rm /tmp/cloud
-oc --context hub-x get backupstoragelocation -n open-cluster-management-backup   # Available
+for hub in hub-x hub-y; do
+  oc --context $hub wait backupstoragelocation --all -n open-cluster-management-backup \
+    --for=jsonpath='{.status.phase}'=Available --timeout=5m
+done
 ```
+
+A certificate error from curl means the store's certificate is not
+publicly trusted: add its CA to the copy as `objectStorage.caCert`
+(base64) before applying it.
 
 ### 4. Active hub: import the spoke
 
