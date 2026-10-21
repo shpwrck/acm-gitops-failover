@@ -665,6 +665,9 @@ exact warning). If in doubt, wait; `Unknown` costs nothing.
 oc --context $ACTIVE get backupschedule -n open-cluster-management-backup
 # expect: BackupCollision (it saw the new hub's newer backups in the shared bucket)
 oc --context $ACTIVE delete backupschedule schedule-acm -n open-cluster-management-backup
+# the Velero schedules it owned can outlive it: garbage collection lags after a reboot
+oc --context $ACTIVE delete schedules.velero.io -n open-cluster-management-backup --all
+oc --context $ACTIVE get schedules.velero.io -n open-cluster-management-backup   # expect: No resources found
 oc --context $PASSIVE get backupschedule -n open-cluster-management-backup   # the NEW active hub: expect Enabled
 ```
 
@@ -679,8 +682,12 @@ permanent and auditable, and check which cluster id wrote the bucket's
 `latest` before any future restore.
 
 **Success:** Schedule shows `BackupCollision` (or still `Enabled`, if
-you got there before the guard fired), then deletes cleanly; the new
-active hub's schedule stays `Enabled`.
+you got there before the guard fired), then deletes cleanly; no Velero
+schedules remain on the returned hub; the new active hub's schedule
+stays `Enabled`. (Observed live: four minutes after the BackupSchedule
+delete on a just-rebooted hub, all five Velero schedules it owned were
+still there and due at the next slot. Deleting them is what the
+BackupSchedule delete is meant to do.)
 
 **Failure:** Schedule still `Enabled` and writing → verify which backup is
 newest in the bucket before ANY future restore; delete the schedule
