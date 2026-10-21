@@ -234,11 +234,15 @@ hub.
 
 ## Phase B — Disaster
 
-### B.0 Lab safety net: an etcd backup before a power cut
+### B.0 Lab safety net: an etcd backup, and a cut between backups
 
 ```bash
 NODE=$(oc --context $ACTIVE get nodes -l node-role.kubernetes.io/master -o jsonpath='{.items[0].metadata.name}')
 oc --context $ACTIVE debug node/$NODE -- chroot /host /usr/local/bin/cluster-backup.sh /home/core/assets/backup
+# just before the cut: the newest set must be Completed, not InProgress
+oc --context $ACTIVE get backup -n open-cluster-management-backup \
+  --sort-by=.metadata.creationTimestamp \
+  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -6
 ```
 
 **Why:** A hard power cut hits every etcd member at once, and on a
@@ -246,7 +250,10 @@ single-node hub there is only one. The DR design does not need this
 backup (the hub's ACM state is already in the bucket), but a lab hub
 usually runs other workloads, and this snapshot is what recovers the
 node if the cut corrupts etcd. It is lab protection, not part of the
-simulated disaster: take it before you note B.1's timestamp.
+simulated disaster: take it before you note B.1's timestamp. Time the
+cut away from the schedule's slots (`:00` and `:30` here) as well: a
+cut halfway through a set leaves the bucket's `latest` set incomplete,
+which is a different exercise from this one.
 
 **Success:** the script ends with `snapshot db and kube resources are
 successfully saved to /home/core/assets/backup` (about a minute).
@@ -285,6 +292,7 @@ schedule freezes itself on `BackupCollision`, but do not leave it
 **Success:**
 
 ```bash
+date -u +%FT%TZ   # record: power cut
 curl -sk --max-time 5 $ACTIVE_API/version || echo DEAD
 ```
 
