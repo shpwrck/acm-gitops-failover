@@ -379,8 +379,16 @@ oc --context hub-y get restores.cluster.open-cluster-management.io -n open-clust
 oc --context hub-x apply -f manifests/61-gitops-integration.yaml
 oc --context hub-x apply -f manifests/62-appset-pull.yaml
 oc --context hub-x apply -f manifests/63-appset-push.yaml
-oc --context spoke get applications.argoproj.io -A   # hello-failover-spoke, synced by the spoke's Argo
-oc --context hub-x get applications.argoproj.io -n openshift-gitops   # hello-failover-push-spoke, on the hub
+# the pull app, synced by the spoke's own Argo CD:
+until oc --context spoke get applications.argoproj.io hello-failover-spoke -n openshift-gitops >/dev/null 2>&1; do sleep 10; done
+oc --context spoke wait applications.argoproj.io/hello-failover-spoke -n openshift-gitops \
+  --for=jsonpath='{.status.health.status}'=Healthy --timeout=10m
+# the push app, synced by the hub's Argo CD through cluster-proxy:
+until oc --context hub-x get applications.argoproj.io hello-failover-push-spoke -n openshift-gitops >/dev/null 2>&1; do sleep 10; done
+oc --context hub-x wait applications.argoproj.io/hello-failover-push-spoke -n openshift-gitops \
+  --for=jsonpath='{.status.health.status}'=Healthy --timeout=10m
+oc --context spoke get applications.argoproj.io -A
+oc --context hub-x get applications.argoproj.io -n openshift-gitops
 ```
 
 Everything applied in this step is in a backed-up API group, so hub-y
