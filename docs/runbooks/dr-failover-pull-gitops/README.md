@@ -17,6 +17,14 @@ export PASSIVE_DIR=dr/$PASSIVE
 export BRANCH=main   # the branch the dr-role apps track (targetRevision in dr/bootstrap); PRs target it
 ```
 
+With [`hack/dr.sh`](../../../hack/dr.sh) (setup in the
+[Manual Pull Path](../dr-failover-pull-manual/README.md#running-it-with-hackdrsh)),
+`hack/dr.sh run --git` runs this path. It authors PR-A, PR-B and the
+demote PR, opens each one with `gh` when that is signed in (otherwise
+it prints the compare link and the PR text), and waits for your merge
+to land on `$BRANCH` before the next step. Phase P stays a one-time
+manual setup.
+
 ## Phase P — One-time prerequisites
 
 (P runs once per HUB, not per role — `hub-x`/`hub-y` below are cluster

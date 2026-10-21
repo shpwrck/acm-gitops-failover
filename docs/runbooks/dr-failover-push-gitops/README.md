@@ -16,6 +16,10 @@ own verification exercises first — do not run this path as the first live
 test of either mechanism; a composed failure is twice as hard to
 attribute.
 
+With [`hack/dr.sh`](../../../hack/dr.sh) (setup in the
+[Manual Pull Path](../dr-failover-pull-manual/README.md#running-it-with-hackdrsh)),
+this path is `hack/dr.sh run --git` with `PUSH_APP_URL` set.
+
 ## The composed exercise
 
 | Phase | Take from | Layer in |

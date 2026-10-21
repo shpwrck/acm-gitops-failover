@@ -17,6 +17,13 @@ Conventions as the Manual Pull Path, plus the push app's URL:
 export PUSH_APP_URL=https://hello-failover-push-hello-failover-push.apps.spoke.example.com   # <apps domain of $MANAGED>
 ```
 
+With [`hack/dr.sh`](../../../hack/dr.sh) (setup in the
+[Manual Pull Path](../dr-failover-pull-manual/README.md#running-it-with-hackdrsh)),
+`hack/dr.sh run` with `PUSH_APP_URL` set covers this path: it runs the
+second probe, bumps both apps in C', and records in `events.log` the
+moment the push app serves the mid-outage revision (E'). Phase P stays
+a one-time manual setup.
+
 ## Phase P — One-time prerequisites
 
 ### P.1 Deploy the push app from the active hub

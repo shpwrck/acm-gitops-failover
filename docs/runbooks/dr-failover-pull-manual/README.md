@@ -13,6 +13,61 @@ the [Automated Push Path](../dr-failover-push-gitops/README.md) both — all thr
 deltas against this document, so a change here must be checked against
 them.
 
+## Running it with `hack/dr.sh`
+
+[`hack/dr.sh`](../../../hack/dr.sh) runs this runbook and its three
+siblings, one command per exercise. It runs the commands below in
+order, enforces every **Gate**, and labels its output with this
+document's step numbers, so this document stays the explanation of what
+it does. It never powers a cluster off or on: it tells you when to cut
+or restore power, then waits until the API is dead or answers again.
+
+Set it up once, in the repo checkout on the branch the clusters track:
+
+```bash
+mkdir -p ~/acm-dr && cp hack/dr.env.example ~/acm-dr/dr.env
+${EDITOR:-vi} ~/acm-dr/dr.env   # KUBECONFIG, ACTIVE, PASSIVE, the two app URLs, BRANCH
+hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr/ is bootstrapped)
+```
+
+Then one exercise is one command:
+
+```bash
+hack/dr.sh run          # the manual paths: this runbook and the Manual Push Path
+hack/dr.sh run --git    # the git-driven paths: you review and merge each PR it opens
+```
+
+`run` stops only for what you have to do yourself: cut `$ACTIVE`'s
+power (B.1), merge the PRs on a `--git` run (D'.2, F', G'.1), and power
+the hub back on (G.0). It asks before a manual activation (D.2), and
+`--yes` skips that question. Both demo apps run side by side, so every
+exercise probes and deploys both: one run covers pull and push delivery.
+At the end, `rejoin` swaps `ACTIVE` and `PASSIVE` in the settings file
+and bumps `RUN`, so the next `run` goes the other way.
+
+Its death gate is B.1's check, hardened. `$PASSIVE` and `$MANAGED` must
+answer, and `$ACTIVE`'s API must refuse connections or time out twice,
+10 s apart. A name that does not resolve is DNS trouble, not proof of
+death, and stops the script.
+
+If a run stops partway, fix the cause, then run the remaining steps:
+
+| Command | Steps |
+| --- | --- |
+| `hack/dr.sh check` | Phase 0, read-only |
+| `hack/dr.sh nodes [context...]` | G.1's power-on note: approve pending certificate requests until the nodes are Ready (all three clusters by default, for example after powering the whole lab on) |
+| `hack/dr.sh probe start` / `stop` / `summary` | Phase A and the Phase H summary; the probes run detached, so closing the terminal does not stop them |
+| `hack/dr.sh outage` | B.0, B.1, B.2 |
+| `hack/dr.sh deploy` | C, for both apps |
+| `hack/dr.sh failover [--git]` | the death gate, then D, E, F (or D', E, F') |
+| `hack/dr.sh rejoin [--git]` | G and H.1 (or G'.1, G'.2) |
+
+Each run's evidence lands in `~/acm-dr/runs/run-$RUN/`: the probe logs
+(`probe.log`, `probe-push.log`, `hub-pointer.log`, and `revisions.log`,
+one line each time an app's served revision changes), `events.log` (one
+timestamped line per step) and `console.log` (everything the script
+printed).
+
 ## Conventions
 
 The posture is symmetric — set these once and every command below works in
