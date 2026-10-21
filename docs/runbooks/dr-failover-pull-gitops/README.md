@@ -14,6 +14,7 @@ named after the hub's context:
 ```bash
 export ACTIVE_DIR=dr/$ACTIVE
 export PASSIVE_DIR=dr/$PASSIVE
+export BRANCH=main   # the branch the dr-role apps track (targetRevision in dr/bootstrap); PRs target it
 ```
 
 ## Phase P — One-time prerequisites
@@ -93,7 +94,7 @@ drift BEFORE trusting git-driven ops.
 
 ```bash
 NEWEST=$(oc --context $ACTIVE get backup -n open-cluster-management-backup \
-  --sort-by=.metadata.creationTimestamp -o name | grep acm-resources-schedule | tail -1 | cut -d/ -f2)
+  --sort-by=.status.startTimestamp -o name | grep acm-resources-schedule | tail -1 | cut -d/ -f2)
 oc --context $ACTIVE -n open-cluster-management-backup exec deploy/velero -- \
   /velero backup describe "$NEWEST" --details | grep -A12 'v1alpha1/Application'
 ```
@@ -143,16 +144,16 @@ F' (promotion).
 
 ```bash
 STAMP=$(date -u +%Y%m%d%H%M)
+git checkout $BRANCH && git pull --ff-only
 git checkout -b failover-$STAMP
 cp dr/templates/restore-activate.template.yaml "$PASSIVE_DIR/restore-activate-$STAMP.yaml"
 sed -i "s/<UTCSTAMP>/$STAMP/" "$PASSIVE_DIR/restore-activate-$STAMP.yaml"
-# edit $PASSIVE_DIR/kustomization.yaml so resources lists ONLY the new file:
-#   resources:
-#     - restore-activate-$STAMP.yaml
-# (remove ../roles/passive; do NOT add ../roles/active — that is F''s
-#  promotion PR, after the claim lands)
+# resources lists ONLY the new file: ../roles/passive goes, and ../roles/active
+# is NOT added (that is F''s promotion PR, after the claim lands)
+sed -i "s#^  - ../roles/passive\$#  - restore-activate-$STAMP.yaml#" "$PASSIVE_DIR/kustomization.yaml"
+grep '^  - ' "$PASSIVE_DIR/kustomization.yaml"   # expect: only restore-activate-$STAMP.yaml
 git add dr/ && git commit -m "FAILOVER: activate $PASSIVE ($ACTIVE dead $(date -u +%FT%TZ))" && git push -u origin HEAD
-# open the PR
+# open the PR against $BRANCH
 ```
 
 **Why:** The change is the entire failover *decision*, reviewable as a
@@ -166,7 +167,7 @@ manual path.
 one resource:
 
 ```bash
-git diff --stat origin/main...HEAD   # expect: exactly the two files under $PASSIVE_DIR
+git diff --stat origin/$BRANCH...HEAD   # expect: exactly the two files under $PASSIVE_DIR
 ```
 
 **Failure:** `../roles/active` in the diff → you are re-running the
@@ -235,12 +236,14 @@ Manual Pull Path E (verify + [MSA hygiene](../../msa-token-hygiene.md)) unchange
 ## Phase F' — Promotion PR (PR-B): the git-driven F.1
 
 ```bash
+git checkout $BRANCH && git pull --ff-only   # PR-A merged
 git checkout -b promote-$(date -u +%Y%m%d%H%M)
-# $PASSIVE_DIR/kustomization.yaml: resources ->
-#   - ../roles/active
-#   - restore-activate-<stamp>.yaml     (keep; demote PR removes it)
+# resources -> ../roles/active plus the one-shot (keep it; the demote PR removes it)
+sed -i "s#^  - restore-activate-$STAMP.yaml\$#  - ../roles/active\n  - restore-activate-$STAMP.yaml#" "$PASSIVE_DIR/kustomization.yaml"
+grep '^  - ' "$PASSIVE_DIR/kustomization.yaml"   # expect: ../roles/active and restore-activate-$STAMP.yaml
 git add dr/ && git commit -m "PROMOTE: $PASSIVE to full active (claim verified)" && git push -u origin HEAD
-# PR + merge — review gate: $MANAGED Joined/Available on $PASSIVE (paste it)
+# open the PR against $BRANCH — review gate: $MANAGED Joined/Available on $PASSIVE (paste it); merge, then:
+oc --context $PASSIVE annotate applications.argoproj.io dr-role -n openshift-gitops argocd.argoproj.io/refresh=normal --overwrite
 ```
 
 **Why:** Delivers the BackupSchedule only AFTER the claim landed — the
@@ -266,11 +269,14 @@ from the Manual Pull Path.
 ### G'.1 Author + merge the demote PR (dead hub still off is fine)
 
 ```bash
+git checkout $BRANCH && git pull --ff-only
 git checkout -b demote-$(date -u +%Y%m%d%H%M)
-# 1. $ACTIVE_DIR/kustomization.yaml: resources -> ../roles/passive
-# 2. git rm $ACTIVE_DIR/restore-activate-*.yaml   (if any; the prune then reaps the Finished one-shot)
+# resources -> ../roles/passive; drop any one-shot (the prune then reaps the Finished restore)
+sed -i 's#^  - ../roles/active$#  - ../roles/passive#; /^  - restore-activate-.*\.yaml$/d' "$ACTIVE_DIR/kustomization.yaml"
+git rm -q --ignore-unmatch "$ACTIVE_DIR"/restore-activate-*.yaml
+grep '^  - ' "$ACTIVE_DIR/kustomization.yaml"   # expect: only ../roles/passive
 git add -A dr/ && git commit -m "DEMOTE: $ACTIVE to passive" && git push -u origin HEAD
-# PR + merge — review gate here is posture correctness, not death
+# open the PR against $BRANCH — review gate here is posture correctness, not death; merge
 ```
 
 **Why:** Merging while the hub is down means it boots into current truth:
@@ -287,7 +293,14 @@ oc --context $ACTIVE get applications.argoproj.io dr-role -n openshift-gitops \
   -o jsonpath='{.status.sync.status}{" "}{.status.health.status}{"\n"}'   # expect: Synced Healthy
 oc --context $ACTIVE get restore,backupschedule -n open-cluster-management-backup
 # expect: restore-acm-passive-sync Enabled and NO BackupSchedule
+oc --context $ACTIVE get schedules.velero.io -n open-cluster-management-backup   # expect: No resources found
+oc --context $PASSIVE get backupschedule -n open-cluster-management-backup        # the new active hub: expect Enabled
 ```
+
+The pruned BackupSchedule's Velero schedules can outlive it for a few
+minutes after a boot (Manual Pull Path G.2); delete any that remain
+with `oc --context $ACTIVE delete schedules.velero.io -n
+open-cluster-management-backup --all`.
 
 **Failure:** Sync stuck on the pruned schedule → delete it by hand; the underlying BackupCollision guard has already frozen it
 regardless (verified in the Manual Pull Path, both directions).
@@ -295,7 +308,12 @@ If the demoted hub's LAST activation was MANUAL, its fixed-name
 `restore-acm-activate` is NOT Argo-tracked and this prune will never
 remove it — delete it by hand now (verified live; same mechanism as the
 hand-apply warning in D'.3), or the next manual activation on this hub
-silently no-ops.
+silently no-ops:
+
+```bash
+oc --context $ACTIVE delete restores.cluster.open-cluster-management.io restore-acm-activate \
+  -n open-cluster-management-backup --ignore-not-found
+```
 
 ### G'.2 The imperative residue — exactly as Manual Pull Path G.1 + G.3
 

@@ -789,10 +789,12 @@ one-shot was already reaped by a demote PR; fine, continue.
 ```bash
 # in the git repo, on the branch the dr-role apps track (targetRevision)
 git branch --show-current
-sed -i 's#^  - ../roles/active$#  - ../roles/passive#' dr/$ACTIVE/kustomization.yaml    # the demoted hub
+# the demoted hub: passive role, and drop a one-shot left by an earlier git-driven activation
+sed -i 's#^  - ../roles/active$#  - ../roles/passive#; /^  - restore-activate-.*\.yaml$/d' dr/$ACTIVE/kustomization.yaml
+git rm -q --ignore-unmatch dr/$ACTIVE/restore-activate-*.yaml
 sed -i 's#^  - ../roles/passive$#  - ../roles/active#' dr/$PASSIVE/kustomization.yaml   # the new active hub
-git diff --stat   # expect: exactly the two kustomization.yaml files
-git add dr/ && git commit -m "Re-align dr/: $PASSIVE active, $ACTIVE passive (manual failover)" && git push
+git status --short   # expect: the two kustomization.yaml files (plus a deleted one-shot, if there was one)
+git add -A dr/ && git commit -m "Re-align dr/: $PASSIVE active, $ACTIVE passive (manual failover)" && git push
 REV=$(git rev-parse HEAD)
 for hub in $ACTIVE $PASSIVE; do
   oc --context $hub annotate applications.argoproj.io dr-role -n openshift-gitops \
