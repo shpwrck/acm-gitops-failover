@@ -234,6 +234,23 @@ hub.
 
 ## Phase B — Disaster
 
+### B.0 Lab safety net: an etcd backup before a power cut
+
+```bash
+NODE=$(oc --context $ACTIVE get nodes -l node-role.kubernetes.io/master -o jsonpath='{.items[0].metadata.name}')
+oc --context $ACTIVE debug node/$NODE -- chroot /host /usr/local/bin/cluster-backup.sh /home/core/assets/backup
+```
+
+**Why:** A hard power cut hits every etcd member at once, and on a
+single-node hub there is only one. The DR design does not need this
+backup (the hub's ACM state is already in the bucket), but a lab hub
+usually runs other workloads, and this snapshot is what recovers the
+node if the cut corrupts etcd. It is lab protection, not part of the
+simulated disaster: take it before you note B.1's timestamp.
+
+**Success:** the script ends with `snapshot db and kube resources are
+successfully saved to /home/core/assets/backup` (about a minute).
+
 ### B.1 Power off the active hub
 
 Out-of-band action (hypervisor/BMC/plug) — there is deliberately no `oc`
@@ -549,6 +566,21 @@ longer than the lease window (for example a ~15 min outage),
 it wakes with the cluster ALREADY `Unknown` — the 2–4 min wait applies
 only to short outages; the gate is the `Unknown` reading itself, never
 elapsed time.
+
+**Power-on note:** if the API answers but the node stays `NotReady`,
+approve its pending certificate requests (a node that was off for a
+while, single-node hubs especially, often has several, including OVN's
+client certificate):
+
+```bash
+oc --context $ACTIVE get nodes
+oc --context $ACTIVE get csr -o go-template='{{range .items}}{{if not .status}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' \
+  | xargs -r oc --context $ACTIVE adm certificate approve
+```
+
+Run it again after a minute: approving the client certificates makes
+the kubelet request its serving certificates. Pods on the node can sit
+in `ContainerCreating` for several more minutes until OVN is up.
 
 **Failure — the one dangerous moment of the whole exercise:** deleting the
 ManagedCluster while it still reads `True` triggers a live detach and
