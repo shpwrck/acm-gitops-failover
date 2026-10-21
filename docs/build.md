@@ -131,8 +131,11 @@ oc --context hub-x get csv -n open-cluster-management
 for hub in hub-x hub-y; do
   oc --context $hub apply -f manifests/20-multiclusterhub.yaml
 done
-oc --context hub-x get mch -n open-cluster-management -w      # until Running
-oc --context hub-x get csv -n open-cluster-management-backup  # OADP installed by ACM
+for hub in hub-x hub-y; do
+  oc --context $hub wait mch/multiclusterhub -n open-cluster-management \
+    --for=jsonpath='{.status.phase}'=Running --timeout=30m
+  oc --context $hub get csv -n open-cluster-management-backup   # OADP installed by ACM
+done
 ```
 
 **Both hubs must report the same ACM version** before you go on:
@@ -160,6 +163,21 @@ IP=$(oc --context hub-y get installplan -n open-cluster-management -o jsonpath='
 oc --context hub-y patch installplan "$IP" -n open-cluster-management --type merge -p '{"spec":{"approved":true}}'
 until [ "$(oc --context hub-y get csv advanced-cluster-management.v$V -n open-cluster-management \
   -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
+```
+
+The multicluster engine Subscription that ACM creates inherits the
+Manual approval, so after you apply `20-multiclusterhub.yaml` on that hub
+its InstallPlan waits for approval too, and the MultiClusterHub stays
+`Installing` until you approve it:
+
+```bash
+oc --context hub-y apply -f manifests/20-multiclusterhub.yaml
+until oc --context hub-y get installplan -n multicluster-engine -o name | grep -q .; do sleep 10; done
+IP=$(oc --context hub-y get installplan -n multicluster-engine \
+  -o jsonpath='{.items[?(@.spec.approved==false)].metadata.name}')
+oc --context hub-y patch installplan "$IP" -n multicluster-engine --type merge -p '{"spec":{"approved":true}}'
+oc --context hub-y wait mch/multiclusterhub -n open-cluster-management \
+  --for=jsonpath='{.status.phase}'=Running --timeout=30m
 ```
 
 Set the existing hub's ACM Subscription to `installPlanApproval: Manual`
@@ -260,7 +278,7 @@ oc --context spoke config view --flatten --minify > /tmp/spoke-kubeconfig
 oc --context hub-x create secret generic auto-import-secret -n spoke \
   --from-file=kubeconfig=/tmp/spoke-kubeconfig
 rm /tmp/spoke-kubeconfig
-oc --context hub-x get managedclusters -w        # spoke: Joined, Available True
+oc --context hub-x get managedclusters -w        # Ctrl-C once spoke shows Joined and Available True
 ```
 
 (If the `KlusterletAddonConfig` is rejected because namespace `spoke`
