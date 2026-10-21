@@ -33,6 +33,15 @@ export APP_URL=https://hello-failover-hello-failover.apps.spoke.example.com   # 
 export ACTIVE_API=$(oc --context $ACTIVE whoami --show-server)   # read from kubeconfig while the hub is alive
 ```
 
+Every terminal you run commands in needs these exports. With
+`$ACTIVE` empty, `oc --context $ACTIVE get nodes` reads `get` as the
+context name and fails with `flags cannot be placed before plugin
+name`. Check a terminal before using it:
+
+```bash
+echo "ACTIVE=${ACTIVE:?unset} PASSIVE=${PASSIVE:?unset} MANAGED=${MANAGED:?unset} ACTIVE_API=${ACTIVE_API:?unset}"
+```
+
 The whole exercise at a glance (the hub-pointer flip in Phase D is the
 re-home):
 
