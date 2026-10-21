@@ -71,7 +71,10 @@ hubs can reach, a git repository every cluster can reach, and a
 workstation with `oc`, `git`, `jq` and curl 8 or newer.
 
 1. **Fork or copy this repo** and change the values below to match your
-   environment.
+   environment. To exercise a copy without touching its `main`, put the
+   changed values on a branch and set `targetRevision` to that branch:
+   the git-driven failover pull requests and the mid-outage deploys then
+   land on the branch too.
 2. **Build the environment** by following [docs/build.md](docs/build.md):
    it applies `manifests/` in numbered order and bootstraps `dr/`.
 3. **Run a failover** with one of the runbooks above.
@@ -79,6 +82,7 @@ workstation with `oc`, `git`, `jq` and curl 8 or newer.
 | Value | Where it is set | Default here |
 | --- | --- | --- |
 | Git repository URL | `repoURL` in `manifests/62-appset-pull.yaml`, `manifests/63-appset-push.yaml`, `dr/bootstrap/dr-role-hub-*.yaml` (CI fails if they disagree) | `https://github.com/redhat-na-ssa/acm-gitops-failover` |
+| Git revision the clusters track | `targetRevision` in the same four files | `main` |
 | S3 endpoint, bucket, prefix, region | `manifests/50-dpa.yaml` | `https://s3.example.com`, `acm-backups`, `acm`, `us-east-1` |
 | Workload cluster name | `manifests/40-import-spoke.yaml` and the `name: spoke` selector in `manifests/61-gitops-integration.yaml` | `spoke` |
 | Hub names | `dr/hub-x/`, `dr/hub-y/` and `dr/bootstrap/dr-role-hub-{x,y}.yaml` (directory name and `path` must match) | `hub-x`, `hub-y` |
