@@ -29,6 +29,24 @@ oc config rename-context <your workload cluster> spoke   # skip if it is already
 oc config get-contexts                        # hub-x, hub-y and spoke are listed
 ```
 
+Start from three healthy clusters. After a cold start, a single-node
+cluster takes 10–20 minutes to settle:
+
+```bash
+for c in hub-x hub-y spoke; do
+  echo "== $c"
+  oc --context $c get nodes                                    # Ready
+  oc --context $c get clusteroperators --no-headers \
+    | awk '$3 != "True" || $5 != "False"'                      # no output: all Available, none Degraded
+  oc --context $c get csr --no-headers | grep -c Pending       # 0
+done
+```
+
+A node that stays `NotReady` after a long power-off usually has
+certificate signing requests waiting; approve that cluster's pending ones
+with `oc --context <c> get csr -o name | xargs oc --context <c> adm
+certificate approve`.
+
 The values to change in the repo are listed in the
 [README](../README.md#getting-started). The hub roles are
 interchangeable: failover swaps them back and forth with no extra cleanup
