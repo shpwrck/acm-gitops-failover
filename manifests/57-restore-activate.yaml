@@ -11,6 +11,8 @@ kind: Restore
 metadata:
   name: restore-acm-activate
   namespace: open-cluster-management-backup
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   veleroManagedClustersBackupName: latest
   veleroCredentialsBackupName: latest

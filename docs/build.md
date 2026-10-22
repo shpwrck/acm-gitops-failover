@@ -57,7 +57,7 @@ in between.
   `multicluster-engine` and `open-cluster-management`).
   `availabilityConfig: Basic` on the MultiClusterHub is [the install
   docs' guidance for single-node
-  OpenShift](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/install/index#advanced-config-hub);
+  OpenShift](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/get_started/index#advanced-config-hub);
   use `High` on multi-node hubs.
 - The verified build's API endpoints served publicly trusted
   certificates. With self-signed certificates, include
@@ -69,7 +69,7 @@ in between.
 | Component | Version | Where | Notes |
 | --- | --- | --- | --- |
 | ACM | 2.17 (verified on 2.17.0) | both hubs | [The same version on both hubs is a hard backup/restore requirement](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#enabling-backup-operator-clusters) |
-| `cluster-backup` MCH component | with ACM | both hubs | Enabled in `manifests/20-multiclusterhub.yaml` ([MCH component override](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/install/index#advanced-config-hub)); ACM then installs OADP in `open-cluster-management-backup` |
+| `cluster-backup` MCH component | with ACM | both hubs | Enabled in `manifests/20-multiclusterhub.yaml` ([MCH component override](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/get_started/index#advanced-config-hub)); ACM then installs OADP in `open-cluster-management-backup` |
 | `managedserviceaccount` MCE component | with ACM | both hubs | On by default; MSA auto-import depends on it |
 | OpenShift GitOps operator | channel `latest` (verified on 1.21) | all three clusters | [Identical operators on both hubs is a restore-hub requirement](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/business_continuity/index#prepare-new-hub) |
 | S3-compatible object store | any | outside the clusters | Verified with SeaweedFS 4.41; on AWS use real S3 |
@@ -101,9 +101,58 @@ in between.
   `SignatureDoesNotMatch` against a healthy endpoint). Velero itself is
   unaffected.
 
+## The scripted build
+
+`hack/build.sh` runs the build steps below in order, from three clusters
+that pass the health check under [Clusters](#clusters), and ends with
+`hack/dr.sh check`, the pre-flight every exercise starts with. It reads
+the same settings file as `hack/dr.sh`: copy
+[`hack/dr.env.example`](../hack/dr.env.example) to `~/acm-dr/dr.env` and
+set the contexts, the branch and the S3 endpoint, bucket, prefix and
+region (and a CA file if the store's certificate is not publicly
+trusted). It asks for the S3 keys, or reads them from `S3_ACCESS_KEY`
+and `S3_SECRET_KEY` in the environment, and puts them only into the
+secret on each hub: not into a file, not into its log.
+
+```bash
+hack/build.sh --check   # read-only: what it would install, reuse or refuse, and why
+hack/build.sh           # a menu; --yes builds without asking
+```
+
+It takes 40 to 60 minutes, most of it waiting for operators. Every RED
+line links to the section of this document that explains it, and the
+log is in `~/acm-dr/logs/build-<time>.log`. After a stop, run it again:
+each stage skips what is already in place. What it does beyond typing
+the steps:
+
+- **One ACM version on both hubs.** It pins ACM to the version a hub
+  already runs, or else to the newest in the `release-2.17` channel, with
+  `installPlanApproval: Manual` on both hubs, and approves only that
+  InstallPlan and the first ones of the multicluster engine and OADP,
+  never an upgrade (step 1).
+- **What is installed is reused.** An ACM that is already there gets the
+  in-place changes and the annotations of [A hub that already runs
+  ACM](#a-hub-that-already-runs-acm); an OpenShift GitOps that is already
+  there is left as it is, and a hub that gets GitOps next to one that
+  runs it is pinned to the same version (step 2).
+- **It refuses what would break,** before it changes anything: a hub that
+  another hub manages, a spoke managed by some other hub, hubs on
+  different ACM versions, other managed clusters on a hub (see [Shared
+  clusters](#shared-clusters)), a stray Route CRD (gotcha 3), or manifests
+  that pull from another repo or branch than your settings name.
+- **It creates `open-cluster-management-global-set`** on a hub where ACM
+  did not (gotcha 1).
+- **It writes the demo apps' URLs** (`APP_URL`, `PUSH_APP_URL`) into the
+  settings file once they answer.
+
+[`hack/teardown.sh`](#tearing-it-down) undoes it.
+
 ## Build steps
 
-Apply from the repo root. `manifests/` is numbered in apply order.
+Apply from the repo root, in the order of the steps below. The numbers in
+`manifests/` group the files by component; the steps apply the demo apps
+(61–63) before the backup roles (55–56), so the first backup carries
+them.
 
 | Manifest | Apply on | Purpose |
 | --- | --- | --- |
@@ -180,11 +229,17 @@ oc --context hub-y wait mch/multiclusterhub -n open-cluster-management \
 ```
 
 Set the existing hub's ACM Subscription to `installPlanApproval: Manual`
-too, or a z-stream release during the exercise upgrades only that hub:
+too, or a z-stream release during the exercise upgrades only that hub.
+The annotation records the old value, so that
+[`hack/teardown.sh`](#tearing-it-down) can set it back:
 
 ```bash
 SUB=$(oc --context hub-x get subscription.operators.coreos.com -n open-cluster-management \
   -o jsonpath='{.items[?(@.spec.name=="advanced-cluster-management")].metadata.name}')
+OLD=$(oc --context hub-x get subscription.operators.coreos.com "$SUB" -n open-cluster-management \
+  -o jsonpath='{.spec.installPlanApproval}')
+oc --context hub-x annotate subscription.operators.coreos.com "$SUB" -n open-cluster-management \
+  acm-gitops-failover/install-plan-approval="$OLD"
 oc --context hub-x patch subscription.operators.coreos.com "$SUB" -n open-cluster-management \
   --type merge -p '{"spec":{"installPlanApproval":"Manual"}}'
 ```
@@ -197,7 +252,9 @@ Skip `10-acm-operator.yaml` there: a second OperatorGroup in
 the operator has filled the existing MultiClusterHub's
 `spec.overrides.components` with every component, and `oc apply`
 replaces that whole list. Turn on `cluster-backup` in place instead,
-keeping every other entry:
+keeping every other entry. If it was off, the annotation records that
+the build turned it on, so that [`hack/teardown.sh`](#tearing-it-down)
+turns it off again and leaves the rest of that ACM alone:
 
 ```bash
 oc --context hub-x get mch multiclusterhub -n open-cluster-management -o json \
@@ -208,7 +265,13 @@ oc --context hub-x patch mch multiclusterhub -n open-cluster-management \
   --type merge --patch-file /tmp/mch-patch.json
 oc --context hub-x get mch multiclusterhub -n open-cluster-management \
   -o jsonpath='{.spec.overrides.components[?(@.name=="cluster-backup")].enabled}'   # true
+oc --context hub-x annotate mch multiclusterhub -n open-cluster-management \
+  acm-gitops-failover/cluster-backup=enabled-by-build   # only if it was off before
 ```
+
+Neither of these objects gets this repo's label
+(`app.kubernetes.io/part-of: acm-gitops-failover`), so the teardown keeps
+this ACM; everything the remaining steps apply does carry it.
 
 #### A cluster that is managed by another hub
 
@@ -254,18 +317,24 @@ for c in hub-x hub-y spoke; do
 done
 ```
 
+Skip a cluster that already runs OpenShift GitOps: applying the file
+there would mark the existing Subscription as this repo's, and the
+[teardown](#tearing-it-down) would then remove an operator that was
+there before the build (and its Subscription may have another name,
+which gives OLM two Subscriptions for one package).
+
 If one hub already runs GitOps, check its version first. Channel `latest`
 installs the newest z-stream on a new cluster, so pin the other hub to the
 existing hub's CSV, the same way as ACM in step 1. The spoke can take
-`latest`. A Manual Subscription holds every upgrade in its namespace (OLM
-resolves `openshift-operators` as one unit), so other operators there
-wait for approval too until you switch it back:
+`latest`. If the existing hub's Subscription follows another channel, set
+that channel in the copy too. A Manual Subscription holds every upgrade in
+its namespace (OLM resolves `openshift-operators` as one unit), so other
+operators there wait for approval too until you switch it back:
 
 ```bash
-oc --context hub-x apply -f manifests/60-gitops-operator.yaml   # no change if it is the same Subscription
-oc --context spoke apply -f manifests/60-gitops-operator.yaml
-GV=$(oc --context hub-x get subscription.operators.coreos.com openshift-gitops-operator \
-  -n openshift-operators -o jsonpath='{.status.installedCSV}')
+oc --context spoke apply -f manifests/60-gitops-operator.yaml   # unless the spoke runs GitOps already
+GV=$(oc --context hub-x get subscription.operators.coreos.com -n openshift-operators \
+  -o jsonpath='{.items[?(@.spec.name=="openshift-gitops-operator")].status.installedCSV}')
 echo "$GV"
 sed "s/^  installPlanApproval: Automatic\$/  installPlanApproval: Manual\n  startingCSV: $GV/" \
   manifests/60-gitops-operator.yaml > /tmp/60-gitops-operator-pinned.yaml
@@ -301,7 +370,9 @@ grep s3Url /tmp/50-dpa.yaml
 printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' "$S3_ACCESS_KEY" "$S3_SECRET_KEY" > /tmp/cloud
 for hub in hub-x hub-y; do
   oc --context $hub create secret generic cloud-credentials -n open-cluster-management-backup \
-    --from-file=cloud=/tmp/cloud --dry-run=client -o yaml | oc --context $hub apply -f -
+    --from-file=cloud=/tmp/cloud --dry-run=client -o yaml \
+    | oc label --local -f - app.kubernetes.io/part-of=acm-gitops-failover -o yaml \
+    | oc --context $hub apply -f -
   oc --context $hub apply -f /tmp/50-dpa.yaml
 done
 rm /tmp/cloud
@@ -339,8 +410,16 @@ it.)
 
 If hub-x already manages the spoke, apply `40-import-spoke.yaml` anyway,
 because it sets the clusterset, the `name` label and the add-ons the
-rest of the build relies on, and skip the auto-import secret. If another
-tool imported it with a kept auto-import secret (annotation
+rest of the build relies on, and skip the auto-import secret. Apply it
+without this repo's label, so that the [teardown](#tearing-it-down)
+leaves the spoke managed, as it was before the build:
+
+```bash
+sed '/app.kubernetes.io\/part-of: acm-gitops-failover/d' manifests/40-import-spoke.yaml \
+  | oc --context hub-x apply -f -
+```
+
+If another tool imported it with a kept auto-import secret (annotation
 `managedcluster-import-controller.open-cluster-management.io/keeping-auto-import-secret`),
 delete that secret. That leaves the ManagedServiceAccount token from the
 backups as the only import credential, which is the state the runbooks
@@ -351,28 +430,7 @@ oc --context hub-x get secret auto-import-secret -n spoke   # NotFound is what y
 oc --context hub-x delete secret auto-import-secret -n spoke
 ```
 
-### 5. Backup roles
-
-The schedule takes its first backups right away. Let them finish before
-the passive hub starts restoring, so its first restore has something to
-read:
-
-```bash
-oc --context hub-x apply -f manifests/55-backupschedule.yaml
-while :; do
-  P=$(oc --context hub-x get backup.velero.io -n open-cluster-management-backup -o jsonpath='{.items[*].status.phase}')
-  echo "$(date -u +%T) ${P:-no backups yet}"
-  [ -n "$P" ] && [ -z "$(echo "$P" | tr ' ' '\n' | grep -v '^Completed$')" ] && break
-  sleep 20
-done                                    # Ctrl-C and investigate if a phase reads Failed or PartiallyFailed
-oc --context hub-x get backupschedule -n open-cluster-management-backup   # Enabled
-oc --context hub-y apply -f manifests/56-restore-passive.yaml
-oc --context hub-y wait restores.cluster.open-cluster-management.io/restore-acm-passive-sync \
-  -n open-cluster-management-backup --for=jsonpath='{.status.phase}'=Enabled --timeout=15m
-oc --context hub-y get restores.cluster.open-cluster-management.io -n open-cluster-management-backup
-```
-
-### 6. Active hub: GitOps wiring and the demo apps
+### 5. Active hub: GitOps wiring and the demo apps
 
 ```bash
 oc --context hub-x apply -f manifests/61-gitops-integration.yaml
@@ -397,14 +455,38 @@ On the hub, the pull app's copy reads `Unknown`: it carries
 `argocd.argoproj.io/skip-reconcile`, and its status comes from the spoke.
 
 Everything applied in this step is in a backed-up API group, so hub-y
-picks it up through its passive restore; there is nothing to apply there.
+picks it up through its passive restore (step 6); there is nothing to apply there.
+
+### 6. Backup roles
+
+This comes after the demo apps, so the first backup already carries
+them: the passive hub's first restore then holds them too, and the
+Automated Pull Path's check that the backup contains Applications (P.2)
+passes from the start. The schedule takes its first backups right away.
+Let them finish before the passive hub starts restoring, so its first
+restore has something to read:
+
+```bash
+oc --context hub-x apply -f manifests/55-backupschedule.yaml
+while :; do
+  P=$(oc --context hub-x get backup.velero.io -n open-cluster-management-backup -o jsonpath='{.items[*].status.phase}')
+  echo "$(date -u +%T) ${P:-no backups yet}"
+  [ -n "$P" ] && [ -z "$(echo "$P" | tr ' ' '\n' | grep -v '^Completed$')" ] && break
+  sleep 20
+done                                    # Ctrl-C and investigate if a phase reads Failed or PartiallyFailed
+oc --context hub-x get backupschedule -n open-cluster-management-backup   # Enabled
+oc --context hub-y apply -f manifests/56-restore-passive.yaml
+oc --context hub-y wait restores.cluster.open-cluster-management.io/restore-acm-passive-sync \
+  -n open-cluster-management-backup --for=jsonpath='{.status.phase}'=Enabled --timeout=15m
+oc --context hub-y get restores.cluster.open-cluster-management.io -n open-cluster-management-backup
+```
 
 ### 7. Git-driven paths only: bootstrap `dr/`
 
 Follow Phase P of the [Automated Pull Path
 runbook](runbooks/dr-failover-pull-gitops/README.md#phase-p--one-time-prerequisites):
 RBAC first, then each hub's `dr-role` Application. Each hub's Argo CD
-adopts the BackupSchedule or Restore applied in step 5. From then on the
+adopts the BackupSchedule or Restore applied in step 6. From then on the
 manual runbooks need their break-glass step (D.0) before touching a hub's
 role objects.
 
@@ -446,3 +528,113 @@ stable; other documents cite these by number):
    `/spec/host`, `/spec/wildcardPolicy` and `/spec/to/weight`
    (server-side defaults). An explicit host in git is wrong for an
    ApplicationSet, because it would pin one cluster's apps domain.
+
+## Tearing it down
+
+`hack/teardown.sh` removes the exercise from the three clusters, in the
+reverse order of the build, so that the next build, or other work on the
+clusters, starts clean. It reads the same settings file as the build.
+Start with a dry run: it reads the clusters, prints the plan and every
+step a real run would take, and changes nothing.
+
+```bash
+hack/teardown.sh --dry-run          # what the default removes, and what stays
+hack/teardown.sh --full --dry-run   # the same with --full
+hack/teardown.sh                    # a menu; --yes removes without asking
+```
+
+| Mode | What goes |
+| --- | --- |
+| default | Everything that carries the label `app.kubernetes.io/part-of: acm-gitops-failover`, which every object in `manifests/` and `dr/` has (`hack/validate.sh` checks it), so a manual build is labeled the same way as a scripted one. ACM and OpenShift GitOps go where their Subscription carries the label, that is, where the build installed them. On an ACM that was there before, the two marked changes of [A hub that already runs ACM](#a-hub-that-already-runs-acm) are undone, and the rest of it stays. |
+| `--full` | ACM, OpenShift GitOps and the demo, whoever installed them, and the spoke is detached: afterwards none of the three clusters runs ACM or OpenShift GitOps. |
+
+Either way, other operators and workloads stay, and so do the S3 bucket
+and its backups, the settings file, git, and the CRDs the operators
+installed (harmless, and a new install adopts them). The log is in
+`~/acm-dr/logs/teardown-<time>.log`. After a stop, run it again: each
+stage skips what is already gone. The stages, in order:
+
+1. **Pre-flight** (read-only): every cluster must answer; then a table of
+   what goes and what stays, and the checks under [What the teardown
+   refuses](#what-the-teardown-refuses).
+2. **DR roles**: each hub's `dr-role` Application first, since its Argo
+   CD would put the role back, then the BackupSchedule, the restores and
+   the `dr-role` RBAC.
+3. **Demo apps**: on both hubs (the passive hub holds restored copies),
+   the ApplicationSets and the Applications they made, the GitOpsCluster,
+   the placements and the cluster secrets; then the apps' namespaces on
+   the spoke.
+4. **Detach the spoke** (where the build imported it, or with `--full`):
+   the ManagedCluster goes, a stale copy on the passive hub first; the hub that reaches the spoke then removes its
+   klusterlet and add-ons, which takes a few minutes.
+5. **Backup storage**: each hub's DataProtectionApplication and S3 key
+   secret. Empty the bucket with your S3 tool if the next build should
+   start without the old backups; it does not have to, since its first
+   backup is newer than all of them.
+6. **ACM**, the documented way ([Uninstalling Red Hat Advanced Cluster
+   Management](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/get_started/index)):
+   the MultiClusterHub first, which takes the engine, the add-ons and the
+   backup operator with it (5 to 15 minutes), then the ACM operator, what
+   ACM's "Cleaning up artifacts before reinstalling" script lists, and the
+   namespaces ACM made.
+7. **OpenShift GitOps**: its Argo CD instance while the operator can still
+   clean up after it, then the operator and the `openshift-gitops`
+   namespace.
+8. **Summary**: what is left of ACM, OpenShift GitOps and the ACM agent on
+   each cluster.
+
+### What the teardown refuses
+
+The pre-flight goes RED, and nothing is removed, when removing ACM or
+OpenShift GitOps would take something that is not this repo's with it:
+
+- **ACM also manages another cluster.** Removing the MultiClusterHub
+  detaches every cluster it manages. Detach that cluster yourself first
+  (see [A cluster that is managed by another
+  hub](#a-cluster-that-is-managed-by-another-hub)), or keep that ACM: the
+  default mode keeps an ACM that was there before the build.
+- **ACM runs a DiscoveryConfig, an AgentServiceConfig or a
+  MultiClusterObservability** (default mode only). The ACM uninstall needs
+  them gone first, and this repo never creates them, so they belong to
+  someone else. Remove them yourself, or use `--full`, which deletes them
+  as the uninstall docs do.
+- **Argo CD runs something this repo did not create**: an Application or
+  ApplicationSet other than the demo's and `dr-role`, or an Argo CD
+  instance outside `openshift-gitops`. Removing OpenShift GitOps deletes
+  them. Move them to another cluster or delete them yourself, then run the
+  teardown again; or use the default mode, which keeps a GitOps that was
+  there before the build.
+
+A spoke that runs an ACM agent but is listed by neither hub is reported,
+not detached: its hub is elsewhere, and only that hub can detach it.
+
+### A MultiClusterHub that does not go
+
+The teardown waits up to 30 minutes for each MultiClusterHub to finish
+uninstalling, then stops and prints its phase and conditions, which name
+what it is still waiting for. The usual cause is a managed cluster that
+has not finished detaching (`oc get managedclusters`; only
+`local-cluster` may remain) or an add-on resource whose finalizer waits
+for a controller. Resolve that, then run the teardown again: it carries on
+from where it stopped, and runs ACM's cleanup script once the
+MultiClusterHub is gone.
+
+### A namespace that does not go
+
+A namespace stays `Terminating` while an object in it keeps a finalizer,
+usually because the operator that would clear the finalizer is already
+gone. The teardown waits up to 15 minutes, then stops and prints the
+namespace's conditions: `NamespaceContentRemaining` names the kinds still
+there, `NamespaceFinalizersRemaining` the finalizers. To see the objects:
+
+```bash
+NS=<namespace>; C=<context>
+oc --context $C api-resources --verbs=list --namespaced -o name \
+  | xargs -n1 oc --context $C get -n $NS --ignore-not-found --show-kind -o name
+```
+
+If the operator that owns a finalizer is gone for good, clearing the
+finalizer on that object by hand is the remaining way out
+(`oc --context $C patch <kind>/<name> -n $NS --type merge -p
+'{"metadata":{"finalizers":null}}'`). Do that only for objects of an
+operator you have removed. Then run the teardown again.

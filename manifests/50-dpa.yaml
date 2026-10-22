@@ -16,6 +16,8 @@ kind: DataProtectionApplication
 metadata:
   name: acm-dpa
   namespace: open-cluster-management-backup
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   configuration:
     velero:

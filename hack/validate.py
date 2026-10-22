@@ -11,7 +11,10 @@
 4. Every Argo CD source points at the same repository, so a fork changes
    them together.
 5. Relative links (and #anchors) in the Markdown docs resolve, and so do
-   the doc sections hack/dr.sh links to (help_at).
+   the doc sections the hack/ scripts link to (help_at).
+6. Every object in manifests/ and dr/ carries the label
+   app.kubernetes.io/part-of: acm-gitops-failover, which is how
+   hack/teardown.sh tells this repo's objects from everything else.
 
 Run from anywhere: hack/validate.py. Needs PyYAML and kustomize (or kubectl).
 """
@@ -133,6 +136,21 @@ def check_repo_urls():
     return next(iter(urls), None)
 
 
+PART_OF = ("app.kubernetes.io/part-of", "acm-gitops-failover")
+
+
+def check_labels():
+    paths = [*ROOT.glob("manifests/*.yaml"), *DR.glob("*/*.yaml")]
+    for path in sorted(p for p in paths if p.name != "kustomization.yaml"):
+        for doc in yaml.safe_load_all(path.read_text()):
+            if not doc:
+                continue
+            labels = (doc.get("metadata") or {}).get("labels") or {}
+            if labels.get(PART_OF[0]) != PART_OF[1]:
+                fail(f"{path.relative_to(ROOT)}: {doc.get('kind')} {doc['metadata'].get('name')} lacks the label "
+                     f"{PART_OF[0]}: {PART_OF[1]} (hack/teardown.sh would leave it behind)")
+
+
 def slug(heading):
     heading = re.sub(r"[`*_]|<[^>]+>", "", heading).strip().lower()
     return re.sub(r"[^\w\- ]", "", heading).replace(" ", "-")
@@ -190,6 +208,7 @@ def main():
     check_bootstrap(hubs)
     posture = {hub: check_overlay(hub, template_spec) for hub in hubs}
     repo = check_repo_urls()
+    check_labels()
     check_links()
 
     print(f"Argo source repo: {repo}")
