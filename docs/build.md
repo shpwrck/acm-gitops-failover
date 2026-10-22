@@ -29,6 +29,24 @@ oc config rename-context <your workload cluster> spoke   # skip if it is already
 oc config get-contexts                        # hub-x, hub-y and spoke are listed
 ```
 
+Start from three healthy clusters. After a cold start, a single-node
+cluster takes 10–20 minutes to settle:
+
+```bash
+for c in hub-x hub-y spoke; do
+  echo "== $c"
+  oc --context $c get nodes                                    # Ready
+  oc --context $c get clusteroperators --no-headers \
+    | awk '$3 != "True" || $5 != "False"'                      # no output: all Available, none Degraded
+  oc --context $c get csr --no-headers | grep -c Pending       # 0
+done
+```
+
+A node that stays `NotReady` after a long power-off usually has
+certificate signing requests waiting; approve that cluster's pending ones
+with `oc --context <c> get csr -o name | xargs oc --context <c> adm
+certificate approve`.
+
 The values to change in the repo are listed in the
 [README](../README.md#getting-started). The hub roles are
 interchangeable: failover swaps them back and forth with no extra cleanup
@@ -113,8 +131,11 @@ oc --context hub-x get csv -n open-cluster-management
 for hub in hub-x hub-y; do
   oc --context $hub apply -f manifests/20-multiclusterhub.yaml
 done
-oc --context hub-x get mch -n open-cluster-management -w      # until Running
-oc --context hub-x get csv -n open-cluster-management-backup  # OADP installed by ACM
+for hub in hub-x hub-y; do
+  oc --context $hub wait mch/multiclusterhub -n open-cluster-management \
+    --for=jsonpath='{.status.phase}'=Running --timeout=30m
+  oc --context $hub get csv -n open-cluster-management-backup -o name | grep oadp   # OADP installed by ACM
+done
 ```
 
 **Both hubs must report the same ACM version** before you go on:
@@ -126,12 +147,47 @@ done
 ```
 
 If one hub already runs an older z-stream than the catalog's latest, pin
-the new hub to it: in `10-acm-operator.yaml` set `installPlanApproval:
-Manual` and `startingCSV: advanced-cluster-management.v<version>`, apply
-it, and approve the one InstallPlan it creates
-(`oc --context hub-y get installplan -n open-cluster-management`, then
-`oc --context hub-y patch installplan <name> -n open-cluster-management
---type merge -p '{"spec":{"approved":true}}'`).
+the new hub to it. Apply a copy of `10-acm-operator.yaml` with
+`installPlanApproval: Manual` and a `startingCSV`, approve the one
+InstallPlan it creates, and wait for the CSV before applying
+`20-multiclusterhub.yaml` there (here hub-y, pinned to 2.17.3):
+
+```bash
+V=2.17.3
+sed "s/^  installPlanApproval: Automatic\$/  installPlanApproval: Manual\n  startingCSV: advanced-cluster-management.v$V/" \
+  manifests/10-acm-operator.yaml > /tmp/10-acm-operator-pinned.yaml
+grep -A1 '^  installPlanApproval' /tmp/10-acm-operator-pinned.yaml   # Manual, then the startingCSV
+oc --context hub-y apply -f /tmp/10-acm-operator-pinned.yaml
+until oc --context hub-y get installplan -n open-cluster-management -o name | grep -q .; do sleep 10; done
+IP=$(oc --context hub-y get installplan -n open-cluster-management -o jsonpath='{.items[0].metadata.name}')
+oc --context hub-y patch installplan "$IP" -n open-cluster-management --type merge -p '{"spec":{"approved":true}}'
+until [ "$(oc --context hub-y get csv advanced-cluster-management.v$V -n open-cluster-management -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
+```
+
+The multicluster engine Subscription that ACM creates inherits the
+Manual approval, so after you apply `20-multiclusterhub.yaml` on that hub
+its InstallPlan waits for approval too, and the MultiClusterHub stays
+`Installing` until you approve it:
+
+```bash
+oc --context hub-y apply -f manifests/20-multiclusterhub.yaml
+until oc --context hub-y get installplan -n multicluster-engine -o name | grep -q .; do sleep 10; done
+IP=$(oc --context hub-y get installplan -n multicluster-engine \
+  -o jsonpath='{.items[?(@.spec.approved==false)].metadata.name}')
+oc --context hub-y patch installplan "$IP" -n multicluster-engine --type merge -p '{"spec":{"approved":true}}'
+oc --context hub-y wait mch/multiclusterhub -n open-cluster-management \
+  --for=jsonpath='{.status.phase}'=Running --timeout=30m
+```
+
+Set the existing hub's ACM Subscription to `installPlanApproval: Manual`
+too, or a z-stream release during the exercise upgrades only that hub:
+
+```bash
+SUB=$(oc --context hub-x get subscription.operators.coreos.com -n open-cluster-management \
+  -o jsonpath='{.items[?(@.spec.name=="advanced-cluster-management")].metadata.name}')
+oc --context hub-x patch subscription.operators.coreos.com "$SUB" -n open-cluster-management \
+  --type merge -p '{"spec":{"installPlanApproval":"Manual"}}'
+```
 
 #### A hub that already runs ACM
 
@@ -198,20 +254,73 @@ for c in hub-x hub-y spoke; do
 done
 ```
 
-### 3. Hubs: backup storage
-
-Edit `manifests/50-dpa.yaml` for your bucket first. Then, on each hub:
+If one hub already runs GitOps, check its version first. Channel `latest`
+installs the newest z-stream on a new cluster, so pin the other hub to the
+existing hub's CSV, the same way as ACM in step 1. The spoke can take
+`latest`. A Manual Subscription holds every upgrade in its namespace (OLM
+resolves `openshift-operators` as one unit), so other operators there
+wait for approval too until you switch it back:
 
 ```bash
+oc --context hub-x apply -f manifests/60-gitops-operator.yaml   # no change if it is the same Subscription
+oc --context spoke apply -f manifests/60-gitops-operator.yaml
+GV=$(oc --context hub-x get subscription.operators.coreos.com openshift-gitops-operator \
+  -n openshift-operators -o jsonpath='{.status.installedCSV}')
+echo "$GV"
+sed "s/^  installPlanApproval: Automatic\$/  installPlanApproval: Manual\n  startingCSV: $GV/" \
+  manifests/60-gitops-operator.yaml > /tmp/60-gitops-operator-pinned.yaml
+grep -A1 '^  installPlanApproval' /tmp/60-gitops-operator-pinned.yaml   # Manual, then the startingCSV
+oc --context hub-y apply -f /tmp/60-gitops-operator-pinned.yaml
+IP=""; until [ -n "$IP" ]; do sleep 10
+  IP=$(oc --context hub-y get installplan -n openshift-operators -o json | jq -r --arg csv "$GV" \
+    '.items[] | select(.spec.approved==false and (.spec.clusterServiceVersionNames | index($csv))) | .metadata.name')
+done
+oc --context hub-y patch installplan "$IP" -n openshift-operators --type merge -p '{"spec":{"approved":true}}'
+until [ "$(oc --context hub-y get csv "$GV" -n openshift-operators -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
+for c in hub-x hub-y spoke; do
+  echo "== $c"; oc --context $c get csv -n openshift-operators -o name | grep gitops
+done
+```
+
+### 3. Hubs: backup storage
+
+Check the bucket and key from your workstation first (curl 8 or newer),
+then point a copy of `manifests/50-dpa.yaml` at your endpoint, so the
+endpoint stays out of git. If the bucket name, prefix or region differ
+from `acm-backups`, `acm` and `us-east-1`, change them in the copy too.
+Then, on each hub:
+
+```bash
+read -rp 'S3 endpoint URL: ' S3_URL            # e.g. https://s3.example.com
+read -rp 'S3 access key: ' S3_ACCESS_KEY
+read -rsp 'S3 secret key: ' S3_SECRET_KEY; echo
+curl -sS -o /dev/null -w '%{http_code}\n' --aws-sigv4 "aws:amz:us-east-1:s3" \
+  --user "$S3_ACCESS_KEY:$S3_SECRET_KEY" "$S3_URL/acm-backups?list-type=2"   # 200
+sed "s#s3Url: https://s3.example.com#s3Url: $S3_URL#" manifests/50-dpa.yaml > /tmp/50-dpa.yaml
+grep s3Url /tmp/50-dpa.yaml
 printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' "$S3_ACCESS_KEY" "$S3_SECRET_KEY" > /tmp/cloud
 for hub in hub-x hub-y; do
-  oc --context $hub create secret generic cloud-credentials \
-    -n open-cluster-management-backup --from-file=cloud=/tmp/cloud
-  oc --context $hub apply -f manifests/50-dpa.yaml
+  oc --context $hub create secret generic cloud-credentials -n open-cluster-management-backup \
+    --from-file=cloud=/tmp/cloud --dry-run=client -o yaml | oc --context $hub apply -f -
+  oc --context $hub apply -f /tmp/50-dpa.yaml
 done
 rm /tmp/cloud
-oc --context hub-x get backupstoragelocation -n open-cluster-management-backup   # Available
+for hub in hub-x hub-y; do
+  oc --context $hub wait backupstoragelocation --all -n open-cluster-management-backup \
+    --for=jsonpath='{.status.phase}'=Available --timeout=5m
+done
 ```
+
+The secret is created through `apply`, so running the block again (for
+example with a new key) updates it in place; then run `oc --context <hub>
+rollout restart deploy/velero -n open-cluster-management-backup` on each
+hub so Velero picks up the new key at once. A location that stays
+`Unavailable` with `SignatureDoesNotMatch` in `oc get
+backupstoragelocation -o yaml` has a wrong secret key in that secret.
+
+A certificate error from curl means the store's certificate is not
+publicly trusted: add its CA to the copy as `objectStorage.caCert`
+(base64) before applying it.
 
 ### 4. Active hub: import the spoke
 
@@ -221,7 +330,7 @@ oc --context spoke config view --flatten --minify > /tmp/spoke-kubeconfig
 oc --context hub-x create secret generic auto-import-secret -n spoke \
   --from-file=kubeconfig=/tmp/spoke-kubeconfig
 rm /tmp/spoke-kubeconfig
-oc --context hub-x get managedclusters -w        # spoke: Joined, Available True
+oc --context hub-x get managedclusters -w        # Ctrl-C once spoke shows Joined and Available True
 ```
 
 (If the `KlusterletAddonConfig` is rejected because namespace `spoke`
@@ -230,15 +339,37 @@ it.)
 
 If hub-x already manages the spoke, apply `40-import-spoke.yaml` anyway,
 because it sets the clusterset, the `name` label and the add-ons the
-rest of the build relies on, and skip the auto-import secret.
+rest of the build relies on, and skip the auto-import secret. If another
+tool imported it with a kept auto-import secret (annotation
+`managedcluster-import-controller.open-cluster-management.io/keeping-auto-import-secret`),
+delete that secret. That leaves the ManagedServiceAccount token from the
+backups as the only import credential, which is the state the runbooks
+assume:
+
+```bash
+oc --context hub-x get secret auto-import-secret -n spoke   # NotFound is what you want
+oc --context hub-x delete secret auto-import-secret -n spoke
+```
 
 ### 5. Backup roles
 
+The schedule takes its first backups right away. Let them finish before
+the passive hub starts restoring, so its first restore has something to
+read:
+
 ```bash
 oc --context hub-x apply -f manifests/55-backupschedule.yaml
+while :; do
+  P=$(oc --context hub-x get backup.velero.io -n open-cluster-management-backup -o jsonpath='{.items[*].status.phase}')
+  echo "$(date -u +%T) ${P:-no backups yet}"
+  [ -n "$P" ] && [ -z "$(echo "$P" | tr ' ' '\n' | grep -v '^Completed$')" ] && break
+  sleep 20
+done                                    # Ctrl-C and investigate if a phase reads Failed or PartiallyFailed
+oc --context hub-x get backupschedule -n open-cluster-management-backup   # Enabled
 oc --context hub-y apply -f manifests/56-restore-passive.yaml
-oc --context hub-x get backupschedule,backup -n open-cluster-management-backup
-oc --context hub-y get restore -n open-cluster-management-backup   # Enabled
+oc --context hub-y wait restores.cluster.open-cluster-management.io/restore-acm-passive-sync \
+  -n open-cluster-management-backup --for=jsonpath='{.status.phase}'=Enabled --timeout=15m
+oc --context hub-y get restores.cluster.open-cluster-management.io -n open-cluster-management-backup
 ```
 
 ### 6. Active hub: GitOps wiring and the demo apps
@@ -247,9 +378,23 @@ oc --context hub-y get restore -n open-cluster-management-backup   # Enabled
 oc --context hub-x apply -f manifests/61-gitops-integration.yaml
 oc --context hub-x apply -f manifests/62-appset-pull.yaml
 oc --context hub-x apply -f manifests/63-appset-push.yaml
-oc --context spoke get applications.argoproj.io -A   # hello-failover-spoke, synced by the spoke's Argo
-oc --context hub-x get applications.argoproj.io -n openshift-gitops   # hello-failover-push-spoke, on the hub
+# the pull app, synced by the spoke's own Argo CD; the push app, synced by
+# the hub's Argo CD through cluster-proxy. An Application reads Healthy
+# before its first sync (it has no resources yet), so wait for the sync first:
+for app in spoke/hello-failover-spoke hub-x/hello-failover-push-spoke; do
+  c=${app%/*}; a=${app#*/}
+  until oc --context $c get applications.argoproj.io $a -n openshift-gitops >/dev/null 2>&1; do sleep 10; done
+  oc --context $c wait applications.argoproj.io/$a -n openshift-gitops \
+    --for=jsonpath='{.status.operationState.phase}'=Succeeded --timeout=10m
+  oc --context $c wait applications.argoproj.io/$a -n openshift-gitops \
+    --for=jsonpath='{.status.health.status}'=Healthy --timeout=10m
+done
+oc --context spoke get applications.argoproj.io -A
+oc --context hub-x get applications.argoproj.io -n openshift-gitops
 ```
+
+On the hub, the pull app's copy reads `Unknown`: it carries
+`argocd.argoproj.io/skip-reconcile`, and its status comes from the spoke.
 
 Everything applied in this step is in a backed-up API group, so hub-y
 picks it up through its passive restore; there is nothing to apply there.

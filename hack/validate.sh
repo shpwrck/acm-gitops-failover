@@ -2,7 +2,7 @@
 # Offline validation: everything that can be checked without clusters.
 # The same script runs in CI (.github/workflows/validate.yaml).
 #
-# Needs: python3 + PyYAML, yamllint, kubeconform, kustomize (or kubectl),
+# Needs: python3 + PyYAML, yamllint, shellcheck, kubeconform, kustomize (or kubectl),
 # and network access to fetch CRD schemas. The Mermaid render check runs
 # when mmdc (@mermaid-js/mermaid-cli) is on PATH; SKIP_MERMAID=1 skips it.
 set -euo pipefail
@@ -15,6 +15,9 @@ step() { printf '\n== %s\n' "$*"; }
 
 step "yamllint"
 yamllint -s .
+
+step "shellcheck"
+shellcheck hack/*.sh
 
 step "kustomize build (every overlay and role)"
 build() { if command -v kustomize >/dev/null; then kustomize build "$1"; else kubectl kustomize "$1"; fi; }

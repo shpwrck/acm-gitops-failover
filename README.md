@@ -71,7 +71,10 @@ hubs can reach, a git repository every cluster can reach, and a
 workstation with `oc`, `git`, `jq` and curl 8 or newer.
 
 1. **Fork or copy this repo** and change the values below to match your
-   environment.
+   environment. To exercise a copy without touching its `main`, put the
+   changed values on a branch and set `targetRevision` to that branch:
+   the git-driven failover pull requests and the mid-outage deploys then
+   land on the branch too.
 2. **Build the environment** by following [docs/build.md](docs/build.md):
    it applies `manifests/` in numbered order and bootstraps `dr/`.
 3. **Run a failover** with one of the runbooks above.
@@ -79,10 +82,11 @@ workstation with `oc`, `git`, `jq` and curl 8 or newer.
 | Value | Where it is set | Default here |
 | --- | --- | --- |
 | Git repository URL | `repoURL` in `manifests/62-appset-pull.yaml`, `manifests/63-appset-push.yaml`, `dr/bootstrap/dr-role-hub-*.yaml` (CI fails if they disagree) | `https://github.com/redhat-na-ssa/acm-gitops-failover` |
+| Git revision the clusters track | `targetRevision` in the same four files | `main` |
 | S3 endpoint, bucket, prefix, region | `manifests/50-dpa.yaml` | `https://s3.example.com`, `acm-backups`, `acm`, `us-east-1` |
 | Workload cluster name | `manifests/40-import-spoke.yaml` and the `name: spoke` selector in `manifests/61-gitops-integration.yaml` | `spoke` |
 | Hub names | `dr/hub-x/`, `dr/hub-y/` and `dr/bootstrap/dr-role-hub-{x,y}.yaml` (directory name and `path` must match) | `hub-x`, `hub-y` |
-| kubeconfig contexts | the `export` lines at the top of each runbook | `hub-x`, `hub-y`, `spoke` |
+| kubeconfig contexts | the `export` lines at the top of each runbook, or `~/acm-dr/dr.env` for `hack/dr.sh` | `hub-x`, `hub-y`, `spoke` |
 | Hub replica mode | `availabilityConfig` in `manifests/20-multiclusterhub.yaml` | `Basic` (single-node hubs) |
 
 ## Repository layout
@@ -93,7 +97,8 @@ apps/        the demo apps: hello-failover (pull) and hello-failover-push (push)
 dr/          git-driven DR roles: one overlay per hub, the active/passive
              roles, the activation template, and the per-hub bootstrap
 docs/        design, build, results, runbooks
-hack/        validation scripts used locally and by CI
+hack/        validation scripts used locally and by CI, and dr.sh, which
+             runs a whole DR exercise (see the runbooks)
 ```
 
 ## Validation
@@ -102,7 +107,8 @@ hack/        validation scripts used locally and by CI
 clusters, and runs on every pull request
 ([.github/workflows/validate.yaml](.github/workflows/validate.yaml)):
 
-- yamllint, and `kustomize build` of every `dr/` overlay and role;
+- yamllint, shellcheck of the scripts in `hack/`, and `kustomize build`
+  of every `dr/` overlay and role;
 - strict schema validation of every manifest against the upstream CRDs
   for ACM 2.17, OADP, Argo CD, OLM and OpenShift routes, so a misspelled
   field fails;
@@ -112,7 +118,7 @@ clusters, and runs on every pull request
   renders a legal role, and every Argo source names the same repo;
 - relative links in the docs resolve, and every Mermaid diagram renders.
 
-It needs python3 with PyYAML, yamllint, kubeconform, kustomize (or
+It needs python3 with PyYAML, yamllint, shellcheck, kubeconform, kustomize (or
 kubectl) and, for the diagram check, `mmdc` from
 `@mermaid-js/mermaid-cli`. Live behavior can only be proven on clusters:
 that is what the runbooks' exercises and [docs/results.md](docs/results.md)
