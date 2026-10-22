@@ -177,7 +177,8 @@ pending_csrs() { [ -n "$(pending_csr_names "$1")" ]; }
 approve_csrs() { pending_csr_names "$1" | xargs -r oc --context "$1" adm certificate approve; }
 ready_up() {   # wait for <context>'s API, then approve certificates until its nodes are Ready (G.1's power-on note)
   local c=$1 end=$((SECONDS + 1800))
-  wait_until 7200 "$c's API to answer" alive "$c"
+  alive "$c" || wait_until 7200 "$c's API to answer" alive "$c"
+  echo "   approving pending certificate requests on $c until its nodes are Ready (up to 30 min)"
   until nodes_ready "$c" && not pending_csrs "$c"; do
     [ "$SECONDS" -lt "$end" ] || die "$c: nodes not Ready, or certificate requests still pending, after 30 min"
     approve_csrs "$c" || true
