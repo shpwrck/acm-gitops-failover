@@ -387,7 +387,7 @@ probe_summary() {
   done
   if [ -f "$LOGDIR/hub-pointer.log" ]; then
     echo "hub pointer:"
-    awk '$2 != last {print "  " $0; last = $2}' "$LOGDIR/hub-pointer.log"
+    awk '{s = $2 == "" ? "(read failed)" : $2} s != last {print "  " $1, s; last = s}' "$LOGDIR/hub-pointer.log"
   fi
   if [ -f "$LOGDIR/revisions.log" ]; then echo "served revisions:"; sed 's/^/  /' "$LOGDIR/revisions.log"; fi
   if [ -f "$LOGDIR/events.log" ]; then echo "events:"; sed 's/^/  /' "$LOGDIR/events.log"; fi
@@ -486,7 +486,7 @@ claim_and_verify() {   # D.3, E.1, E.2, E.3 on the new hub
   event "E.1 all addons Available"
   oc --context "$p" get managedclusteraddon -n "$MANAGED"
   say "E.2: re-home evidence"
-  awk '$2 != last {print "   " $0; last = $2}' "$LOGDIR/hub-pointer.log" 2>/dev/null | tail -n 3 || true
+  awk '{s = $2 == "" ? "(read failed)" : $2} s != last {print "   " $1, s; last = s}' "$LOGDIR/hub-pointer.log" 2>/dev/null | tail -n 3 || true
   echo "   availability samples not 200: $(grep -c -v ' 200$' "$LOGDIR/probe.log" 2>/dev/null || true)"
   say "E.3: the restored MSA secret"
   if wait_for 120 token_adopted "$p"; then
