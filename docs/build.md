@@ -138,8 +138,10 @@ the steps:
 - **It refuses what would break,** before it changes anything: a hub that
   another hub manages, a spoke managed by some other hub, hubs on
   different ACM versions, other managed clusters on a hub (see [Shared
-  clusters](#shared-clusters)), a stray Route CRD (gotcha 3), or manifests
-  that pull from another repo or branch than your settings name.
+  clusters](#shared-clusters)), a stray Route CRD (gotcha 3), manifests
+  that pull from another repo or branch than your settings name, or an
+  active hub's overlay that still lists an earlier failover's activation
+  one-shot (step 7).
 - **It creates `open-cluster-management-global-set`** on a hub where ACM
   did not (gotcha 1).
 - **It writes the demo apps' URLs** (`APP_URL`, `PUSH_APP_URL`) into the
@@ -489,6 +491,15 @@ RBAC first, then each hub's `dr-role` Application. Each hub's Argo CD
 adopts the BackupSchedule or Restore applied in step 6. From then on the
 manual runbooks need their break-glass step (D.0) before touching a hub's
 role objects.
+
+On a branch that has been through a git-driven failover, the active hub's
+overlay still lists that failover's activation one-shot next to
+`../roles/active` (the "promoted" state in
+[dr/README.md](../dr/README.md)). Before you build new clusters from that
+branch, delete the `restore-activate-*.yaml` file from the overlay and its
+entry from the overlay's `kustomization.yaml`, and push. Otherwise the new
+hub's `dr-role` applies it next to the BackupSchedule, where the backup
+operator ignores it.
 
 ## Build-time gotchas
 

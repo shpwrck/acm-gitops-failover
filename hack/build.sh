@@ -119,6 +119,7 @@ git_role() {   # git_role <hub>: active, passive or something else, as dr/<hub> 
   case $k in
     ../roles/active) echo active ;;
     ../roles/passive) echo passive ;;
+    "../roles/active restore-activate-"*) echo "active with ${k#../roles/active }" ;;   # promoted by a git-driven failover
     "") echo missing ;;
     *) echo "'$k'" ;;
   esac
@@ -250,7 +251,12 @@ preflight() {
     if [ ! -f "dr/bootstrap/dr-role-$c.yaml" ]; then red "no dr/bootstrap/dr-role-$c.yaml: the hubs' contexts must be named hub-x and hub-y"; fi
   done
   x=$(git_role "$ACTIVE")
-  if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"; else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active"; fi
+  if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"
+  elif [[ $x == "active with "* ]]; then
+    help_at docs/build.md#7-git-driven-paths-only-bootstrap-dr
+    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. Remove the file and its entry on $BRANCH"
+    help_at dr/README.md
+  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active"; fi
   x=$(git_role "$PASSIVE")
   if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive"; fi
 
