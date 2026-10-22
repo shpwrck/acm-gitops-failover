@@ -19,6 +19,8 @@ environment is described in [build.md](build.md).
 
 Each path was run in August 2026 and then re-run end to end on 2026-08-18
 by an operator with no prior context, following only these documents.
+In October 2026 all four were run again on a different lab, with ACM
+2.17.3 (see [October 2026 re-validation](#october-2026-re-validation)).
 
 ## Measured results
 
@@ -52,6 +54,52 @@ Other timings worth knowing:
 - Failback as a role swap (the returned hub becomes the new passive) took
   about 7 minutes from power-on.
 
+## October 2026 re-validation
+
+A second lab, built from [build.md](build.md) with only these documents:
+three single-node OpenShift 4.21 clusters, ACM 2.17.3 on both hubs,
+OpenShift GitOps 1.22, and an S3-compatible store outside the clusters.
+The first run was done by hand on 2026-10-21 (manual pull and push,
+hub-x powered off): activation to claim 11 s, the hubless deploy served
+in 3:30, and 0 failed samples out of 178. On 2026-10-22 four more runs
+used [`hack/dr.sh`](../hack/dr.sh), alternating the hub that dies, each
+with both demo apps deployed and probed. Every outage was a power-off
+by hand.
+
+| Run | Path | Hub that died | To claim | To all addons | To push delivery back | Pull deploy, no hub | Push delivery RTO | Failed samples from the cut on |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Manual | hub-y | 11 s | 42 s | 2:33 | 1:11 | 4:23 | 0 |
+| 2 | Git-driven | hub-x | 27 s | 1:53 | 3:04 | 1:44 | 6:31 | 0 |
+| 3 | Manual | hub-y | 12 s | 1:43 | 2:23 | 6:23 | 9:12 | 0 |
+| 4 | Git-driven | hub-x | 28 s | 55 s | 2:16 | 0:26 | 4:57 | 0 |
+
+"To" columns count from the activation restore's apply (manual) or the
+PR-A merge (git-driven). The git-driven claims include the activation
+race of finding 3, which fired on both runs and cost about 16 s. Each
+probe sampled every 10 s, 75 to 308 samples per app per run. The only
+failed sample in the whole series was one pull-app timeout in run 2, 32
+minutes before the cut, in an attempt that was stopped and started
+again; the push app answered in the same second.
+
+The push delivery RTO counts from the mid-outage commit, and the runbook
+waits for the pull app to serve that commit (C.1) before the failover
+starts, so the RTO includes that wait. In run 3 the spoke's Argo CD took
+5:33 to notice the commit, which is within its defaults: a refresh every
+2 minutes plus up to 1 minute of jitter, a branch resolution cached for
+up to 3 minutes, then about 1 minute for the ConfigMap volume. Hubless
+pull delivery therefore takes anywhere from under a minute to about 6.5
+minutes; the "to push delivery back" column is the part DR controls.
+
+Other timings from these runs:
+
+- Human review dominated the git-driven runs: 1:10 to 1:44 per PR
+  (one demote PR waited 8:53 for its merge).
+- The returned hub read the moved cluster as `Unknown` 3:14 to 3:45
+  after its API answered again.
+- A whole run, from the probes starting to rejoin done, took 12 to 33
+  minutes; most of the spread is the wait for a cut time between backup
+  slots, and when the PRs were merged.
+
 ## Findings
 
 These are the behaviors the runs uncovered. Each one is already built into
@@ -60,9 +108,12 @@ the runbooks; this list says why the runbooks look the way they do.
 1. **Activation silently freezes ManagedServiceAccount token rotation.**
    The restored `auto-import-account` secret cannot be adopted by the new
    hub's controller, so the token stops rotating and the *next* failover
-   fails days later in `Pending Import`. Reproduced on every activation;
-   fixed by deleting the restored secret after the claim lands. Details:
-   [msa-token-hygiene.md](msa-token-hygiene.md).
+   fails days later in `Pending Import`. Reproduced on every activation
+   on ACM 2.17.0; fixed by deleting the restored secret after the claim
+   lands. On ACM 2.17.3 (the October runs) the controller adopted and
+   rotated the restored secret within about a minute on all five
+   activations, so step E.3 checks which case it is before deleting
+   anything. Details: [msa-token-hygiene.md](msa-token-hygiene.md).
 2. **A one-PR git-driven failover does not work.** Delivering the
    `BackupSchedule` and the activation `Restore` in the same sync makes
    the backup operator ignore the restore, and the premature schedule then
@@ -105,3 +156,9 @@ the runbooks; this list says why the runbooks look the way they do.
 10. **A failed Argo sync is not retried on the same revision.** After
     fixing missing RBAC, the `dr-role` app stayed `Failed` until a fresh
     sync operation was triggered (see [dr/README.md](../dr/README.md)).
+11. **A hub's first backup set after a cold boot can fail.** After the
+    lab was powered on, the active hub's catch-up set failed because the
+    cluster's DNS refused the S3 lookup while it was still settling; the
+    next scheduled set completed. Pre-flight (0.3) reads the newest
+    credentials backup, so right after a power-on, wait for the next
+    :00/:30 set before starting an exercise.
