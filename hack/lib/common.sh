@@ -343,4 +343,28 @@ msa_token() {
 }
 msa_fresh() { local t; t=$(msa_token "$1"); [ "${t%% *}" = True ] && [[ ${t#* } > $(date -u -d '+24 hours' +%FT%TZ) ]]; }
 
+# The ACM agent (klusterlet) on a cluster: another hub's, or the cluster's own as a hub (local-cluster)
+klusterlet_hub() {   # klusterlet_hub <context>: the API of the hub its klusterlet reports to, or nothing
+  local s
+  for s in hub-kubeconfig-secret bootstrap-hub-kubeconfig; do
+    oc --context "$1" get secret "$s" -n open-cluster-management-agent -o jsonpath='{.data.kubeconfig}' 2>/dev/null |
+      base64 -d 2>/dev/null | awk '/server:/ {print $2; exit}' | grep . && return 0
+  done
+  return 0
+}
+self_agent() {   # self_agent <context>: its klusterlet reports to the cluster itself: a hub's own agent for local-cluster
+  local h
+  if [ "$(oc --context "$1" get klusterlets.operator.open-cluster-management.io klusterlet -o jsonpath='{.spec.clusterName}' 2>/dev/null)" = local-cluster ]; then
+    return 0
+  fi
+  h=$(klusterlet_hub "$1")
+  case $h in https://kubernetes.default.svc*) return 0 ;; esac
+  [ -n "$h" ] && [ "${h%/}" = "$(server "$1")" ]
+}
+orphan_agent() {   # orphan_agent <context>: the cluster's own agent with no hub left on it, as an ACM uninstall can leave it
+  { some "$1" klusterlets.operator.open-cluster-management.io klusterlet || some "$1" ns open-cluster-management-agent; } &&
+    self_agent "$1" && ! some "$1" multiclusterhubs.operator.open-cluster-management.io -A &&
+    ! some "$1" multiclusterengines.multicluster.openshift.io
+}
+
 repo_url() { git remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##'; }

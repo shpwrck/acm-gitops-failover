@@ -293,6 +293,27 @@ If the klusterlet stays, follow the cleanup in the ACM
 [Clusters guide](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/clusters/index)
 ("Removing a cluster from management").
 
+A klusterlet that reports to the cluster itself is not another hub's:
+its `spec.clusterName` is `local-cluster`, or its hub kubeconfig (secret
+`hub-kubeconfig-secret` in `open-cluster-management-agent`) points at
+`https://kubernetes.default.svc`. It is the agent a hub runs for its own
+`local-cluster`, and an ACM uninstall can leave it behind; with no
+MultiClusterHub left on the cluster, nothing manages it.
+`hack/teardown.sh --full` removes it. By hand, delete it while its
+operator still runs, so the operator cleans up after it, then its
+namespaces:
+
+```bash
+oc --context hub-y delete klusterlet klusterlet --wait=false
+oc --context hub-y wait klusterlet/klusterlet --for=delete --timeout=5m
+oc --context hub-y delete namespace open-cluster-management-agent-addon open-cluster-management-agent
+```
+
+If the klusterlet stays because its operator is gone already (no
+`klusterlet` deployment in `open-cluster-management-agent`), clear its
+finalizer: `oc --context hub-y patch klusterlet klusterlet --type merge -p
+'{"metadata":{"finalizers":null}}'`.
+
 #### Shared clusters
 
 These manifests assume dedicated clusters. On a hub that already manages
@@ -586,8 +607,11 @@ stage skips what is already gone. The stages, in order:
    Management](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/get_started/index)):
    the MultiClusterHub first, which takes the engine, the add-ons and the
    backup operator with it (5 to 15 minutes), then the ACM operator, what
-   ACM's "Cleaning up artifacts before reinstalling" script lists, and the
-   namespaces ACM made.
+   ACM's "Cleaning up artifacts before reinstalling" script lists, the
+   namespaces ACM made, and the hub's own agent for `local-cluster` if the
+   uninstall left it ([A cluster that is managed by another
+   hub](#a-cluster-that-is-managed-by-another-hub)). With `--full`, it also
+   removes such an agent that an earlier uninstall left.
 7. **OpenShift GitOps**: its Argo CD instance while the operator can still
    clean up after it, then the operator and the `openshift-gitops`
    namespace.
