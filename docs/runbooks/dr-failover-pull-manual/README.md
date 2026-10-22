@@ -27,8 +27,15 @@ Set it up once, in the repo checkout on the branch the clusters track:
 ```bash
 mkdir -p ~/acm-dr && cp hack/dr.env.example ~/acm-dr/dr.env
 ${EDITOR:-vi} ~/acm-dr/dr.env   # KUBECONFIG, ACTIVE, PASSIVE, the two app URLs, BRANCH
+sudo dnf install -y gum         # optional (brew install gum elsewhere): boxes, spinners and tables
 hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr/ is bootstrapped)
 ```
+
+With [gum](https://github.com/charmbracelet/gum) installed, the script
+shows a stage tracker, a spinner with the elapsed time while it waits,
+a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
+timing table at the end. Without gum, or with `DR_PLAIN=1`, it prints
+the same steps as plain text.
 
 Then one exercise is one command:
 
@@ -39,8 +46,10 @@ hack/dr.sh run --git    # the git-driven paths: you review and merge each PR it 
 
 `run` stops only for what you have to do yourself: cut `$ACTIVE`'s
 power (B.1), merge the PRs on a `--git` run (D'.2, F', G'.1), and power
-the hub back on (G.0). It asks before a manual activation (D.2), and
-`--yes` skips that question. Both demo apps run side by side, so every
+the hub back on (G.0). For each PR it pushes the branch and prints a
+link to GitHub's new-PR page with the title and body filled in (with
+`gh` signed in, it opens the PR itself). It asks before it starts and
+before a manual activation (D.2); `--yes` skips both questions. Both demo apps run side by side, so every
 exercise probes and deploys both: one run covers pull and push delivery.
 At the end, `rejoin` swaps `ACTIVE` and `PASSIVE` in the settings file
 and bumps `RUN`, so the next `run` goes the other way.
@@ -65,8 +74,8 @@ If a run stops partway, fix the cause, then run the remaining steps:
 Each run's evidence lands in `~/acm-dr/runs/run-$RUN/`: the probe logs
 (`probe.log`, `probe-push.log`, `hub-pointer.log`, and `revisions.log`,
 one line each time an app's served revision changes), `events.log` (one
-timestamped line per step) and `console.log` (everything the script
-printed).
+timestamped line per step; the summary's timing table is computed from
+it) and `console.log` (everything the script printed, as plain text).
 
 ## Conventions
 
