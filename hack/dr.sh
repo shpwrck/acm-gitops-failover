@@ -306,15 +306,28 @@ spin_cmd() {   # spin_cmd <title> <command...>: a slow command; its output goes 
   return "$rc"
 }
 
+fresh_screen() {   # scroll what the screen shows into the scrollback, then write from the top
+  local rows
+  rows=$(stty size </dev/tty 2>/dev/null) || rows=""
+  rows=${rows%% *}
+  if ! [[ $rows =~ ^[0-9]+$ ]] || [ "$rows" -lt 1 ]; then rows=50; fi
+  printf '%*s' "$rows" '' | tr ' ' '\n'
+  printf '\e[H'
+}
+
 STAGES=(Pre-flight Outage Deploy Failover Rejoin Summary)
-IN_RUN=0 RUN_T0=0
-stage() {   # stage <n>: where the run stands
-  local i s="" rule w fill
+IN_RUN=0 RUN_T0=0 STAGE_EV=0
+stage() {   # stage <n>: where the run stands; with gum, each stage after the first starts on a clear screen
+  local i s="" rule w fill recap="" n
+  n=$(wc -l 2>/dev/null <"$LOGDIR/events.log" || echo 0)
+  if [ "$1" -gt 1 ] && [ "$n" -gt "$STAGE_EV" ]; then recap=$(sed -n "$((STAGE_EV + 1)),\$p" "$LOGDIR/events.log" | tail -n 3); fi
+  STAGE_EV=$n
   logln "" "#### Stage $1/${#STAGES[@]}: ${STAGES[$1 - 1]}"
   if [ "$UI" != gum ]; then
     printf '\n#### Stage %d/%d: %s\n' "$1" "${#STAGES[@]}" "${STAGES[$1 - 1]}"
     return 0
   fi
+  if [ "$1" -gt 1 ]; then fresh_screen; fi
   for i in "${!STAGES[@]}"; do
     if [ "$i" -gt 0 ]; then s+="${C_DIM} › ${C_OFF}"; fi
     if [ "$i" -lt $(($1 - 1)) ]; then
@@ -327,9 +340,13 @@ stage() {   # stage <n>: where the run stands
   done
   w=$(cols)
   w=$((w > 80 ? 78 : w - 2))
-  rule="── Run $RUN · $(mode_name) · $(dur $((SECONDS - RUN_T0))) "
+  rule="── Run $RUN · $(mode_name) · $ACTIVE dies, $PASSIVE takes over · $(dur $((SECONDS - RUN_T0))) "
   printf -v fill '%*s' $((w - ${#rule} > 0 ? w - ${#rule} : 0)) ''
   printf '\n %s%s%s\n %s\n' "$C_DIM" "$rule${fill// /─}" "$C_OFF" "$s"
+  if [ -n "$recap" ]; then   # the end of the last stage, so the clear screen keeps some context
+    printf '\n   %s%s ended with:%s\n' "$C_DIM" "${STAGES[$1 - 2]}" "$C_OFF"
+    while read -r i s; do printf '   %s◆ %s %s%s\n' "$C_DIM" "${i:11:8}" "$s" "$C_OFF"; done <<<"$recap"
+  fi
 }
 
 # --- cluster checks ------------------------------------------------------------
@@ -660,11 +677,22 @@ timings() {
   span "Old hub back to its lease running out (G.1)" " G .* API answers" " G.1 .* Unknown"
   span "Whole run" " A probes started" " rejoin done"
 }
-summary() {
+summary() {   # the tables come last, so they are what stays on the screen
   local f n
   say "Run $RUN summary ($LOGDIR)"
-  if [ -s "$LOGDIR/events.log" ]; then timings | table; fi
+  if [ -s "$LOGDIR/events.log" ]; then label "Events"; show <"$LOGDIR/events.log"; fi
+  if [ -f "$LOGDIR/hub-pointer.log" ]; then
+    label "Hub pointer (which hub $MANAGED reports to)"
+    awk '{s = $2 == "" ? "(read failed)" : $2} s != last {print $1, s; last = s}' "$LOGDIR/hub-pointer.log" | show
+  fi
+  if [ -s "$LOGDIR/revisions.log" ]; then label "Served revisions"; show <"$LOGDIR/revisions.log"; fi
   if compgen -G "$LOGDIR/probe*.log" >/dev/null; then
+    for f in "$LOGDIR"/probe*.log; do
+      if grep -q -v ' 200$' "$f"; then
+        label "$(basename "$f"), first samples not 200:"
+        grep -v ' 200$' "$f" | head -n 5 | show
+      fi
+    done
     {
       printf 'Availability\tSamples\tNot 200\tFirst\tLast\n'
       for f in "$LOGDIR/probe.log" "$LOGDIR/probe-push.log"; do
@@ -674,19 +702,8 @@ summary() {
           "$(head -n 1 "$f" | cut -d' ' -f1)" "$(tail -n 1 "$f" | cut -d' ' -f1)"
       done
     } | table
-    for f in "$LOGDIR"/probe*.log; do
-      if grep -q -v ' 200$' "$f"; then
-        label "$(basename "$f"), first samples not 200:"
-        grep -v ' 200$' "$f" | head -n 5 | show
-      fi
-    done
   fi
-  if [ -f "$LOGDIR/hub-pointer.log" ]; then
-    label "Hub pointer (which hub $MANAGED reports to)"
-    awk '{s = $2 == "" ? "(read failed)" : $2} s != last {print $1, s; last = s}' "$LOGDIR/hub-pointer.log" | show
-  fi
-  if [ -s "$LOGDIR/revisions.log" ]; then label "Served revisions"; show <"$LOGDIR/revisions.log"; fi
-  if [ -s "$LOGDIR/events.log" ]; then label "Events"; show <"$LOGDIR/events.log"; fi
+  if [ -s "$LOGDIR/events.log" ]; then timings | table; fi
 }
 
 cmd_probe() {

@@ -34,7 +34,8 @@ hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr
 With [gum](https://github.com/charmbracelet/gum) installed, the script
 shows a stage tracker, a spinner with the elapsed time while it waits,
 a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
-timing table at the end. Without gum, or with `DR_PLAIN=1`, it prints
+timing table at the end. Each stage starts on a clear screen; the
+earlier output stays in the terminal's scrollback and in `console.log`. Without gum, or with `DR_PLAIN=1`, it prints
 the same steps as plain text.
 
 Then one exercise is one command:
