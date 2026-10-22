@@ -81,7 +81,12 @@ A run started again after a stop carries on in the same folder: its
 events say which attempt it is, and "Whole run" counts from the latest
 answer to "Start run N?". The availability table splits each app's
 samples at B.1, so a failed sample before the power cut is not counted
-against the failover.
+against the failover. The rows that start at the cut or at C's deploy
+include C.1's wait for the pull app, which is bound by `$MANAGED`'s Argo
+poll (1 to 6.5 minutes with Argo's defaults: a refresh every 2 minutes
+plus up to 1 minute of jitter, a branch resolution cached for up to 3
+minutes, then about 1 minute for the ConfigMap volume); the rows that
+start at the activation (or at the PR-A merge) do not.
 
 ## Conventions
 

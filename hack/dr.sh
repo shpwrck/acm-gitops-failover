@@ -672,6 +672,7 @@ timings() {
   span "$from to claim (D.3)" "$act" " D.3 claim landed"
   span "$from to all addons Available (E.1)" "$act" " E.1 all addons Available"
   span "$from to the first backup set (F.1)" "$act" " F.1 first backup set Completed"
+  span "$from to push delivery back (E')" "$act" " E' push delivery back"
   span "PR-B: pushed to merged" " F' PR-B branch" " F' PR-B merged"
   span "Demote PR: pushed to merged" " G'.1 demote branch" " G'.1 demote PR merged"
   span "Old hub back to its lease running out (G.1)" " G .* API answers" " G.1 .* Unknown"
