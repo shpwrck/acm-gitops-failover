@@ -4,7 +4,10 @@
 # below (B.0, D.2, G.3, ...) point into the Manual Pull Path runbook, the
 # primed ones (D'.1, F', G'.1) into the Automated Pull Path.
 #
-# Usage: hack/dr.sh <command> [--git] [--yes]
+# Usage: hack/dr.sh [command] [--git] [--yes]
+#
+# With no command, on a terminal, it shows the lab's posture and a menu:
+# a manual or a git-driven run, a pre-flight check, the last run's summary.
 #
 #   run        one whole exercise: check, probes, outage, deploy, failover,
 #              rejoin, summary. It stops for what only you can do: cut the
@@ -13,7 +16,7 @@
 #   nodes [CONTEXT...]
 #              approve pending certificate requests until the nodes are Ready
 #              (after a power-on; default: all three clusters)
-#   probe start|stop|summary
+#   probe start|stop|summary [N]
 #              availability, hub-pointer and revision probes, detached from the terminal (A)
 #   outage     etcd backup and slot check (B.0), then wait for you to cut the power (B.1)
 #   deploy     bump both apps' REVISION on $BRANCH, wait for the pull app to serve it (C)
@@ -25,7 +28,9 @@
 #   --yes      do not ask before starting a run or a manual activation
 #
 # Both demo apps run side by side, so every run exercises pull and push
-# delivery. The script never powers anything off or on.
+# delivery. The script never powers anything off or on. Each stage and step
+# says what it does and why; a RED pre-flight line links to the section of
+# the docs that explains it.
 # Settings: $DR_ENV (default ~/acm-dr/dr.env; see hack/dr.env.example).
 # Logs: ~/acm-dr/runs/run-$RUN/
 # Output: with gum (https://github.com/charmbracelet/gum) on a terminal,
@@ -50,17 +55,9 @@ LOGDIR=$HOME/acm-dr/runs/run-$RUN
 mkdir -p "$LOGDIR"
 cd "$REPO"
 
-NS=open-cluster-management-backup
-GNS=openshift-gitops
-RESTORE=restores.cluster.open-cluster-management.io
-BSCHED=backupschedules.cluster.open-cluster-management.io
-VSCHED=schedules.velero.io
-VBACKUP=backups.velero.io
-APP=applications.argoproj.io
-
 GIT=0 YES=0
-CMD=${1:-}
-if [ $# -gt 0 ]; then shift; fi
+CMD=""
+if [ $# -gt 0 ] && [[ $1 != --* ]]; then CMD=$1; shift; fi
 ARGS=()
 for a in "$@"; do
   case $a in
@@ -70,249 +67,20 @@ for a in "$@"; do
   esac
 done
 
-# --- output ------------------------------------------------------------------
-# The screen gets gum's boxes and tables, and a spinner while the script waits.
-# The log (fd 3: console.log, or nowhere for check and probe) gets plain text.
+# shellcheck source=hack/lib/common.sh
+. "$REPO/hack/lib/common.sh"
+LOGFILE=$LOGDIR/console.log
 
-UI=plain
-if [ -t 1 ] && [ "${DR_PLAIN:-0}" != 1 ] && [ -z "${NO_COLOR:-}" ] && command -v gum >/dev/null; then UI=gum; fi
-C_B="" C_DIM="" C_OFF="" C_OK="" C_BAD="" C_WARN="" C_ACC=""
-if [ "$UI" = gum ]; then
-  C_B=$'\e[1m' C_DIM=$'\e[2m' C_OFF=$'\e[0m' C_OK=$'\e[92m' C_BAD=$'\e[91m' C_WARN=$'\e[33m' C_ACC=$'\e[95m'
-fi
-exec 3>/dev/null
+# --- run output ----------------------------------------------------------------
 
-now() { date -u +%FT%TZ; }
-logln() { printf '%s\n' "$@" >&3; }
-line() { printf '%s\n' "$*"; logln "$*"; }
-not() { ! "$@"; }
 flag() { if [ "$GIT" = 1 ]; then echo " --git"; fi; }
 mode_name() { if [ "$GIT" = 1 ]; then echo git-driven; else echo manual; fi; }
-dur() {   # dur <seconds>: 41s, 3m05s, 1h02m
-  if [ "$1" -lt 60 ]; then echo "$1s"
-  elif [ "$1" -lt 3600 ]; then printf '%dm%02ds\n' $(($1 / 60)) $(($1 % 60))
-  else printf '%dh%02dm\n' $(($1 / 3600)) $(($1 % 3600 / 60)); fi
-}
-cols() {   # the terminal's width; 80 when it does not say
-  local s
-  s=$(stty size </dev/tty 2>/dev/null) || s=""
-  s=${s#* }
-  if [[ $s =~ ^[0-9]+$ ]] && [ "$s" -ge 40 ]; then echo "$s"; else echo 80; fi
-}
-# gum's colors survive the pipe of $(...), which also spares the terminal gum's color queries
-gumc() { CLICOLOR_FORCE=1 gum "$@"; }
-
-box() {   # box <border> <color> <title> [line...]: a framed message with gum, plain lines without
-  local border=$1 color=$2 title=$3 l w
-  shift 3
-  logln "" "== $title"
-  for l in "$@"; do logln "   $l"; done
-  if [ "$UI" = gum ]; then
-    w=$(cols)
-    w=$((w > 80 ? 76 : w - 4))
-    printf '\n%s\n' "$(gumc style --border "$border" --border-foreground "$color" --padding '0 2' --margin '0 1' --width "$w" \
-      "$(gumc style --bold --foreground "$color" "$title")" "$@")"
-  else
-    printf '\n== %s\n' "$title"
-    for l in "$@"; do printf '   %s\n' "$l"; done
-  fi
-}
-your_turn() {   # your_turn <what> [line...]: something only you can do; the bell calls you back
-  box double 3 "YOUR TURN: $1" "${@:2}"
-  if [ "$UI" = gum ]; then printf '\a'; fi
-}
-say() {
-  logln "" "== $*"
-  if [ "$UI" = gum ]; then printf '\n %s▍%s%s%s\n' "$C_ACC" "$C_B" "$*" "$C_OFF"; else printf '\n== %s\n' "$*"; fi
-}
 event() {   # a milestone: on the screen, in the log and in events.log
   local t
   t=$(now)
   echo "$t $*" >>"$LOGDIR/events.log"
   logln "$t $*"
   if [ "$UI" = gum ]; then printf '   %s◆ %s%s %s\n' "$C_ACC" "${t:11:8}" "$C_OFF" "$*"; else echo "$t $*"; fi
-}
-mark() {   # mark <plain tag> <gum mark> <text>
-  logln "   $1 $3"
-  if [ "$UI" = gum ]; then printf '   %s %s\n' "$2" "$3"; else printf '   %s %s\n' "$1" "$3"; fi
-}
-BAD=0
-ok() { mark "ok   " "${C_OK}✓${C_OFF}" "$*"; }
-red() { BAD=1; mark "RED  " "${C_BAD}✗${C_OFF}" "$*"; }
-note() { mark "note " "${C_WARN}•${C_OFF}" "$*"; }
-label() { logln "   $*"; printf '   %s%s%s\n' "$C_B" "$*" "$C_OFF"; }
-finished() {   # finished <text>: a step that went through
-  logln "   $*"
-  if [ "$UI" = gum ]; then printf '   %s✓%s %s%s%s\n' "$C_OK" "$C_OFF" "$C_DIM" "$*" "$C_OFF"; else echo "   $*"; fi
-}
-verdict() {   # verdict ok|bad <text>
-  local color=9
-  if [ "$1" = ok ]; then color=10; fi
-  logln "" "$2"
-  if [ "$UI" = gum ]; then
-    printf '\n%s\n' "$(gumc style --border rounded --border-foreground "$color" --foreground "$color" --bold --padding '0 1' --margin '0 1' "$2")"
-  else
-    printf '\n%s\n' "$2"
-  fi
-}
-show() {   # show [command...]: its output (or stdin), indented and dim, on the screen and in the log
-  local out rc=0 l
-  if [ $# -gt 0 ]; then out=$("$@" 2>&1) || rc=$?; else out=$(cat); fi
-  if [ -n "$out" ]; then
-    while IFS= read -r l; do
-      logln "     $l"
-      printf '     %s%s%s\n' "$C_DIM" "$l" "$C_OFF"
-    done <<<"$out"
-  fi
-  return "$rc"
-}
-quiet() {   # quiet <command...>: with gum its output goes to the log only, unless it fails
-  local out rc=0
-  out=$("$@" 2>&1) || rc=$?
-  if [ -z "$out" ]; then return "$rc"; fi
-  if [ "$UI" = gum ] && [ "$rc" = 0 ]; then logln "$out"; else show <<<"$out"; fi
-  return "$rc"
-}
-to_log() { if [ "$UI" = gum ]; then cat >&3; else show; fi; }   # stdin, like quiet
-
-align() {   # tab-separated rows in aligned columns
-  awk -F'\t' '{ for (i = 1; i <= NF; i++) { c[NR, i] = $i; if (length($i) > w[i]) w[i] = length($i) } if (NF > n) n = NF }
-    END { for (r = 1; r <= NR; r++) { s = ""; for (i = 1; i <= n; i++) s = s sprintf("%-" (w[i] + 2) "s", c[r, i]); sub(/ +$/, "", s); print "   " s } }'
-}
-table() {   # table: tab-separated rows on stdin, the first one the header
-  local rows
-  rows=$(cat)
-  align <<<"$rows" >&3
-  if [ "$UI" = gum ]; then
-    # gum 0.17's --print leaves the header plain (and bolds the first row), so the header is colored here
-    rows=$(awk -F'\t' -v OFS='\t' -v a="$C_B$C_ACC" -v z="$C_OFF" 'NR == 1 { for (i = 1; i <= NF; i++) $i = a $i z } 1' <<<"$rows")
-    printf '%s\n' "$(gumc table --print --separator $'\t' --border rounded --border.foreground 8 --selected.foreground '' \
-      --lazy-quotes <<<"$rows" | sed 's/^/  /')"
-  else
-    align <<<"$rows"
-  fi
-}
-
-DIED=0
-die() {
-  spin_stop
-  DIED=1
-  box thick 9 "STOP" "$*" "" "Log: $LOGDIR/console.log"
-  exit 1
-}
-confirm() {
-  [ "$YES" = 1 ] && return 0
-  local answer=""
-  if [ "$UI" = gum ]; then
-    echo
-    if gum confirm --default=false "$1" </dev/tty >/dev/tty 2>/dev/tty; then
-      finished "$1 yes"
-      return 0
-    fi
-    logln "$1 no"
-    die "stopped at your request"
-  fi
-  read -r -p "$1 [y/N] " answer </dev/tty || true
-  logln "$1 [y/N] $answer"
-  [ "$answer" = y ] || [ "$answer" = Y ] || die "stopped at your request"
-}
-
-# The spinner: one status line, redrawn ten times a second while the script
-# waits. Checks run in the background so it keeps turning.
-SPIN="" SPIN_T0=0 SPIN_N=0 SPIN_W=60 POLL_PID=""
-FRAMES=(⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷)
-spin_begin() {   # spin_begin <title>
-  spin_stop
-  logln "   $1"
-  if [ "$UI" = gum ]; then
-    SPIN=$1 SPIN_T0=$SECONDS SPIN_W=$(($(cols) - 14))
-    if [ "$SPIN_W" -lt 20 ]; then SPIN_W=20; fi
-    printf '\e[?25l'
-    spin_draw
-  else
-    echo "   $1"
-  fi
-}
-spin_draw() {
-  local e=$((SECONDS - SPIN_T0))
-  SPIN_N=$(((SPIN_N + 1) % ${#FRAMES[@]}))
-  printf '\r\e[K   %s%s%s %s %s%d:%02d%s' "$C_ACC" "${FRAMES[SPIN_N]}" "$C_OFF" "${SPIN:0:SPIN_W}" "$C_DIM" $((e / 60)) $((e % 60)) "$C_OFF"
-}
-spin_stop() { if [ -n "$SPIN" ]; then printf '\r\e[K\e[?25h'; SPIN=""; fi; }
-nap() { sleep 0.1; }   # not read -t: bash 5.2 can crash when Ctrl-C lands in one
-pause() {   # pause <seconds>: sleep, keeping the spinner turning
-  local i
-  if [ -z "$SPIN" ]; then sleep "$1"; return 0; fi
-  for ((i = 0; i < $1 * 10; i++)); do spin_draw; nap; done
-}
-spin_wait() {   # spin_wait <pid>: keep the spinner turning until <pid> exits; its exit status
-  local rc=0
-  POLL_PID=$1
-  while kill -0 "$1" 2>/dev/null; do spin_draw; nap; done
-  wait "$1" || rc=$?
-  POLL_PID=""
-  return "$rc"
-}
-poll() {   # poll <command...>: run a check quietly, keeping the spinner turning
-  if [ -z "$SPIN" ]; then "$@" >/dev/null 2>&1; return; fi
-  "$@" >/dev/null 2>&1 &
-  spin_wait $!
-}
-
-# wait_for <seconds> <command...>: retry every ${EVERY:-5} s; non-zero on timeout
-wait_for() {
-  local end=$((SECONDS + $1))
-  shift
-  until poll "$@"; do
-    [ "$SECONDS" -lt "$end" ] || return 1
-    pause "${EVERY:-5}"
-  done
-}
-upto() { if [ $(($1 % 3600)) = 0 ]; then echo "$(($1 / 3600)) h"; else echo "$(($1 / 60)) min"; fi; }
-# try_until <seconds> <what> <command...>: wait_for under a spinner; non-zero on timeout
-try_until() {
-  local limit=$1 what=$2 t0=$SECONDS
-  shift 2
-  spin_begin "waiting for $what (up to $(upto "$limit"))"
-  if wait_for "$limit" "$@"; then
-    spin_stop
-    finished "waited $(dur $((SECONDS - t0))) for $what"
-  else
-    spin_stop
-    return 1
-  fi
-}
-# wait_until <seconds> <what> <command...>: try_until, and stop on timeout
-wait_until() { try_until "$@" || die "timed out waiting for $2"; }
-spin_cmd() {   # spin_cmd <title> <command...>: a slow command; its output goes to the log, and to the screen if it fails
-  local title=$1 t0=$SECONDS out rc=0
-  shift
-  out=$(mktemp)
-  spin_begin "$title"
-  if [ -n "$SPIN" ]; then
-    "$@" >"$out" 2>&1 &
-    spin_wait $! || rc=$?
-  else
-    "$@" >"$out" 2>&1 || rc=$?
-  fi
-  spin_stop
-  if [ "$rc" = 0 ]; then
-    logln "$(cat "$out")"
-    finished "$title: $(dur $((SECONDS - t0)))"
-  else
-    show <"$out"
-  fi
-  rm -f "$out"
-  return "$rc"
-}
-
-fresh_screen() {   # scroll what the screen shows into the scrollback, then write from the top
-  local rows
-  rows=$(stty size </dev/tty 2>/dev/null) || rows=""
-  rows=${rows%% *}
-  if ! [[ $rows =~ ^[0-9]+$ ]] || [ "$rows" -lt 1 ]; then rows=50; fi
-  printf '%*s' "$rows" '' | tr ' ' '\n'
-  printf '\e[H'
 }
 
 STAGES=(Pre-flight Outage Deploy Failover Rejoin Summary)
@@ -325,6 +93,7 @@ stage() {   # stage <n>: where the run stands; with gum, each stage after the fi
   logln "" "#### Stage $1/${#STAGES[@]}: ${STAGES[$1 - 1]}"
   if [ "$UI" != gum ]; then
     printf '\n#### Stage %d/%d: %s\n' "$1" "${#STAGES[@]}" "${STAGES[$1 - 1]}"
+    explain "$(stage_text "$1")"
     return 0
   fi
   if [ "$1" -gt 1 ]; then fresh_screen; fi
@@ -347,40 +116,35 @@ stage() {   # stage <n>: where the run stands; with gum, each stage after the fi
     printf '\n   %s%s ended with:%s\n' "$C_DIM" "${STAGES[$1 - 2]}" "$C_OFF"
     while read -r i s; do printf '   %s◆ %s %s%s\n' "$C_DIM" "${i:11:8}" "$s" "$C_OFF"; done <<<"$recap"
   fi
+  echo
+  explain "$(stage_text "$1")"
+}
+stage_text() {   # stage_text <n>: what the stage does and why
+  local a=$ACTIVE p=$PASSIVE
+  case $1 in
+    1) echo "Read-only checks that the lab is in the posture the settings file names, so the outage tests DR and not a broken lab: $a active and taking backups, $p passive and restoring them continuously, $MANAGED managed by $a with a valid import token, a recent backup, and both demo apps answering. Nothing on the clusters changes here." ;;
+    2) echo "The probes start: every 10 s they record both apps' HTTP status, which hub $MANAGED reports to, and which revision each app serves, until the summary. Then an etcd backup of $a (a safety net for the lab, not part of DR), a wait for a moment between the :00/:30 backup slots, and your power cut. The script carries on when $a's API stops answering. The apps on $MANAGED should not notice." ;;
+    3) echo "With no hub alive, the script commits a new REVISION of both apps to $BRANCH. The pull app is delivered by $MANAGED's own Argo CD straight from git, so it updates with no hub at all, within one Argo poll (up to about 6.5 min). The push app is delivered by a hub's Argo CD, so it stays on the old revision until $p is active: that wait is the push model's delivery RTO." ;;
+    4)
+      if [ "$GIT" = 1 ]; then
+        echo "First the death gate: $a must stay unreachable, because activating $p while $a lives would leave two hubs claiming $MANAGED. Then the failover goes through git (Automated Pull Path). PR-A puts an activation restore in dr/$p; when you merge it, $p's own Argo CD applies it, $p restores the newest backup and re-imports $MANAGED. Once the claim is verified, PR-B makes $p fully active, which starts its backups. The script writes both PRs and waits for your merges."
+      else
+        echo "First the death gate: $a must stay unreachable, because activating $p while $a lives would leave two hubs claiming $MANAGED. Then the script activates $p as the Manual Pull Path does: it pauses $p's dr-role automation, replaces the continuous passive restore with the activation restore, and watches $p re-import $MANAGED. It then checks the addons, the import token and push delivery, and starts backups on $p, which makes $p the active hub."
+      fi
+      ;;
+    5)
+      if [ "$GIT" = 1 ]; then
+        echo "$a comes back as the new passive hub instead of taking its role back. The demote PR goes first, so that $a boots into the passive role. Once you power it on, the script removes its old backup schedule before it can write to the shared bucket, waits until $a's view of $MANAGED goes stale (deleting the claim earlier would uninstall $MANAGED's agent), deletes that stale claim and checks the passive restore. At the end the settings file swaps ACTIVE and PASSIVE for the next run."
+      else
+        echo "$a comes back as the new passive hub instead of taking its role back. Once you power it on, the script pauses its dr-role automation, removes its old backup schedule before it can write to the shared bucket, waits until $a's view of $MANAGED goes stale (deleting the claim earlier would uninstall $MANAGED's agent), deletes that stale claim and starts the passive restore. Then it commits the new roles to dr/ and turns automation back on. At the end the settings file swaps ACTIVE and PASSIVE for the next run."
+      fi
+      ;;
+    6) echo "The probes stop. The summary shows everything they recorded: each app's availability before and after the power cut, when $MANAGED switched hubs, when each app served each revision, and how long each step took." ;;
+  esac
 }
 
 # --- cluster checks ------------------------------------------------------------
 
-server() { oc config view --minify --context "$1" -o jsonpath='{.clusters[0].cluster.server}'; }
-api_rc() { local rc=0; curl -sk --max-time 5 -o /dev/null "$(server "$1")/version" || rc=$?; echo "$rc"; }
-# alive: any HTTP answer. dead: connection refused or timed out. A name that
-# does not resolve is neither: that is DNS trouble, not proof of death.
-alive() { [ "$(api_rc "$1")" = 0 ]; }
-dead() { case $(api_rc "$1") in 7 | 28) return 0 ;; *) return 1 ;; esac; }
-
-# none / some <context> <oc get args...>: the query worked and found nothing / something
-none() { local out; out=$(oc --context "$1" get "${@:2}" --ignore-not-found -o name 2>/dev/null) && [ -z "$out" ]; }
-some() { local out; out=$(oc --context "$1" get "${@:2}" --ignore-not-found -o name 2>/dev/null) && [ -n "$out" ]; }
-phase() { oc --context "$1" get "$2" "$3" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || true; }
-restore_finished() { [[ $(phase "$1" "$RESTORE" "$2") == Finished* ]]; }
-restore_enabled() { [ "$(phase "$1" "$RESTORE" "$2")" = Enabled ]; }
-schedule_enabled() { [ "$(phase "$1" "$BSCHED" schedule-acm)" = Enabled ]; }
-mc_available() {   # mc_available <context> True|Unknown
-  [ "$(oc --context "$1" get managedcluster "$MANAGED" \
-    -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)" = "$2" ]
-}
-addons_available() {
-  oc --context "$1" get managedclusteraddon -n "$MANAGED" -o json 2>/dev/null | jq -e '
-    [.items[] | ((.status.conditions // []) | map(select(.type == "Available")) | .[0].status) == "True"]
-    | length > 0 and all' >/dev/null
-}
-# backup_set_after <context> <time>: one backup of each kind started at or after <time> has Completed
-backup_set_after() {
-  oc --context "$1" get "$VBACKUP" -n "$NS" -o json 2>/dev/null | jq -e --arg t "$2" '
-    ["acm-credentials-schedule-", "acm-managed-clusters-schedule-", "acm-resources-schedule-"] as $kinds
-    | [.items[] | select(.status.phase == "Completed" and (.status.startTimestamp // "") >= $t) | .metadata.name] as $done
-    | all($kinds[]; . as $k | any($done[]; startswith($k)))' >/dev/null
-}
 backup_running() { oc --context "$1" get "$VBACKUP" -n "$NS" -o jsonpath='{.items[*].status.phase}' 2>/dev/null | grep -qwE 'New|InProgress'; }
 recent_backups() {
   oc --context "$1" get "$VBACKUP" -n "$NS" --sort-by=.status.startTimestamp \
@@ -392,15 +156,7 @@ revision() {   # the REVISION an app's route serves, or ? when it does not answe
   echo "${rev:-?}"
 }
 serves() { [ "$(revision "$1")" = "$2" ]; }
-http_ok() { [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1")" = 200 ]; }
-app_state() {   # app_state <context> <Application name>: "Synced Healthy" when all is well
-  oc --context "$1" get "$APP" -A --field-selector "metadata.name=$2" \
-    -o jsonpath='{.items[0].status.sync.status} {.items[0].status.health.status}' 2>/dev/null || true
-}
 
-has_dr_role() { some "$1" "$APP" dr-role -n "$GNS"; }
-dr_role_state() { oc --context "$1" get "$APP" dr-role -n "$GNS" -o jsonpath='{.status.sync.status} {.status.health.status}' 2>/dev/null || true; }
-dr_role_synced() { [ "$(dr_role_state "$1")" = "Synced Healthy" ]; }
 dr_role_automated() { [ -n "$(oc --context "$1" get "$APP" dr-role -n "$GNS" -o jsonpath='{.spec.syncPolicy.automated}' 2>/dev/null)" ]; }
 dr_role_has() {   # dr-role on <context> compares against <rev> or a later commit
   local cur; cur=$(oc --context "$1" get "$APP" dr-role -n "$GNS" -o jsonpath='{.status.sync.revision}' 2>/dev/null) || return 1
@@ -413,26 +169,12 @@ resume_dr_role() {
 }
 refresh_dr_role() { oc --context "$1" annotate "$APP" dr-role -n "$GNS" "argocd.argoproj.io/refresh=$2" --overwrite >/dev/null; }
 
-msa_token() {
-  oc --context "$1" get managedserviceaccount auto-import-account -n "$MANAGED" \
-    -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status} {.status.expirationTimestamp}' 2>/dev/null || true
-}
-msa_fresh() { local t; t=$(msa_token "$1"); [ "${t%% *}" = True ] && [[ ${t#* } > $(date -u -d '+24 hours' +%FT%TZ) ]]; }
 token_adopted() {
   [ "$(msa_token "$1" | cut -d' ' -f1)" = True ] &&
     [ "$(oc --context "$1" get secret auto-import-account -n "$MANAGED" \
       -o jsonpath='{.metadata.ownerReferences[0].kind}' 2>/dev/null)" = ManagedServiceAccount ]
 }
 
-nodes_ready() {
-  local out; out=$(oc --context "$1" get nodes --no-headers 2>/dev/null) && [ -n "$out" ] && [ -z "$(awk '$2 !~ /^Ready/' <<<"$out")" ]
-}
-pending_csr_names() {
-  oc --context "$1" get csr -o go-template='{{range .items}}{{if not .status}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null || true
-}
-pending_csrs() { [ -n "$(pending_csr_names "$1")" ]; }
-approve_csrs() { pending_csr_names "$1" | xargs -r oc --context "$1" adm certificate approve; }
-settled() { nodes_ready "$1" && not pending_csrs "$1"; }
 ready_up() {   # wait for <context>'s API, then approve certificates until its nodes are Ready (G.1's power-on note)
   local c=$1 t0 end=$((SECONDS + 1800))
   alive "$c" || wait_until 7200 "$c's API to answer" alive "$c"
@@ -463,7 +205,6 @@ new_stamp() {   # new_stamp <branch prefix>: a UTC minute stamp no branch of tha
   done
   echo "$s"
 }
-repo_url() { git remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##'; }
 uri() { jq -rn --arg s "$1" '$s | @uri'; }
 open_pr() {   # open_pr <branch> <title> <body> [line...]: a PR for you to review and merge
   local url
@@ -503,16 +244,20 @@ cmd_check() {
   local a=${1:-$ACTIVE} p=${2:-$PASSIVE} c out newest
   BAD=0
   say "Clusters"
+  explain "All three clusters must be up and settled: an API that answers, nodes Ready and no certificate requests waiting (a cluster that was powered off for a while usually has some)."
+  help_at docs/build.md#clusters
   for c in "$a" "$p" "$MANAGED"; do
     expect "$c API answers" "$c API does not answer" alive "$c"
   done
-  if [ "$BAD" = 1 ]; then verdict bad "PRE-FLIGHT RED: power the clusters on, then run hack/dr.sh nodes"; return 1; fi
+  if [ "$BAD" = 1 ]; then HELP=""; verdict bad "PRE-FLIGHT RED: power the clusters on, then run hack/dr.sh nodes"; return 1; fi
   for c in "$a" "$p" "$MANAGED"; do
     expect "$c nodes Ready" "$c has nodes not Ready (hack/dr.sh nodes $c)" nodes_ready "$c"
     expect "$c has no pending certificate requests" "$c has pending certificate requests (hack/dr.sh nodes $c)" not pending_csrs "$c"
   done
 
   say "Posture: $a active, $p passive (0.1)"
+  explain "Exactly one hub may be active. $a must be taking backups and managing $MANAGED; $p must be restoring those backups continuously, with no backup schedule of its own and no claim on $MANAGED."
+  help_at docs/runbooks/dr-failover-pull-manual/README.md#01-posture-sanity
   expect "$a schedule-acm Enabled" "$a schedule-acm is '$(phase "$a" "$BSCHED" schedule-acm)'" schedule_enabled "$a"
   expect "$a has no passive restore" "$a has a restore-acm-passive-sync" none "$a" "$RESTORE" restore-acm-passive-sync -n "$NS"
   expect "$MANAGED Available on $a" "$MANAGED not Available on $a" mc_available "$a" True
@@ -526,10 +271,14 @@ cmd_check() {
   fi
 
   say "MSA token chain (0.2)"
+  explain "The new hub re-imports $MANAGED with the auto-import token it restores from the backups. The token must be valid and rotating, or the failover stalls in Pending Import."
+  help_at docs/runbooks/dr-failover-pull-manual/README.md#02-msa-token-chain--the-load-bearing-check
   expect "auto-import-account on $a: $(msa_token "$a")" \
     "auto-import-account on $a: '$(msa_token "$a")' (want True and an expiry more than a day out; 0.2)" msa_fresh "$a"
 
   say "Backups (0.3)"
+  explain "A failover restores the newest backup set, so one must have completed recently (sets run at :00 and :30)."
+  help_at docs/runbooks/dr-failover-pull-manual/README.md#03-a-backup-newer-than-every-fix
   out=$(oc --context "$a" get "$VBACKUP" -n "$NS" -o json 2>/dev/null | jq -r '
     [.items[] | select(.metadata.name | startswith("acm-credentials-schedule-"))]
     | sort_by(.status.startTimestamp // "") | last // {} | "\(.status.phase // "none") \(.status.startTimestamp // "-")"' || true)
@@ -546,11 +295,14 @@ cmd_check() {
   fi
 
   say "Passive hub readiness (0.4)"
+  explain "Things that would only break at activation: the addon namespace, a stray Route CRD, $p's Argo CD, and both hubs' access to the backup bucket."
+  help_at docs/runbooks/dr-failover-pull-manual/README.md#04-remaining-static-checks
   expect "$p has namespace open-cluster-management-global-set" "$p lacks namespace open-cluster-management-global-set" \
     some "$p" ns open-cluster-management-global-set
   expect "$p has no stray Route CRD" "$p has a stray routes.route.openshift.io CRD" none "$p" crd routes.route.openshift.io
   out=$(oc --context "$p" get pods -n "$GNS" --no-headers 2>/dev/null | awk '$3 != "Running" && $3 != "Completed" {print $1, $3}' || true)
   if [ -z "$out" ]; then ok "$p Argo CD pods Running"; else red "$p Argo CD pods not Running: $out"; fi
+  help_at docs/build.md#3-hubs-backup-storage
   for c in "$a" "$p"; do
     out=$(oc --context "$c" get backupstoragelocation -n "$NS" -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
     if [ "$out" = Available ]; then ok "$c BSL Available"; else red "$c BSL is '$out'"; fi
@@ -558,6 +310,8 @@ cmd_check() {
 
   if has_dr_role "$a" || has_dr_role "$p"; then
     say "Git-driven roles (Automated Pull Path P.2 and pre-flight)"
+    explain "Each hub's own Argo CD (the dr-role app) applies its role from dr/ in git. Both must be in sync with automation on, and dr-role must never be in a backup, or a restore would hand the other hub the wrong role."
+    help_at docs/runbooks/dr-failover-pull-gitops/README.md#p1-bootstrap-each-hubs-dr-role-application
     for c in "$a" "$p"; do
       expect "$c dr-role Synced Healthy" "$c dr-role is '$(dr_role_state "$c")'" dr_role_synced "$c"
       expect "$c dr-role automation on" "$c dr-role automation is off (finish H.1)" dr_role_automated "$c"
@@ -565,6 +319,7 @@ cmd_check() {
     newest=$(oc --context "$a" get "$VBACKUP" -n "$NS" -o json 2>/dev/null | jq -r '
       [.items[] | select((.metadata.name | startswith("acm-resources-schedule-")) and .status.phase == "Completed")]
       | sort_by(.status.startTimestamp) | last | .metadata.name // ""' || true)
+    help_at docs/runbooks/dr-failover-pull-gitops/README.md#p2-confirm-the-backup-exclusion-works
     out=$(oc --context "$a" -n "$NS" exec deploy/velero -- /velero backup describe "$newest" --details 2>/dev/null |
       awk '/v1alpha1\/Application:/ {f = 1; next} f && /^ *- / {print $2; next} f {exit}' || true)
     if [ -z "$out" ]; then
@@ -577,19 +332,25 @@ cmd_check() {
   fi
 
   say "Workload"
+  explain "The two demo apps on $MANAGED: the pull app, delivered by $MANAGED's own Argo CD, and the push app, delivered by $a's Argo CD. Both must answer and be in sync before the outage, or the probes prove nothing."
+  help_at docs/build.md#5-active-hub-gitops-wiring-and-the-demo-apps
   expect "pull app answers 200 (serves $(revision "$APP_URL"))" "pull app does not answer 200 (tried for 30 s)" wait_for 30 http_ok "$APP_URL"
+  help_at docs/build.md#build-time-gotchas
   out=$(app_state "$MANAGED" "hello-failover-$MANAGED")
   if [ "$out" = "Synced Healthy" ]; then ok "pull app Synced Healthy on $MANAGED"; else red "pull app on $MANAGED is '$out'"; fi
   if [ -n "$PUSH_APP_URL" ]; then
+    help_at docs/build.md#5-active-hub-gitops-wiring-and-the-demo-apps
     expect "push app answers 200 (serves $(revision "$PUSH_APP_URL"))" "push app does not answer 200 (tried for 30 s)" wait_for 30 http_ok "$PUSH_APP_URL"
+    help_at docs/build.md#build-time-gotchas
     out=$(app_state "$a" "hello-failover-push-$MANAGED")
     if [ "$out" = "Synced Healthy" ]; then ok "push app Synced Healthy on $a"; else red "push app on $a is '$out'"; fi
   fi
 
+  HELP=""
   if [ "$BAD" = 0 ]; then
     verdict ok "PRE-FLIGHT GREEN: $a active, $p passive"
   else
-    verdict bad "PRE-FLIGHT RED: fix the RED lines first"
+    verdict bad "PRE-FLIGHT RED: fix the RED lines first; each links to the section that explains it"
     return 1
   fi
 }
@@ -652,27 +413,36 @@ probe_stop() {
 
 # the time of the last event matching <regex>, or nothing
 ev() { awk -v re="$1" '$0 ~ re {t = $1} END {print t}' "$LOGDIR/events.log" 2>/dev/null || true; }
-span() {   # span <label> <from event> <to event>: a timing row when both happened
-  local a b
-  a=$(ev "$2")
-  b=$(ev "$3")
-  if [ -n "$a" ] && [ -n "$b" ]; then
-    printf '%s\t%s\n' "$1" "$(dur $(($(date -u -d "$b" +%s) - $(date -u -d "$a" +%s))))"
+span() { span_t "$1" "$(ev "$2")" "$(ev "$3")"; }   # span <label> <from event> <to event>
+span_t() {   # span_t <label> <from time> <to time>: a timing row when both are known
+  if [ -n "$2" ] && [ -n "$3" ]; then
+    printf '%s\t%s\n' "$1" "$(dur $(($(date -u -d "$3" +%s) - $(date -u -d "$2" +%s))))"
   fi
 }
+first_served() {   # first_served <pull|push> <n>: when revisions.log first shows that app serving vN
+  awk -v r="$1=v$2" '{for (i = 2; i <= NF; i++) if ($i == r) {print $1; exit}}' "$LOGDIR/revisions.log" 2>/dev/null || true
+}
+push_back() {   # when the push app first served the mid-outage revision: E' or the revision probe, whichever saw it first
+  local e r np
+  e=$(ev " E' push delivery back")
+  [ -s "$LOGDIR/deploy.rev" ] && np=$(cut -d' ' -f2 "$LOGDIR/deploy.rev") && r=$(first_served push "$np")
+  if [ -z "$e" ] || { [ -n "${r:-}" ] && [[ $r < $e ]]; }; then e=${r:-}; fi
+  echo "$e"
+}
 timings() {
-  local act=" D.2 activation applied" from=Activation
+  local act=" D.2 activation applied" from=Activation pb
+  pb=$(push_back)
   if [ -n "$(ev " D'.2 PR-A merged")" ]; then act=" D'.2 PR-A merged" from="PR-A merge"; fi
   printf 'Measure\tTime\n'
   span "Hub dead to $MANAGED claimed on the new hub" " B.1 .* API dead" " D.3 claim landed"
   span "Pull deploy: pushed to served, no hub" " C deploy pushed" " C pull app serves"
-  span "Push deploy: pushed to served (push delivery RTO)" " C deploy pushed" " E' push delivery back"
+  span_t "Push deploy: pushed to served (push delivery RTO)" "$(ev " C deploy pushed")" "$pb"
   span "Death gate to activation" " B .*death gate passed" " D.2 activation applied"
   span "PR-A: pushed to merged" " D'.1 PR-A branch" " D'.2 PR-A merged"
   span "$from to claim (D.3)" "$act" " D.3 claim landed"
   span "$from to all addons Available (E.1)" "$act" " E.1 all addons Available"
   span "$from to the first backup set (F.1)" "$act" " F.1 first backup set Completed"
-  span "$from to push delivery back (E')" "$act" " E' push delivery back"
+  span_t "$from to push delivery back (E')" "$(ev "$act")" "$pb"
   span "PR-B: pushed to merged" " F' PR-B branch" " F' PR-B merged"
   span "Demote PR: pushed to merged" " G'.1 demote branch" " G'.1 demote PR merged"
   span "Old hub back to its lease running out (G.1)" " G .* API answers" " G.1 .* Unknown"
@@ -749,21 +519,25 @@ cmd_outage() {
   local a=$ACTIVE node
   alive "$a" || die "$a's API does not answer: is it already down?"
   say "B.0: lab safety net, an etcd backup of $a"
+  explain "A backup of $a's control plane, kept on its node. It is not part of DR: it is there in case a lab hub does not come back cleanly from a hard power-off."
   node=$(oc --context "$a" get nodes -l node-role.kubernetes.io/master -o jsonpath='{.items[0].metadata.name}')
   spin_cmd "etcd backup on $node" \
     oc --context "$a" debug "node/$node" -- chroot /host /usr/local/bin/cluster-backup.sh /home/core/assets/backup ||
     die "the etcd backup on $node failed: its output is above"
   event "B.0 etcd backup saved on $a ($node:/home/core/assets/backup)"
+  explain "Backups run at :00 and :30. A power cut in the middle of a backup set would leave a partial set in the bucket, so the script waits until 5 to 26 minutes past a slot, with no backup running."
   wait_until 1800 "a cut time clear of the :00/:30 backup slots, with no backup in progress" slot_clear "$a"
   recent_backups "$a"
 
   say "B.1: the outage"
+  explain "A hard power-off is the realistic disaster: no clean shutdown and no chance to hand anything over. From now on $a is the failed hub."
   your_turn "cut $a's power now" \
     "Hold the power button about 5 s (a short press is a graceful shutdown), pull the plug, or use a hard power-off." \
     "The script carries on when $a's API stops answering."
   wait_until 1800 "$a's API to stop answering" dead "$a"
   event "B.1 $a API dead (power cut by hand)"
   say "B.2: the workload does not care"
+  explain "$MANAGED runs its workloads by itself; a hub only manages it. The probes should keep answering 200 the whole time."
   spin_begin "letting the probes sample the outage"
   pause 20
   spin_stop
@@ -780,6 +554,7 @@ cmd_deploy() {
   n=$(($(rev_of "$f") + 1))
   np=$(($(rev_of "$fp") + 1))
   say "C: push pull v$n and push v$np with $ACTIVE down"
+  explain "One commit changes the REVISION text both apps serve. The script waits for the pull app to serve v$n, which proves a deploy needs no hub; the push app is checked again after the failover (E')."
   sed -i "s/REVISION v[0-9]*/REVISION v$n/" "$f"
   sed -i "s/REVISION v[0-9]*/REVISION v$np/" "$fp"
   quiet git add "$f" "$fp"
@@ -820,21 +595,25 @@ activation_restore() {   # wait for <name> to finish; one retry for the git-driv
 claim_and_verify() {   # D.3, E.1, E.2, E.3 on the new hub
   local p=$PASSIVE n
   say "D.3: the claim"
+  explain "$p uses the restored import token to re-import $MANAGED: the agent on $MANAGED switches to $p, and $MANAGED reads Available there."
   wait_until 300 "the restored ManagedCluster $MANAGED on $p" some "$p" managedcluster "$MANAGED"
   EVERY=1 wait_until 900 "$MANAGED to be Available on $p" mc_available "$p" True
   event "D.3 claim landed: $MANAGED Available on $p"
   show oc --context "$p" get managedclusters
   say "E.1: addons"
+  explain "The addons are $MANAGED's agents for applications, policies, search and the cluster proxy. Push delivery needs the cluster proxy and the application-manager account, so they must all re-register with $p."
   wait_until 900 "every addon on $MANAGED to be Available" addons_available "$p"
   event "E.1 all addons Available"
   show oc --context "$p" get managedclusteraddon -n "$MANAGED"
   say "E.2: re-home evidence"
+  explain "The hub-pointer probe shows when $MANAGED's agent switched hubs; the availability probe shows whether the pull app noticed."
   if [ -s "$LOGDIR/hub-pointer.log" ]; then
     awk '{s = $2 == "" ? "(read failed)" : $2} s != last {print $1, s; last = s}' "$LOGDIR/hub-pointer.log" | tail -n 3 | show
   fi
   n=$(grep -c -v ' 200$' "$LOGDIR/probe.log" 2>/dev/null || true)
   if [ "${n:-0}" = 0 ]; then ok "the pull app answered 200 at every availability sample so far"; else note "$n availability samples were not 200"; fi
   say "E.3: the restored MSA secret"
+  explain "The restored import token has to keep rotating on $p, or the next failover fails in Pending Import. ACM 2.17.3 adopts and rotates it; older versions froze it, and then the script deletes it so a fresh one is minted."
   if try_until 120 "the controller to adopt the restored token" token_adopted "$p"; then
     event "E.3 restored token adopted and rotated by the controller ($(msa_token "$p"))"
   else
@@ -853,18 +632,21 @@ promote_checks() {   # F.1's gate and F.2
   event "F.1 first backup set Completed on $p"
   recent_backups "$p"
   say "F.2: GitOps wiring"
+  explain "The GitOpsCluster, Placements and ApplicationSets came back with the restore, so $p's Argo CD now delivers the push app."
   show oc --context "$p" get gitopscluster,placement,applicationset -n "$GNS"
   show oc --context "$p" get "$APP" -n "$GNS"
 }
 
 push_resurrection() {   # E': the push app serving the mid-outage revision is push delivery back
-  local np
+  local np t
   if [ -z "$PUSH_APP_URL" ] || [ ! -s "$LOGDIR/deploy.rev" ]; then return 0; fi
   np=$(cut -d' ' -f2 "$LOGDIR/deploy.rev")
   say "E': push delivery"
+  explain "The push app updates only when the new hub's Argo CD pushes to $MANAGED. The time from the deploy to the new revision is the push model's delivery RTO."
   show oc --context "$PASSIVE" get secret -n "$GNS" -l apps.open-cluster-management.io/acm-cluster=true
   if try_until 1200 "the push app to serve v$np" serves "$PUSH_APP_URL" "v$np"; then
-    event "E' push delivery back: push app serves v$np"
+    t=$(first_served push "$np")
+    event "E' push delivery back: push app serves v$np${t:+ (the revision probe saw it first at ${t:11:8})}"
   else
     event "E' push app still not serving v$np after 20 min"
     note "see the Manual Push Path E' failure modes"
@@ -874,6 +656,7 @@ push_resurrection() {   # E': the push app serving the mid-outage revision is pu
 failover_manual() {
   local p=$PASSIVE
   say "D: activate $p by hand"
+  explain "D.0 pauses $p's dr-role app, which would otherwise put the passive restore straight back. D.1 deletes the continuous passive restore. D.2 applies restore-acm-activate, which restores the managed-cluster data from the newest backup, including $MANAGED's import token."
   confirm "Activate $p now?"
   if has_dr_role "$p"; then
     suspend_dr_role "$p"
@@ -890,6 +673,7 @@ failover_manual() {
   activation_restore restore-acm-activate
   claim_and_verify
   say "F.1: start backups on $p"
+  explain "$p becomes the only hub writing to the shared bucket. Its first full backup set runs right away, without waiting for a slot."
   quiet oc --context "$p" apply -f manifests/55-backupschedule.yaml
   event "F.1 BackupSchedule applied on $p"
   promote_checks
@@ -905,6 +689,7 @@ failover_git() {
   echo "$stamp" >"$LOGDIR/stamp"
 
   say "D'.1: the activation PR (PR-A)"
+  explain "PR-A changes dr/$p/kustomization.yaml: the passive role makes way for a time-stamped activation restore. Nothing happens on the clusters until you merge it."
   quiet git checkout -q -b "failover-$stamp"
   cp dr/templates/restore-activate.template.yaml "dr/$p/restore-activate-$stamp.yaml"
   sed -i "s/<UTCSTAMP>/$stamp/" "dr/$p/restore-activate-$stamp.yaml"
@@ -916,6 +701,7 @@ failover_git() {
   event "D'.1 PR-A branch failover-$stamp pushed"
   quiet git checkout -q "$BRANCH"
   say "D'.2: review = the death gate, merge = the decision"
+  explain "Reviewing PR-A is where a person confirms $ACTIVE is really dead. Merging it is the failover decision."
   open_pr "failover-$stamp" "FAILOVER: activate $p" \
     "Activation only (PR-A). Review gate: $ACTIVE is dead; hack/dr.sh found its API refusing connections at $(now). Merging is the failover decision." \
     "The review is the death gate: confirm $ACTIVE is dead with the check below the link." \
@@ -926,11 +712,13 @@ failover_git() {
   if not dead "$ACTIVE"; then note "$ACTIVE no longer reads dead: if it is back, you now have two live hubs (B.1 failure)"; fi
 
   say "D'.3: $p executes"
+  explain "$p's own Argo CD syncs the merge: it prunes the passive restore and creates the activation restore. The backup operator often sees the new restore before the old one is gone and ignores it; the script then deletes it, and Argo creates it again (the D'.3 race)."
   refresh_dr_role "$p" normal
   activation_restore "restore-acm-activate-$stamp"
   claim_and_verify
 
   say "F': the promotion PR (PR-B)"
+  explain "PR-B adds the active role to dr/$p, which starts $p's backups. It comes only after the claim is verified, so a failed activation can never overwrite the bucket's newest backup with an empty fleet."
   git_ready
   quiet git checkout -q -b "promote-$stamp"
   sed -i "s#^  - restore-activate-$stamp.yaml\$#  - ../roles/active\n  - restore-activate-$stamp.yaml#" "dr/$p/kustomization.yaml"
@@ -953,6 +741,7 @@ $(oc --context "$p" get managedclusters -o custom-columns='NAME:.metadata.name,A
 
 cmd_failover() {
   say "B: the death gate"
+  explain "Activating $PASSIVE while $ACTIVE still runs would give $MANAGED two hubs. The gate needs $ACTIVE's API to refuse connections or time out twice, 10 s apart, while $PASSIVE and $MANAGED both answer, so a network problem on this machine is not mistaken for a dead hub."
   alive "$PASSIVE" || die "$PASSIVE does not answer either"
   alive "$MANAGED" || die "$MANAGED does not answer: the network path is in doubt, so $ACTIVE's silence proves nothing"
   if alive "$ACTIVE"; then
@@ -1003,6 +792,7 @@ demote_git() {   # G'.1: the demote PR, mergeable while the hub is still down
   if [ "$(overlay "$a")" = ../roles/passive ]; then note "dr/$a already lists ../roles/passive"; return 0; fi
   stamp=$(new_stamp demote)
   say "G'.1: the demote PR"
+  explain "The demote PR makes dr/$a passive. Merge it while $a is still down: it then boots into the passive role, and its Argo CD removes its backup schedule."
   quiet git checkout -q -b "demote-$stamp"
   sed -i 's#^  - ../roles/active$#  - ../roles/passive#; /^  - restore-activate-.*\.yaml$/d' "dr/$a/kustomization.yaml"
   quiet git rm -q --ignore-unmatch "dr/$a"/restore-activate-*.yaml
@@ -1023,6 +813,7 @@ demote_git() {   # G'.1: the demote PR, mergeable while the hub is still down
 realign_git() {   # H.1, after a manual failover
   local a=$ACTIVE p=$PASSIVE rev c
   say "H.1: re-align dr/ with the new roles, then re-enable automation"
+  explain "The manual path changed the roles by hand, so dr/ in git still describes the old ones. The script commits the new roles to $BRANCH, waits until both hubs' Argo CD sees that commit, and turns automation back on."
   git_ready
   sed -i 's#^  - ../roles/active$#  - ../roles/passive#; /^  - restore-activate-.*\.yaml$/d' "dr/$a/kustomization.yaml"
   quiet git rm -q --ignore-unmatch "dr/$a"/restore-activate-*.yaml
@@ -1065,6 +856,7 @@ cmd_rejoin() {
   fi
 
   say "G: $a comes back"
+  explain "$a comes back as the new passive hub. After a long power-off its nodes usually wait for certificate approvals; the script approves them. Its old backup schedule is removed first thing, before it can write to the bucket that $p now owns."
   your_turn "power $a back on now" \
     "The script carries on when its API answers: it approves certificate requests until the nodes are Ready, then makes $a passive."
   wait_until 7200 "$a's API to answer" alive "$a"
@@ -1076,6 +868,7 @@ cmd_rejoin() {
 
   if [ "$GIT" = 1 ]; then
     say "G'.1: $a boots into the demote"
+    explain "$a's Argo CD syncs the merged demote: the passive restore replaces its old role."
     refresh_dr_role "$a" hard
     wait_until 900 "dr-role on $a to compare against ${rev:0:7}" dr_role_has "$a" "$rev"
     if [ "$early" = 1 ]; then resume_dr_role "$a"; event "G'.1 dr-role automation back on $a"; fi
@@ -1085,21 +878,25 @@ cmd_rejoin() {
   fi
 
   if some "$a" managedcluster "$MANAGED"; then
-    say "G.1: wait out the lease (deleting the claim while it reads True would uninstall $MANAGED's agent)"
+    say "G.1: wait out the lease"
+    explain "$a still lists $MANAGED as its own until the agent's lease, last renewed before the outage, runs out (usually 2 to 4 minutes after boot). Deleting the claim while it still reads True would uninstall $MANAGED's agent and its hub-delivered workloads."
     wait_until 1800 "$MANAGED to read Available=Unknown on $a" mc_available "$a" Unknown
     event "G.1 $MANAGED Unknown on $a"
     say "G.3: drop the stale claim"
+    explain "Now that it reads Unknown, deleting $a's stale ManagedCluster is safe: $MANAGED keeps reporting to $p."
     spin_cmd "deleting the stale ManagedCluster $MANAGED on $a" oc --context "$a" delete managedcluster "$MANAGED" --timeout=5m ||
       die "could not delete the stale ManagedCluster $MANAGED on $a (Manual Pull Path G.3)"
     event "G.3 stale claim on $a deleted"
   fi
 
   say "G.4: $a as passive"
+  explain "The continuous passive restore makes $a follow $p's backups, ready for the next failover."
   if [ "$GIT" = 0 ]; then quiet oc --context "$a" apply -f manifests/56-restore-passive.yaml; fi
   wait_until 900 "restore-acm-passive-sync Enabled on $a" restore_enabled "$a" restore-acm-passive-sync
   event "G.4 $a passive sync Enabled"
   if [ "$GIT" = 0 ]; then
     say "G.5: the stale activation restores"
+    explain "Restores are one-shot: $a's old activation restores have done their job and would only get in the way of a later activation."
     oc --context "$a" get "$RESTORE" -n "$NS" -o name | { grep restore-acm-activate || true; } |
       xargs -r -n1 oc --context "$a" delete -n "$NS" 2>&1 | to_log
     event "G.5 old activation restores on $a deleted"
@@ -1146,10 +943,42 @@ cmd_run() {
   probe_stop
   summary
   box rounded 10 "Run $RUN done in $(dur $((SECONDS - RUN_T0))): $PASSIVE active, $ACTIVE passive" \
-    "The settings file now names run $((RUN + 1)). Next: hack/dr.sh check, then hack/dr.sh run (add --git for a git-driven run)."
+    "The settings file now names run $((RUN + 1)). Next: run hack/dr.sh again and pick the next run from the menu."
 }
 
 # --- main --------------------------------------------------------------------
+
+usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
+menu() {   # no command on a terminal: show the posture, then pick what to do
+  local choice prev=$((RUN - 1)) items
+  box rounded 13 "DR exercise: run $RUN is next" \
+    "Active hub now: $ACTIVE. In the next run it dies and $PASSIVE takes over." \
+    "Workload cluster: $MANAGED. Branch the clusters track: $BRANCH." \
+    "" \
+    "A manual run follows the Manual Pull Path: after the death gate, the script activates $PASSIVE with the runbook's oc commands." \
+    "A git-driven run follows the Automated Pull Path: the failover and the rejoin go through three pull requests in dr/ that you review and merge." \
+    "" \
+    "Either way you cut $ACTIVE's power and power it back on yourself, and both demo apps are deployed and probed, so every run shows pull and push delivery side by side."
+  items=("Manual failover run" "Git-driven failover run" "Pre-flight check only (read-only)")
+  if [ -s "$HOME/acm-dr/runs/run-$prev/events.log" ]; then items+=("Summary of run $prev"); fi
+  items+=("Approve certificates after a power-on" "List the commands" "Quit")
+  echo
+  if [ "$UI" = gum ]; then
+    choice=$(gum choose --header "What do you want to do?" "${items[@]}" </dev/tty) || choice=Quit
+  else
+    PS3="What do you want to do? "
+    select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
+  fi
+  case $choice in
+    "Manual failover run") CMD=run GIT=0 ;;
+    "Git-driven failover run") CMD=run GIT=1 ;;
+    "Pre-flight check only"*) CMD=check ;;
+    "Summary of run"*) CMD=probe ARGS=(summary "$prev") ;;
+    "Approve certificates"*) CMD=nodes ;;
+    "List the commands") usage; exit 0 ;;
+    *) exit 0 ;;
+  esac
+}
 
 sanity() {
   local c ctxs
@@ -1184,6 +1013,9 @@ on_exit() {   # put the terminal back, and say why the script stopped if die did
   if [ "$CMD" = run ] && probes_running; then note "the probes are still running: hack/dr.sh probe stop ends them"; fi
 }
 
+if [ -z "$CMD" ]; then
+  if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
+fi
 case $CMD in
   _probe-http) echo $$ >>"$PROBE_PIDS"; probe_http "${ARGS[0]}" ;;
   _probe-pointer) echo $$ >>"$PROBE_PIDS"; probe_pointer "${ARGS[0]}" ;;
@@ -1202,5 +1034,5 @@ case $CMD in
     sanity
     if [ "$CMD" = check ]; then cmd_check || { DIED=1; exit 1; }; else "cmd_$CMD"; fi
     ;;
-  *) sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 2 ;;
+  *) usage; exit 2 ;;
 esac

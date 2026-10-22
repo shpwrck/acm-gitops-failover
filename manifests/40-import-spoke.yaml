@@ -13,6 +13,7 @@ kind: ManagedCluster
 metadata:
   name: spoke
   labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
     name: spoke
     cluster.open-cluster-management.io/clusterset: default
 spec:
@@ -23,6 +24,8 @@ kind: KlusterletAddonConfig
 metadata:
   name: spoke
   namespace: spoke
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   clusterName: spoke
   clusterNamespace: spoke

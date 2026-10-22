@@ -38,9 +38,19 @@ timing table at the end. Each stage starts on a clear screen; the
 earlier output stays in the terminal's scrollback and in `console.log`. Without gum, or with `DR_PLAIN=1`, it prints
 the same steps as plain text.
 
-Then one exercise is one command:
+Each stage opens with a paragraph on what it is about to do and why, and
+each step with a line or two, so a run can be followed (or presented)
+without this document open. A RED pre-flight line links to the section
+of the docs that explains what could be wrong.
+
+Then one exercise is one command. On its own, `hack/dr.sh` shows which
+hub is active now, which one takes over in the next run, and a menu: a
+manual run, a git-driven run, the pre-flight check, the last run's
+summary, or approving certificates after a power-on. The same choices
+are also commands:
 
 ```bash
+hack/dr.sh              # the menu
 hack/dr.sh run          # the manual paths: this runbook and the Manual Push Path
 hack/dr.sh run --git    # the git-driven paths: you review and merge each PR it opens
 ```

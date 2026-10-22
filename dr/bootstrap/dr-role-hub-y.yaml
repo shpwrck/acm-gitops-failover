@@ -9,6 +9,7 @@ metadata:
   name: dr-role
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
     velero.io/exclude-from-backup: "true"
 spec:
   project: default

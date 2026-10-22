@@ -6,6 +6,8 @@ kind: ManagedClusterSetBinding
 metadata:
   name: default
   namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   clusterSet: default
 ---
@@ -18,6 +20,8 @@ kind: Placement
 metadata:
   name: gitops-clusters
   namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   clusterSets:
     - default
@@ -27,6 +31,8 @@ kind: GitOpsCluster
 metadata:
   name: gitops-cluster
   namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   argoServer:
     cluster: local-cluster
@@ -43,6 +49,8 @@ kind: ConfigMap
 metadata:
   name: acm-placement
   namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 data:
   apiVersion: cluster.open-cluster-management.io/v1beta1
   kind: placementdecisions
@@ -56,6 +64,8 @@ kind: Placement
 metadata:
   name: hello-failover-placement
   namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   clusterSets:
     - default

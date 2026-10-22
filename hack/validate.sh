@@ -17,7 +17,7 @@ step "yamllint"
 yamllint -s .
 
 step "shellcheck"
-shellcheck hack/*.sh
+shellcheck -x hack/*.sh hack/lib/*.sh
 
 step "kustomize build (every overlay and role)"
 build() { if command -v kustomize >/dev/null; then kustomize build "$1"; else kubectl kustomize "$1"; fi; }
