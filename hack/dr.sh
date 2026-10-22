@@ -520,6 +520,12 @@ cmd_check() {
     ok "newest credentials backup Completed, started ${out#* }"
   else
     red "newest credentials backup: '$out' (want Completed, started in the last 40 min)"
+    newest=$(oc --context "$a" get "$VBACKUP" -n "$NS" -o json 2>/dev/null | jq -r '
+      [.items[] | select((.metadata.name | startswith("acm-credentials-schedule-")) and .status.phase == "Completed")]
+      | sort_by(.status.startTimestamp) | last | .status.startTimestamp // ""' || true)
+    if [ -n "$newest" ]; then
+      note "the newest Completed one started $newest. Right after a power-on a failed set is usually transient: check again after the next set at $(next_slot)"
+    fi
   fi
 
   say "Passive hub readiness (0.4)"
@@ -554,11 +560,11 @@ cmd_check() {
   fi
 
   say "Workload"
-  expect "pull app answers 200 (serves $(revision "$APP_URL"))" "pull app does not answer 200" http_ok "$APP_URL"
+  expect "pull app answers 200 (serves $(revision "$APP_URL"))" "pull app does not answer 200 (tried for 30 s)" wait_for 30 http_ok "$APP_URL"
   out=$(app_state "$MANAGED" "hello-failover-$MANAGED")
   if [ "$out" = "Synced Healthy" ]; then ok "pull app Synced Healthy on $MANAGED"; else red "pull app on $MANAGED is '$out'"; fi
   if [ -n "$PUSH_APP_URL" ]; then
-    expect "push app answers 200 (serves $(revision "$PUSH_APP_URL"))" "push app does not answer 200" http_ok "$PUSH_APP_URL"
+    expect "push app answers 200 (serves $(revision "$PUSH_APP_URL"))" "push app does not answer 200 (tried for 30 s)" wait_for 30 http_ok "$PUSH_APP_URL"
     out=$(app_state "$a" "hello-failover-push-$MANAGED")
     if [ "$out" = "Synced Healthy" ]; then ok "push app Synced Healthy on $a"; else red "push app on $a is '$out'"; fi
   fi
@@ -694,6 +700,11 @@ cmd_probe() {
 
 # --- outage (B) --------------------------------------------------------------
 
+next_slot() {   # the next :00/:30 backup slot, as HH:MMZ
+  local h m
+  h=$(date -u +%H) m=$((10#$(date -u +%M)))
+  if [ "$m" -lt 30 ]; then echo "$h:30Z"; else printf '%02d:00Z\n' $(((10#$h + 1) % 24)); fi
+}
 slot_clear() {   # 5 to 26 min past a :00/:30 slot, and no backup in progress
   local m=$((10#$(date -u +%M) % 30))
   [ "$m" -ge 5 ] && [ "$m" -le 26 ] && not backup_running "$1"
