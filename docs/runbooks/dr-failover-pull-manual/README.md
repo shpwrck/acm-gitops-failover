@@ -34,7 +34,8 @@ hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr
 With [gum](https://github.com/charmbracelet/gum) installed, the script
 shows a stage tracker, a spinner with the elapsed time while it waits,
 a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
-timing table at the end. Without gum, or with `DR_PLAIN=1`, it prints
+timing table at the end. Each stage starts on a clear screen; the
+earlier output stays in the terminal's scrollback and in `console.log`. Without gum, or with `DR_PLAIN=1`, it prints
 the same steps as plain text.
 
 Then one exercise is one command:
@@ -65,7 +66,7 @@ If a run stops partway, fix the cause, then run the remaining steps:
 | --- | --- |
 | `hack/dr.sh check` | Phase 0, read-only |
 | `hack/dr.sh nodes [context...]` | G.1's power-on note: approve pending certificate requests until the nodes are Ready (all three clusters by default, for example after powering the whole lab on) |
-| `hack/dr.sh probe start` / `stop` / `summary` | Phase A and the Phase H summary; the probes run detached, so closing the terminal does not stop them |
+| `hack/dr.sh probe start` / `stop` / `summary [N]` | Phase A and the Phase H summary; the probes run detached, so closing the terminal does not stop them. `summary N` rebuilds run N's summary from its logs |
 | `hack/dr.sh outage` | B.0, B.1, B.2 |
 | `hack/dr.sh deploy` | C, for both apps |
 | `hack/dr.sh failover [--git]` | the death gate, then D, E, F (or D', E, F') |
@@ -76,6 +77,11 @@ Each run's evidence lands in `~/acm-dr/runs/run-$RUN/`: the probe logs
 one line each time an app's served revision changes), `events.log` (one
 timestamped line per step; the summary's timing table is computed from
 it) and `console.log` (everything the script printed, as plain text).
+A run started again after a stop carries on in the same folder: its
+events say which attempt it is, and "Whole run" counts from the latest
+answer to "Start run N?". The availability table splits each app's
+samples at B.1, so a failed sample before the power cut is not counted
+against the failover.
 
 ## Conventions
 
