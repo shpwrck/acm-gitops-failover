@@ -97,14 +97,6 @@ backup_on() {   # backup_on <context>: the MultiClusterHub has cluster-backup en
   [ "$(oc --context "$1" get "$MCH" -A -o json 2>/dev/null |
     jq -r '[.items[0].spec.overrides.components[]? | select(.name == "cluster-backup") | .enabled] | first // false')" = true ]
 }
-klusterlet_hub() {   # klusterlet_hub <context>: the API of the hub its klusterlet reports to, or nothing
-  local s
-  for s in hub-kubeconfig-secret bootstrap-hub-kubeconfig; do
-    oc --context "$1" get secret "$s" -n open-cluster-management-agent -o jsonpath='{.data.kubeconfig}' 2>/dev/null |
-      base64 -d 2>/dev/null | awk '/server:/ {print $2; exit}' | grep . && return 0
-  done
-  return 0
-}
 mc_joined() {
   [ "$(oc --context "$1" get managedcluster "$MANAGED" \
     -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterJoined")].status}' 2>/dev/null)" = True ] && mc_available "$1" True
@@ -119,6 +111,7 @@ git_role() {   # git_role <hub>: active, passive or something else, as dr/<hub> 
   case $k in
     ../roles/active) echo active ;;
     ../roles/passive) echo passive ;;
+    "../roles/active restore-activate-"*) echo "active with ${k#../roles/active }" ;;   # promoted by a git-driven failover
     "") echo missing ;;
     *) echo "'$k'" ;;
   esac
@@ -250,7 +243,12 @@ preflight() {
     if [ ! -f "dr/bootstrap/dr-role-$c.yaml" ]; then red "no dr/bootstrap/dr-role-$c.yaml: the hubs' contexts must be named hub-x and hub-y"; fi
   done
   x=$(git_role "$ACTIVE")
-  if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"; else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active"; fi
+  if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"
+  elif [[ $x == "active with "* ]]; then
+    help_at docs/build.md#7-git-driven-paths-only-bootstrap-dr
+    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. Remove the file and its entry on $BRANCH"
+    help_at dr/README.md
+  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active"; fi
   x=$(git_role "$PASSIVE")
   if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive"; fi
 
@@ -276,7 +274,9 @@ preflight() {
       ACM_NS[$c]=$(manifest_value manifests/10-acm-operator.yaml namespace) ACM_HAS[$c]=""
       x=$(klusterlet_hub "$c")
       help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
-      if [ -n "$x" ]; then red "$c is managed by the hub at $x: detach it from that hub first"; else ok "$c: no ACM, not managed by another hub"; fi
+      if orphan_agent "$c"; then red "$c still runs the ACM agent of its own former hub (local-cluster), left by an uninstall: hack/teardown.sh --full removes it"
+      elif [ -n "$x" ]; then red "$c is managed by the hub at $x: detach it from that hub first"
+      else ok "$c: no ACM, not managed by another hub"; fi
       help_at docs/build.md#1-hubs-acm-with-the-backup-component
     fi
   done
@@ -337,6 +337,9 @@ preflight() {
   if [ -z "$x" ]; then
     ok "$MANAGED is not managed by any hub yet"
     row "$MANAGED" "ACM import" "import into $ACTIVE"
+  elif orphan_agent "$MANAGED"; then
+    help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
+    red "$MANAGED still runs the ACM agent of its own former hub (local-cluster), left by an uninstall: hack/teardown.sh --full removes it"
   elif [ -n "${ACM_HAS[$ACTIVE]}" ] && mc_available "$ACTIVE" True; then
     SPOKE_HAD=1
     ok "$MANAGED is already managed by $ACTIVE: kept"

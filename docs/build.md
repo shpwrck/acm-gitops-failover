@@ -138,8 +138,10 @@ the steps:
 - **It refuses what would break,** before it changes anything: a hub that
   another hub manages, a spoke managed by some other hub, hubs on
   different ACM versions, other managed clusters on a hub (see [Shared
-  clusters](#shared-clusters)), a stray Route CRD (gotcha 3), or manifests
-  that pull from another repo or branch than your settings name.
+  clusters](#shared-clusters)), a stray Route CRD (gotcha 3), manifests
+  that pull from another repo or branch than your settings name, or an
+  active hub's overlay that still lists an earlier failover's activation
+  one-shot (step 7).
 - **It creates `open-cluster-management-global-set`** on a hub where ACM
   did not (gotcha 1).
 - **It writes the demo apps' URLs** (`APP_URL`, `PUSH_APP_URL`) into the
@@ -290,6 +292,27 @@ oc --context hub-y get ns open-cluster-management-agent   # NotFound
 If the klusterlet stays, follow the cleanup in the ACM
 [Clusters guide](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/clusters/index)
 ("Removing a cluster from management").
+
+A klusterlet that reports to the cluster itself is not another hub's:
+its `spec.clusterName` is `local-cluster`, or its hub kubeconfig (secret
+`hub-kubeconfig-secret` in `open-cluster-management-agent`) points at
+`https://kubernetes.default.svc`. It is the agent a hub runs for its own
+`local-cluster`, and an ACM uninstall can leave it behind; with no
+MultiClusterHub left on the cluster, nothing manages it.
+`hack/teardown.sh --full` removes it. By hand, delete it while its
+operator still runs, so the operator cleans up after it, then its
+namespaces:
+
+```bash
+oc --context hub-y delete klusterlet klusterlet --wait=false
+oc --context hub-y wait klusterlet/klusterlet --for=delete --timeout=5m
+oc --context hub-y delete namespace open-cluster-management-agent-addon open-cluster-management-agent
+```
+
+If the klusterlet stays because its operator is gone already (no
+`klusterlet` deployment in `open-cluster-management-agent`), clear its
+finalizer: `oc --context hub-y patch klusterlet klusterlet --type merge -p
+'{"metadata":{"finalizers":null}}'`.
 
 #### Shared clusters
 
@@ -490,6 +513,15 @@ adopts the BackupSchedule or Restore applied in step 6. From then on the
 manual runbooks need their break-glass step (D.0) before touching a hub's
 role objects.
 
+On a branch that has been through a git-driven failover, the active hub's
+overlay still lists that failover's activation one-shot next to
+`../roles/active` (the "promoted" state in
+[dr/README.md](../dr/README.md)). Before you build new clusters from that
+branch, delete the `restore-activate-*.yaml` file from the overlay and its
+entry from the overlay's `kustomization.yaml`, and push. Otherwise the new
+hub's `dr-role` applies it next to the BackupSchedule, where the backup
+operator ignores it.
+
 ## Build-time gotchas
 
 Each cost real time and none is in the product docs (the numbering is
@@ -575,8 +607,11 @@ stage skips what is already gone. The stages, in order:
    Management](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html-single/get_started/index)):
    the MultiClusterHub first, which takes the engine, the add-ons and the
    backup operator with it (5 to 15 minutes), then the ACM operator, what
-   ACM's "Cleaning up artifacts before reinstalling" script lists, and the
-   namespaces ACM made.
+   ACM's "Cleaning up artifacts before reinstalling" script lists, the
+   namespaces ACM made, and the hub's own agent for `local-cluster` if the
+   uninstall left it ([A cluster that is managed by another
+   hub](#a-cluster-that-is-managed-by-another-hub)). With `--full`, it also
+   removes such an agent that an earlier uninstall left.
 7. **OpenShift GitOps**: its Argo CD instance while the operator can still
    clean up after it, then the operator and the `openshift-gitops`
    namespace.
