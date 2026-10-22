@@ -10,7 +10,8 @@
    role (see dr/README.md).
 4. Every Argo CD source points at the same repository, so a fork changes
    them together.
-5. Relative links (and #anchors) in the Markdown docs resolve.
+5. Relative links (and #anchors) in the Markdown docs resolve, and so do
+   the doc sections hack/dr.sh links to (help_at).
 
 Run from anywhere: hack/validate.py. Needs PyYAML and kustomize (or kubectl).
 """
@@ -171,6 +172,16 @@ def check_links():
                     fail(f"{where}: broken link {target}")
                 elif anchor and dest.suffix == ".md" and anchor not in anchors(dest):
                     fail(f"{where}: no heading for #{anchor} in {dest.relative_to(ROOT)}")
+    for sh in sorted((ROOT / "hack").glob("*.sh")):
+        for n, line in enumerate(sh.read_text().splitlines(), 1):
+            for target in re.findall(r"\bhelp_at\s+([\w./-]+(?:#[\w-]+)?)", line):
+                path, _, anchor = target.partition("#")
+                dest = ROOT / path
+                where = f"{sh.relative_to(ROOT)}:{n}"
+                if not dest.is_file():
+                    fail(f"{where}: help_at names a missing file {path}")
+                elif anchor and anchor not in anchors(dest):
+                    fail(f"{where}: no heading for #{anchor} in {path}")
 
 
 def main():
