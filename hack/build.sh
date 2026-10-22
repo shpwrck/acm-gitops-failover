@@ -415,7 +415,7 @@ s3_inputs() {
   fi
   if [ -z "$S3_ACCESS_KEY" ]; then S3_ACCESS_KEY=$(ask "S3 access key" 0); fi
   if [ -z "$S3_SECRET_KEY" ]; then S3_SECRET_KEY=$(ask "S3 secret key" 1); fi
-  [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ] || die "the S3 keys are empty"
+  if [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then die "the S3 keys are empty"; fi
   if [ -z "$S3_URL" ]; then
     note "AWS S3: the bucket check is left to the BackupStorageLocation"
   elif [ "$(curl --version | awk 'NR == 1 {split($2, v, "."); print v[1]}')" -lt 8 ]; then
