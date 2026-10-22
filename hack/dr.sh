@@ -652,27 +652,36 @@ probe_stop() {
 
 # the time of the last event matching <regex>, or nothing
 ev() { awk -v re="$1" '$0 ~ re {t = $1} END {print t}' "$LOGDIR/events.log" 2>/dev/null || true; }
-span() {   # span <label> <from event> <to event>: a timing row when both happened
-  local a b
-  a=$(ev "$2")
-  b=$(ev "$3")
-  if [ -n "$a" ] && [ -n "$b" ]; then
-    printf '%s\t%s\n' "$1" "$(dur $(($(date -u -d "$b" +%s) - $(date -u -d "$a" +%s))))"
+span() { span_t "$1" "$(ev "$2")" "$(ev "$3")"; }   # span <label> <from event> <to event>
+span_t() {   # span_t <label> <from time> <to time>: a timing row when both are known
+  if [ -n "$2" ] && [ -n "$3" ]; then
+    printf '%s\t%s\n' "$1" "$(dur $(($(date -u -d "$3" +%s) - $(date -u -d "$2" +%s))))"
   fi
 }
+first_served() {   # first_served <pull|push> <n>: when revisions.log first shows that app serving vN
+  awk -v r="$1=v$2" '{for (i = 2; i <= NF; i++) if ($i == r) {print $1; exit}}' "$LOGDIR/revisions.log" 2>/dev/null || true
+}
+push_back() {   # when the push app first served the mid-outage revision: E' or the revision probe, whichever saw it first
+  local e r np
+  e=$(ev " E' push delivery back")
+  [ -s "$LOGDIR/deploy.rev" ] && np=$(cut -d' ' -f2 "$LOGDIR/deploy.rev") && r=$(first_served push "$np")
+  if [ -z "$e" ] || { [ -n "${r:-}" ] && [[ $r < $e ]]; }; then e=${r:-}; fi
+  echo "$e"
+}
 timings() {
-  local act=" D.2 activation applied" from=Activation
+  local act=" D.2 activation applied" from=Activation pb
+  pb=$(push_back)
   if [ -n "$(ev " D'.2 PR-A merged")" ]; then act=" D'.2 PR-A merged" from="PR-A merge"; fi
   printf 'Measure\tTime\n'
   span "Hub dead to $MANAGED claimed on the new hub" " B.1 .* API dead" " D.3 claim landed"
   span "Pull deploy: pushed to served, no hub" " C deploy pushed" " C pull app serves"
-  span "Push deploy: pushed to served (push delivery RTO)" " C deploy pushed" " E' push delivery back"
+  span_t "Push deploy: pushed to served (push delivery RTO)" "$(ev " C deploy pushed")" "$pb"
   span "Death gate to activation" " B .*death gate passed" " D.2 activation applied"
   span "PR-A: pushed to merged" " D'.1 PR-A branch" " D'.2 PR-A merged"
   span "$from to claim (D.3)" "$act" " D.3 claim landed"
   span "$from to all addons Available (E.1)" "$act" " E.1 all addons Available"
   span "$from to the first backup set (F.1)" "$act" " F.1 first backup set Completed"
-  span "$from to push delivery back (E')" "$act" " E' push delivery back"
+  span_t "$from to push delivery back (E')" "$(ev "$act")" "$pb"
   span "PR-B: pushed to merged" " F' PR-B branch" " F' PR-B merged"
   span "Demote PR: pushed to merged" " G'.1 demote branch" " G'.1 demote PR merged"
   span "Old hub back to its lease running out (G.1)" " G .* API answers" " G.1 .* Unknown"
@@ -858,13 +867,14 @@ promote_checks() {   # F.1's gate and F.2
 }
 
 push_resurrection() {   # E': the push app serving the mid-outage revision is push delivery back
-  local np
+  local np t
   if [ -z "$PUSH_APP_URL" ] || [ ! -s "$LOGDIR/deploy.rev" ]; then return 0; fi
   np=$(cut -d' ' -f2 "$LOGDIR/deploy.rev")
   say "E': push delivery"
   show oc --context "$PASSIVE" get secret -n "$GNS" -l apps.open-cluster-management.io/acm-cluster=true
   if try_until 1200 "the push app to serve v$np" serves "$PUSH_APP_URL" "v$np"; then
-    event "E' push delivery back: push app serves v$np"
+    t=$(first_served push "$np")
+    event "E' push delivery back: push app serves v$np${t:+ (the revision probe saw it first at ${t:11:8})}"
   else
     event "E' push app still not serving v$np after 20 min"
     note "see the Manual Push Path E' failure modes"
