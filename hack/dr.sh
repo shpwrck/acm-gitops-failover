@@ -675,10 +675,21 @@ timings() {
   span "PR-B: pushed to merged" " F' PR-B branch" " F' PR-B merged"
   span "Demote PR: pushed to merged" " G'.1 demote branch" " G'.1 demote PR merged"
   span "Old hub back to its lease running out (G.1)" " G .* API answers" " G.1 .* Unknown"
-  span "Whole run" " A probes started" " rejoin done"
+  span "Whole run: start to rejoin done" " run [0-9]+ started" " rejoin done"
+}
+avail_rows() {   # avail_rows <name> <probe log> [cut time]: one table row, or two split at the cut
+  awk -v n="$1" -v c="${3:-}" '
+    function row(label, w) { printf "%s\t%d\t%d\t%s to %s\n", label, s[w], f[w], substr(a[w], 12, 8), substr(b[w], 12, 8) }
+    { w = (c != "" && $1 < c) ? 1 : 2; s[w]++; if ($2 != "200") f[w]++; if (!(w in a)) a[w] = $1; b[w] = $1 }
+    END {
+      if (c == "") { if (s[2]) row(n, 2); exit }
+      if (s[1]) row(n " before the cut", 1)
+      if (s[2]) row(n " from the cut on", 2)
+    }' "$2"
 }
 summary() {   # the tables come last, so they are what stays on the screen
-  local f n
+  local f n cut
+  cut=$(ev " B.1 .* API dead")
   say "Run $RUN summary ($LOGDIR)"
   if [ -s "$LOGDIR/events.log" ]; then label "Events"; show <"$LOGDIR/events.log"; fi
   if [ -f "$LOGDIR/hub-pointer.log" ]; then
@@ -688,18 +699,17 @@ summary() {   # the tables come last, so they are what stays on the screen
   if [ -s "$LOGDIR/revisions.log" ]; then label "Served revisions"; show <"$LOGDIR/revisions.log"; fi
   if compgen -G "$LOGDIR/probe*.log" >/dev/null; then
     for f in "$LOGDIR"/probe*.log; do
-      if grep -q -v ' 200$' "$f"; then
-        label "$(basename "$f"), first samples not 200:"
-        grep -v ' 200$' "$f" | head -n 5 | show
+      if grep -q -v ' 200$' "$f"; then   # up to 3 from before the cut, up to 5 from the cut on
+        label "$(basename "$f"), samples not 200:"
+        awk -v c="$cut" '$2 == "200" {next} c != "" && $1 < c {if (b++ < 3) print $0 "   (before the cut)"; next} a++ < 5' "$f" | show
       fi
     done
     {
-      printf 'Availability\tSamples\tNot 200\tFirst\tLast\n'
+      printf 'Availability\tSamples\tNot 200\tSampled (UTC)\n'
       for f in "$LOGDIR/probe.log" "$LOGDIR/probe-push.log"; do
         [ -f "$f" ] || continue
         if [ "$(basename "$f")" = probe.log ]; then n="pull app"; else n="push app"; fi
-        printf '%s\t%s\t%s\t%s\t%s\n' "$n" "$(wc -l <"$f")" "$(grep -c -v ' 200$' "$f" || true)" \
-          "$(head -n 1 "$f" | cut -d' ' -f1)" "$(tail -n 1 "$f" | cut -d' ' -f1)"
+        avail_rows "$n" "$f" "$cut"
       done
     } | table
   fi
@@ -710,8 +720,15 @@ cmd_probe() {
   case ${ARGS[0]:-} in
     start) probe_start ;;
     stop) probe_stop ;;
-    summary) summary ;;
-    *) die "usage: hack/dr.sh probe start|stop|summary" ;;
+    summary)
+      if [ -n "${ARGS[1]:-}" ]; then   # an earlier run's summary, from its logs
+        [[ ${ARGS[1]} =~ ^[0-9]+$ ]] || die "usage: hack/dr.sh probe summary [run number]"
+        RUN=${ARGS[1]} LOGDIR=$HOME/acm-dr/runs/run-${ARGS[1]}
+        [ -d "$LOGDIR" ] || die "no logs for run $RUN in $LOGDIR"
+      fi
+      summary
+      ;;
+    *) die "usage: hack/dr.sh probe start|stop|summary [run number]" ;;
   esac
 }
 
@@ -1097,6 +1114,12 @@ cmd_rejoin() {
 
 # --- run ---------------------------------------------------------------------
 
+run_started() {   # a run started again after a stop carries on in the same folder
+  local k
+  k=$(grep -c -E ' run [0-9]+ started' "$LOGDIR/events.log" 2>/dev/null || true)
+  if [ "${k:-0}" -gt 0 ]; then event "run $RUN started (attempt $((k + 1)))"; else event "run $RUN started"; fi
+}
+
 cmd_run() {
   local stops="cut $ACTIVE's power and power it back on"
   IN_RUN=1 RUN_T0=$SECONDS
@@ -1107,6 +1130,8 @@ cmd_run() {
   stage 1
   cmd_check || die "pre-flight is red: fix it, then run again"
   confirm "Start run $RUN?"
+  RUN_T0=$SECONDS
+  run_started
   probe_start
   stage 2
   cmd_outage
