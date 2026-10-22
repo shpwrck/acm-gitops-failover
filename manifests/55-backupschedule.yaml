@@ -7,6 +7,8 @@ kind: BackupSchedule
 metadata:
   name: schedule-acm
   namespace: open-cluster-management-backup
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   veleroSchedule: "*/30 * * * *"
   veleroTtl: 72h

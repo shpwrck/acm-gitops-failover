@@ -22,6 +22,8 @@ kind: ApplicationSet
 metadata:
   name: hello-failover-push
   namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
 spec:
   goTemplate: false
   generators:

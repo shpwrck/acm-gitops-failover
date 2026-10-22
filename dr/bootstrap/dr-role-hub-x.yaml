@@ -12,6 +12,7 @@ metadata:
   name: dr-role
   namespace: openshift-gitops
   labels:
+    app.kubernetes.io/part-of: acm-gitops-failover
     # CRITICAL — do not remove. ACM's resource backups include argoproj
     # objects in openshift-gitops (the ApplicationSets are restored
     # cross-hub). If THIS Application were restored onto the other hub,

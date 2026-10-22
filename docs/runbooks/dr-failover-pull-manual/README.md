@@ -13,6 +13,91 @@ the [Automated Push Path](../dr-failover-push-gitops/README.md) both — all thr
 deltas against this document, so a change here must be checked against
 them.
 
+## Running it with `hack/dr.sh`
+
+[`hack/dr.sh`](../../../hack/dr.sh) runs this runbook and its three
+siblings, one command per exercise. It runs the commands below in
+order, enforces every **Gate**, and labels its output with this
+document's step numbers, so this document stays the explanation of what
+it does. It never powers a cluster off or on: it tells you when to cut
+or restore power, then waits until the API is dead or answers again.
+
+Set it up once, in the repo checkout on the branch the clusters track:
+
+```bash
+mkdir -p ~/acm-dr && cp hack/dr.env.example ~/acm-dr/dr.env
+${EDITOR:-vi} ~/acm-dr/dr.env   # KUBECONFIG, ACTIVE, PASSIVE, the two app URLs, BRANCH
+sudo dnf install -y gum         # optional (brew install gum elsewhere): boxes, spinners and tables
+hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr/ is bootstrapped)
+```
+
+With [gum](https://github.com/charmbracelet/gum) installed, the script
+shows a stage tracker, a spinner with the elapsed time while it waits,
+a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
+timing table at the end. Each stage starts on a clear screen; the
+earlier output stays in the terminal's scrollback and in `console.log`. Without gum, or with `DR_PLAIN=1`, it prints
+the same steps as plain text.
+
+Each stage opens with a paragraph on what it is about to do and why, and
+each step with a line or two, so a run can be followed (or presented)
+without this document open. A RED pre-flight line links to the section
+of the docs that explains what could be wrong.
+
+Then one exercise is one command. On its own, `hack/dr.sh` shows which
+hub is active now, which one takes over in the next run, and a menu: a
+manual run, a git-driven run, the pre-flight check, the last run's
+summary, or approving certificates after a power-on. The same choices
+are also commands:
+
+```bash
+hack/dr.sh              # the menu
+hack/dr.sh run          # the manual paths: this runbook and the Manual Push Path
+hack/dr.sh run --git    # the git-driven paths: you review and merge each PR it opens
+```
+
+`run` stops only for what you have to do yourself: cut `$ACTIVE`'s
+power (B.1), merge the PRs on a `--git` run (D'.2, F', G'.1), and power
+the hub back on (G.0). For each PR it pushes the branch and prints a
+link to GitHub's new-PR page with the title and body filled in (with
+`gh` signed in, it opens the PR itself). It asks before it starts and
+before a manual activation (D.2); `--yes` skips both questions. Both demo apps run side by side, so every
+exercise probes and deploys both: one run covers pull and push delivery.
+At the end, `rejoin` swaps `ACTIVE` and `PASSIVE` in the settings file
+and bumps `RUN`, so the next `run` goes the other way.
+
+Its death gate is B.1's check, hardened. `$PASSIVE` and `$MANAGED` must
+answer, and `$ACTIVE`'s API must refuse connections or time out twice,
+10 s apart. A name that does not resolve is DNS trouble, not proof of
+death, and stops the script.
+
+If a run stops partway, fix the cause, then run the remaining steps:
+
+| Command | Steps |
+| --- | --- |
+| `hack/dr.sh check` | Phase 0, read-only |
+| `hack/dr.sh nodes [context...]` | G.1's power-on note: approve pending certificate requests until the nodes are Ready (all three clusters by default, for example after powering the whole lab on) |
+| `hack/dr.sh probe start` / `stop` / `summary [N]` | Phase A and the Phase H summary; the probes run detached, so closing the terminal does not stop them. `summary N` rebuilds run N's summary from its logs |
+| `hack/dr.sh outage` | B.0, B.1, B.2 |
+| `hack/dr.sh deploy` | C, for both apps |
+| `hack/dr.sh failover [--git]` | the death gate, then D, E, F (or D', E, F') |
+| `hack/dr.sh rejoin [--git]` | G and H.1 (or G'.1, G'.2) |
+
+Each run's evidence lands in `~/acm-dr/runs/run-$RUN/`: the probe logs
+(`probe.log`, `probe-push.log`, `hub-pointer.log`, and `revisions.log`,
+one line each time an app's served revision changes), `events.log` (one
+timestamped line per step; the summary's timing table is computed from
+it) and `console.log` (everything the script printed, as plain text).
+A run started again after a stop carries on in the same folder: its
+events say which attempt it is, and "Whole run" counts from the latest
+answer to "Start run N?". The availability table splits each app's
+samples at B.1, so a failed sample before the power cut is not counted
+against the failover. The rows that start at the cut or at C's deploy
+include C.1's wait for the pull app, which is bound by `$MANAGED`'s Argo
+poll (1 to 6.5 minutes with Argo's defaults: a refresh every 2 minutes
+plus up to 1 minute of jitter, a branch resolution cached for up to 3
+minutes, then about 1 minute for the ConfigMap volume); the rows that
+start at the activation (or at the PR-A merge) do not.
+
 ## Conventions
 
 The posture is symmetric — set these once and every command below works in
@@ -31,6 +116,16 @@ export PASSIVE=hub-y      # hub that will activate
 export MANAGED=spoke      # workload cluster that re-homes
 export APP_URL=https://hello-failover-hello-failover.apps.spoke.example.com   # <apps domain of $MANAGED>
 export ACTIVE_API=$(oc --context $ACTIVE whoami --show-server)   # read from kubeconfig while the hub is alive
+export RUN=$(date -u +%Y%m%d)-1   # names this run's probe logs: same value in every terminal, bump -1 per run
+```
+
+Every terminal you run commands in needs these exports. With
+`$ACTIVE` empty, `oc --context $ACTIVE get nodes` reads `get` as the
+context name and fails with `flags cannot be placed before plugin
+name`. Check a terminal before using it:
+
+```bash
+echo "ACTIVE=${ACTIVE:?unset} PASSIVE=${PASSIVE:?unset} MANAGED=${MANAGED:?unset} ACTIVE_API=${ACTIVE_API:?unset} RUN=${RUN:?unset}"
 ```
 
 The whole exercise at a glance (the hub-pointer flip in Phase D is the
@@ -63,8 +158,10 @@ sequenceDiagram
   correlate.
 - Never skip a **Gate** line — each phase's gate is the condition that
   makes the next phase safe.
-- Evidence artifacts: `~/probe-<date>.log` (availability),
-  `~/hub-pointer-<date>.log` (re-home), plus pasted command outputs.
+- Evidence artifacts: `~/probe-$RUN.log` (availability),
+  `~/hub-pointer-$RUN.log` (re-home), plus pasted command outputs.
+  One log pair per run keeps E.2's flip search honest when you run
+  several exercises in a day.
   Any persistent background runner and log location works — the logs
   are the evidence, not the terminals.
 
@@ -73,7 +170,7 @@ sequenceDiagram
 ### 0.1 Posture sanity
 
 ```bash
-oc --context $ACTIVE  get backupschedule,backup -n open-cluster-management-backup | head
+oc --context $ACTIVE  get backupschedule -n open-cluster-management-backup
 oc --context $ACTIVE  get managedclusters
 oc --context $PASSIVE get restore -n open-cluster-management-backup
 oc --context $PASSIVE get managedclusters
@@ -133,7 +230,7 @@ oc --context $ACTIVE get secret auto-import-account -n $MANAGED \
 
 ```bash
 oc --context $ACTIVE get backup -n open-cluster-management-backup \
-  --sort-by=.metadata.creationTimestamp \
+  --sort-by=.status.startTimestamp \
   -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -6
 ```
 
@@ -182,7 +279,7 @@ expensive mid-outage.
 ### A.1 Availability probe (own terminal, runs through the whole exercise)
 
 ```bash
-while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $APP_URL)"; sleep 10; done | tee -a ~/probe-$(date -u +%Y%m%d).log
+while true; do echo "$(date -u +%FT%TZ) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $APP_URL)"; sleep 10; done | tee -a ~/probe-$RUN.log
 ```
 
 **Why:** The architecture's core claim — workloads decoupled from hub
@@ -199,7 +296,7 @@ powering down; check before writing it up as a DR failure).
 ### A.2 Hub-pointer probe (second terminal)
 
 ```bash
-while true; do echo "$(date -u +%FT%TZ) $(oc --context $MANAGED get secret bootstrap-hub-kubeconfig -n open-cluster-management-agent -o jsonpath='{.data.kubeconfig}' --request-timeout=5s 2>/dev/null | base64 -d | awk '/server:/{print $2}')"; sleep 10; done | tee -a ~/hub-pointer-$(date -u +%Y%m%d).log
+while true; do echo "$(date -u +%FT%TZ) $(oc --context $MANAGED get secret bootstrap-hub-kubeconfig -n open-cluster-management-agent -o jsonpath='{.data.kubeconfig}' --request-timeout=5s 2>/dev/null | base64 -d | awk '/server:/{print $2}')"; sleep 10; done | tee -a ~/hub-pointer-$RUN.log
 ```
 
 **Why:** Timestamps the exact second `$MANAGED`'s klusterlet re-points
@@ -234,6 +331,30 @@ hub.
 
 ## Phase B — Disaster
 
+### B.0 Lab safety net: an etcd backup, and a cut between backups
+
+```bash
+NODE=$(oc --context $ACTIVE get nodes -l node-role.kubernetes.io/master -o jsonpath='{.items[0].metadata.name}')
+oc --context $ACTIVE debug node/$NODE -- chroot /host /usr/local/bin/cluster-backup.sh /home/core/assets/backup
+# just before the cut: the newest set must be Completed, not InProgress
+oc --context $ACTIVE get backup -n open-cluster-management-backup \
+  --sort-by=.status.startTimestamp \
+  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -6
+```
+
+**Why:** A hard power cut hits every etcd member at once, and on a
+single-node hub there is only one. The DR design does not need this
+backup (the hub's ACM state is already in the bucket), but a lab hub
+usually runs other workloads, and this snapshot is what recovers the
+node if the cut corrupts etcd. It is lab protection, not part of the
+simulated disaster: take it before you note B.1's timestamp. Time the
+cut away from the schedule's slots (`:00` and `:30` here) as well: a
+cut halfway through a set leaves the bucket's `latest` set incomplete,
+which is a different exercise from this one.
+
+**Success:** the script ends with `snapshot db and kube resources are
+successfully saved to /home/core/assets/backup` (about a minute).
+
 ### B.1 Power off the active hub
 
 Out-of-band action (hypervisor/BMC/plug) — there is deliberately no `oc`
@@ -242,6 +363,12 @@ command here.
 **Why:** A real datacenter loss gives no warning and no clean shutdown;
 killing the API out-of-band is the honest simulation. Do NOT cordon/drain
 first — that would be a migration, not a disaster.
+
+A short press of a physical power button is not a power cut: it sends
+an ACPI shutdown, and the host shuts down gracefully (observed live:
+the API died at once, the host stopped answering ping about 3 min
+later). For a hard cut, hold the button (about 5 s), pull the plug, or
+use the BMC's hard power-off. Record which one you used.
 
 **API variant:** on SNO the cluster dies with its one
 node, so a debug pod can pull the trigger:
@@ -268,6 +395,7 @@ schedule freezes itself on `BackupCollision`, but do not leave it
 **Success:**
 
 ```bash
+date -u +%FT%TZ   # record: power cut
 curl -sk --max-time 5 $ACTIVE_API/version || echo DEAD
 ```
 
@@ -280,7 +408,7 @@ manifest's header warns exactly this). Verify death before Phase D.
 ### B.2 Confirm the workload does not care
 
 ```bash
-tail -3 ~/probe-$(date -u +%Y%m%d).log
+tail -3 ~/probe-$RUN.log
 ```
 
 **Why:** The first customer-visible datapoint: hub dead, app serving.
@@ -294,8 +422,13 @@ the docs' promise, observed.)
 ### C.1 Push a new revision with no hub alive
 
 ```bash
-# in the git repo: bump REVISION in apps/hello-failover/configmap.yaml, then
-git add apps/hello-failover/configmap.yaml && git commit -m "REVISION vN mid-outage" && git push
+# in the git repo, on the branch the clusters track (targetRevision, see the README's settings table)
+git branch --show-current
+N=2   # the next revision number
+sed -i "s/REVISION v[0-9]*/REVISION v$N/" apps/hello-failover/configmap.yaml
+git add apps/hello-failover/configmap.yaml && git commit -m "REVISION v$N mid-outage" && git push
+date -u +%FT%TZ   # record: deploy pushed
+until curl -s $APP_URL | grep -q "REVISION v$N"; do sleep 10; done; date -u +%FT%TZ   # record: new revision served
 ```
 
 **Why:** Proves deployments flow git → cluster with zero hub involvement:
@@ -367,7 +500,10 @@ drift) and continue — activation does not depend on it.
 
 ```bash
 oc --context $PASSIVE apply -f manifests/57-restore-activate.yaml
-oc --context $PASSIVE get restore restore-acm-activate -n open-cluster-management-backup -w
+date -u +%FT%TZ   # record: activation applied
+until oc --context $PASSIVE get restore restore-acm-activate -n open-cluster-management-backup \
+  -o jsonpath='{.status.phase}' | grep -q '^Finished'; do sleep 5; done
+oc --context $PASSIVE get restore restore-acm-activate -n open-cluster-management-backup
 ```
 
 **Why:** `veleroManagedClustersBackupName: latest` is the one field that
@@ -393,7 +529,10 @@ failed).
 ### D.3 Watch the claim land
 
 ```bash
-oc --context $PASSIVE get managedclusters -w
+oc --context $PASSIVE wait managedcluster/$MANAGED \
+  --for=condition=ManagedClusterConditionAvailable --timeout=15m
+date -u +%FT%TZ   # record: claim landed
+oc --context $PASSIVE get managedclusters
 ```
 
 **Why:** This is auto-import doing its job: the restored MSA token lets
@@ -433,8 +572,9 @@ before digging, addon rollout is eventually consistent.
 ### E.2 Re-home evidence
 
 ```bash
-grep -v "$ACTIVE_API" ~/hub-pointer-$(date -u +%Y%m%d).log | head -3
-tail -3 ~/probe-$(date -u +%Y%m%d).log
+grep -v "$ACTIVE_API" ~/hub-pointer-$RUN.log | head -3
+tail -3 ~/probe-$RUN.log
+grep -v ' 200$' ~/probe-$RUN.log || echo "no failures"
 ```
 
 **Why:** The two probe logs are the exercise's proof: the first flip
@@ -449,9 +589,19 @@ unbroken 200s.
 
 ```bash
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
-  -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{"\n"}'
-# expect False with the ownerRef error, or the condition entirely
-# absent on a freshly restored MSA → then:
+  -o jsonpath='{.status.conditions[?(@.type=="TokenReported")].status}{" | "}{.status.expirationTimestamp}{"\n"}'
+oc --context $PASSIVE get secret auto-import-account -n $MANAGED \
+  -o jsonpath='{.metadata.ownerReferences[0].kind}{"\n"}'
+```
+
+Two outcomes:
+
+- `True | <now + 144h>` and `ManagedServiceAccount`: the controller
+  adopted the restored secret and rotated it. Nothing to delete.
+- `False` with the ownerRef error, or the condition absent, and no
+  owner: the frozen restored copy. Delete it and check again:
+
+```bash
 oc --context $PASSIVE delete secret auto-import-account -n $MANAGED
 sleep 30
 oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED \
@@ -459,12 +609,15 @@ oc --context $PASSIVE get managedserviceaccount auto-import-account -n $MANAGED 
 ```
 
 **Why:** The restored secret just did its job (D.3) and is now a
-liability: the new hub's MSA controller cannot adopt a Velero-restored
-secret, so rotation silently freezes and the NEXT failover dies at token
-expiry. Load-bearing during activation, disposable after — delete it only
-now, never before D.3.
+liability if the new hub's MSA controller cannot adopt it: rotation
+silently freezes and the NEXT failover dies at token expiry. The ACM
+2.17.0 runs hit that every time; the 2.17.3 run on 2026-10-21 found the
+secret already adopted and rotated a minute after the claim (expiry
+reset to now + 144h, owner `ManagedServiceAccount`). Check rather than
+assume. If you delete, delete only now, never before D.3: until the
+claim lands the restored secret is load-bearing.
 
-**Success:** `True | <now + 144h>`.
+**Success:** `True | <now + 144h>` and owner `ManagedServiceAccount`.
 
 **Failure:** Still `False` after a minute → check the
 `managed-serviceaccount` addon is `Available` (E.1) — the re-mint is
@@ -476,8 +629,16 @@ performed by the addon agent, not the hub.
 
 ```bash
 oc --context $PASSIVE apply -f manifests/55-backupschedule.yaml
-oc --context $PASSIVE get backupschedule,backup -n open-cluster-management-backup
+oc --context $PASSIVE wait backupschedule/schedule-acm -n open-cluster-management-backup \
+  --for=jsonpath='{.status.phase}'=Enabled --timeout=5m
+sleep 60   # the first set fires on creation
+oc --context $PASSIVE get backup -n open-cluster-management-backup --sort-by=.status.startTimestamp \
+  -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -6
 ```
+
+(Sort by start time, not creation time: the other hub's backups are
+synced in from the bucket, so their objects here are only as old as
+the sync.)
 
 **Why:** Failover is deliberately manual and so is this: until a
 BackupSchedule runs HERE, the fleet state that just changed hands is
@@ -523,21 +684,37 @@ failback may begin whenever the old hub returns.
 ### G.0 Break-glass on the returned hub (only once `dr/` is bootstrapped)
 
 ```bash
-oc --context $ACTIVE patch applications.argoproj.io dr-role -n openshift-gitops \
-  --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'   # $ACTIVE = the RETURNED hub
+# $ACTIVE = the RETURNED hub. Power it on, then:
+until curl -sk --max-time 5 $ACTIVE_API/version >/dev/null; do sleep 15; done; date -u +%FT%TZ   # record: API back
+until oc --context $ACTIVE patch applications.argoproj.io dr-role -n openshift-gitops \
+  --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'; do sleep 10; done
 ```
 
 **Why:** git still says the returned hub is active, so its `dr-role`
 would re-create the BackupSchedule that G.2 deletes, within seconds. Run
 this as soon as the returned hub's API answers, before touching any of
-its role objects. Skip it when `dr/` was never bootstrapped (the patch
-returns NotFound). D.0's afterwards-contract (re-align git, then
-re-enable) now covers both hubs.
+its role objects (the patch retries while the API is still settling).
+Then run G.2 straight away: G.1's wait gates only G.3, and the sooner
+the stale schedule is gone, the less chance it lands a catch-up backup
+set. Skip the patch when `dr/` was never bootstrapped (it returns
+NotFound; interrupt the retry). D.0's afterwards-contract (re-align
+git, then re-enable) now covers both hubs.
+
+**Success:** after G.2, automation is off and the schedule stays gone:
+
+```bash
+oc --context $ACTIVE get applications.argoproj.io dr-role -n openshift-gitops \
+  -o jsonpath='{.spec.syncPolicy.automated}{"\n"}'          # expect: an empty line
+oc --context $ACTIVE get backupschedule -n open-cluster-management-backup   # expect: No resources found
+```
 
 ### G.1 Power the old hub back on; wait out the lease
 
 ```bash
-oc --context $ACTIVE get managedclusters -w   # $ACTIVE = the RETURNED hub
+# $ACTIVE = the RETURNED hub, its API already answering (G.0)
+oc --context $ACTIVE wait managedcluster/$MANAGED \
+  --for=condition=ManagedClusterConditionAvailable=Unknown --timeout=15m
+oc --context $ACTIVE get managedclusters
 ```
 
 **Why:** The returned hub wakes with a STALE worldview — it still lists
@@ -549,6 +726,21 @@ longer than the lease window (for example a ~15 min outage),
 it wakes with the cluster ALREADY `Unknown` — the 2–4 min wait applies
 only to short outages; the gate is the `Unknown` reading itself, never
 elapsed time.
+
+**Power-on note:** if the API answers but the node stays `NotReady`,
+approve its pending certificate requests (a node that was off for a
+while, single-node hubs especially, often has several, including OVN's
+client certificate):
+
+```bash
+oc --context $ACTIVE get nodes
+oc --context $ACTIVE get csr -o go-template='{{range .items}}{{if not .status}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' \
+  | xargs -r oc --context $ACTIVE adm certificate approve
+```
+
+Run it again after a minute: approving the client certificates makes
+the kubelet request its serving certificates. Pods on the node can sit
+in `ContainerCreating` for several more minutes until OVN is up.
 
 **Failure — the one dangerous moment of the whole exercise:** deleting the
 ManagedCluster while it still reads `True` triggers a live detach and
@@ -562,6 +754,10 @@ exact warning). If in doubt, wait; `Unknown` costs nothing.
 oc --context $ACTIVE get backupschedule -n open-cluster-management-backup
 # expect: BackupCollision (it saw the new hub's newer backups in the shared bucket)
 oc --context $ACTIVE delete backupschedule schedule-acm -n open-cluster-management-backup
+# the Velero schedules it owned can outlive it: garbage collection lags after a reboot
+oc --context $ACTIVE delete schedules.velero.io -n open-cluster-management-backup --all
+oc --context $ACTIVE get schedules.velero.io -n open-cluster-management-backup   # expect: No resources found
+oc --context $PASSIVE get backupschedule -n open-cluster-management-backup   # the NEW active hub: expect Enabled
 ```
 
 **Why:** Two hubs writing one bucket corrupts `latest` for every future
@@ -574,7 +770,14 @@ before freezing) and frozen is not gone: delete it so the defusal is
 permanent and auditable, and check which cluster id wrote the bucket's
 `latest` before any future restore.
 
-**Success:** Schedule shows `BackupCollision`, then deletes cleanly.
+**Success:** Schedule shows `BackupCollision` (or still `Enabled`, if
+you got there before the guard fired), then deletes cleanly; no Velero
+schedules remain on the returned hub; the new active hub's schedule
+stays `Enabled`. (Observed live: on a just-rebooted hub, all five
+Velero schedules the BackupSchedule owned were still there a minute
+after its delete, with the next slot minutes away; garbage collection
+removed them about four minutes after the delete. Deleting them by
+hand closes that window.)
 
 **Failure:** Schedule still `Enabled` and writing → verify which backup is
 newest in the bucket before ANY future restore; delete the schedule
@@ -596,7 +799,7 @@ unbroken):
 
 ```bash
 oc --context $ACTIVE get managedclusters        # expect: local-cluster only
-tail -3 ~/probe-$(date -u +%Y%m%d).log          # expect: unbroken 200s
+tail -3 ~/probe-$RUN.log          # expect: unbroken 200s
 ```
 
 **Failure:** Delete hangs on finalizers → the cluster was NOT in `Unknown`
@@ -606,6 +809,8 @@ tail -3 ~/probe-$(date -u +%Y%m%d).log          # expect: unbroken 200s
 
 ```bash
 oc --context $ACTIVE apply -f manifests/56-restore-passive.yaml
+oc --context $ACTIVE wait restores.cluster.open-cluster-management.io/restore-acm-passive-sync \
+  -n open-cluster-management-backup --for=jsonpath='{.status.phase}'=Enabled --timeout=10m
 oc --context $ACTIVE get restore -n open-cluster-management-backup
 ```
 
@@ -652,10 +857,60 @@ one-shot was already reaped by a demote PR; fine, continue.
 ## Phase H — Evidence and docs
 
 - Summarize both probe logs (window, request count, failure count, flip
-  timestamp) and keep them with the exercise's notes.
+  timestamp) and keep them with the exercise's notes:
+
+  ```bash
+  head -1 ~/probe-$RUN.log; tail -1 ~/probe-$RUN.log
+  echo "samples: $(wc -l < ~/probe-$RUN.log)  failures: $(grep -c -v ' 200$' ~/probe-$RUN.log)"
+  grep -v "$ACTIVE_API" ~/hub-pointer-$RUN.log | head -1   # the flip
+  ```
 - If a timing falls outside the ranges in [results.md](../../results.md),
   or a step behaved differently, update that page and this runbook —
   the repo IS the DR plan; an undocumented exercise never happened.
-- If `dr/` is bootstrapped, finish D.0's afterwards-contract: re-align
-  the `dr/` overlays with the roles you created by hand, then re-enable
-  automation on both hubs.
+- If `dr/` is bootstrapped, finish D.0's afterwards-contract with H.1.
+
+### H.1 Re-align `dr/` with the new roles, then re-enable automation (only once `dr/` is bootstrapped)
+
+```bash
+# in the git repo, on the branch the dr-role apps track (targetRevision)
+git branch --show-current
+# the demoted hub: passive role, and drop a one-shot left by an earlier git-driven activation
+sed -i 's#^  - ../roles/active$#  - ../roles/passive#; /^  - restore-activate-.*\.yaml$/d' dr/$ACTIVE/kustomization.yaml
+git rm -q --ignore-unmatch dr/$ACTIVE/restore-activate-*.yaml
+sed -i 's#^  - ../roles/passive$#  - ../roles/active#' dr/$PASSIVE/kustomization.yaml   # the new active hub
+git status --short   # expect: the two kustomization.yaml files (plus a deleted one-shot, if there was one)
+git add -A dr/ && git commit -m "Re-align dr/: $PASSIVE active, $ACTIVE passive (manual failover)" && git push
+REV=$(git rev-parse HEAD)
+for hub in $ACTIVE $PASSIVE; do
+  oc --context $hub annotate applications.argoproj.io dr-role -n openshift-gitops \
+    argocd.argoproj.io/refresh=hard --overwrite
+  oc --context $hub wait applications.argoproj.io/dr-role -n openshift-gitops \
+    --for=jsonpath='{.status.sync.revision}'="$REV" --timeout=5m
+  echo "$hub dr-role now compares against $REV"
+done
+for hub in $ACTIVE $PASSIVE; do
+  oc --context $hub patch applications.argoproj.io dr-role -n openshift-gitops --type merge \
+    -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
+done
+sleep 30
+for hub in $ACTIVE $PASSIVE; do
+  oc --context $hub get applications.argoproj.io dr-role -n openshift-gitops
+  oc --context $hub get backupschedule,restores.cluster.open-cluster-management.io \
+    -n open-cluster-management-backup \
+    -o custom-columns='KIND:.kind,NAME:.metadata.name,CREATED:.metadata.creationTimestamp'
+done
+```
+
+**Why:** Until git says what the hubs now are, re-enabling automation
+would undo the failover: selfHeal would bring back the passive Restore
+on the new active hub and the BackupSchedule on the demoted one. The
+revision wait is the guard against re-enabling on a stale revision
+(see D.0). The hand-made role objects already match the new git, so
+the first sync adopts them rather than recreating them.
+
+**Success:** Both `dr-role` apps `Synced | Healthy`. The new active hub
+lists only `schedule-acm` (plus the `Finished` activation restore from
+D.2, which git does not track; G.5 deletes it at this hub's next
+demotion), the demoted hub only `restore-acm-passive-sync`, and the
+creation times are the ones from F.1 and G.4 (adopted, not recreated).
+`hack/validate.py` prints the new posture.
