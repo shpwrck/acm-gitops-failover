@@ -6,6 +6,6 @@ data:
   # Bump REVISION to demonstrate a deploy (runbook Phase C).
   index.html: |
     <html><body>
-    <h1>hello-failover REVISION v2</h1>
+    <h1>hello-failover REVISION v3</h1>
     <p>Served from git: apps/hello-failover (PULL model — synced by the spoke's own Argo CD)</p>
     </body></html>

@@ -6,6 +6,6 @@ data:
   # Bump REVISION to demonstrate a deploy (push runbook Phase C').
   index.html: |
     <html><body>
-    <h1>hello-failover-push REVISION v1</h1>
+    <h1>hello-failover-push REVISION v2</h1>
     <p>Served from git: apps/hello-failover-push (PUSH model — delivered by the active hub's Argo CD)</p>
     </body></html>
