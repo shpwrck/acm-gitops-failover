@@ -166,7 +166,7 @@ stage() {   # stage <title> <what and why>
   explain "$2"
 }
 
-declare -A ACM_PLAN GITOPS_PLAN OP_NS
+declare -A ACM_PLAN GITOPS_PLAN OP_NS ORPHAN
 DETACH=0 DEMO=0 PLAN_ROWS=""
 row() { PLAN_ROWS+="$1"$'\t'"$2"$'\t'"$3"$'\t'"$4"$'\n'; }
 
@@ -245,7 +245,13 @@ preflight() {
     remove) row "$MANAGED" "OpenShift GitOps" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
     keep) row "$MANAGED" "OpenShift GitOps" keep "there before the build" ;;
   esac
-  if some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet; then
+  for c in "${CLUSTERS[@]}"; do
+    if [ "${ACM_PLAN[$c]}" = none ] && orphan_agent "$c"; then
+      if [ "$FULL" = 1 ]; then ORPHAN[$c]=1; row "$c" "ACM agent of its own former hub" remove "no hub left on $c (--full)"
+      else row "$c" "ACM agent of its own former hub" keep "--full removes it"; fi
+    fi
+  done
+  if some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet && ! orphan_agent "$MANAGED"; then
     if [ "$DETACH" = 1 ]; then row "$MANAGED" "ACM agent (klusterlet)" remove "the detach removes it"; else row "$MANAGED" "ACM agent (klusterlet)" keep "$MANAGED stays managed"; fi
   fi
   printf 'Cluster\tWhat\tPlan\tWhy\n%s' "$PLAN_ROWS" | table
@@ -275,7 +281,7 @@ preflight() {
       fi
     fi
   done
-  if [ "$DETACH" = 0 ] && some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet && [ "$FULL" = 1 ]; then
+  if [ "$DETACH" = 0 ] && some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet && [ "$FULL" = 1 ] && ! orphan_agent "$MANAGED"; then
     note "$MANAGED runs an ACM agent but neither hub lists it: its hub is elsewhere; detach it there"
   fi
   HELP=""
@@ -422,6 +428,26 @@ cleanup_script() {   # cleanup_script <context>: ACM's "Cleaning up artifacts be
     multiclusterengines.multicluster.openshift.io --ignore-not-found
 }
 
+remove_own_agent() {   # remove_own_agent <context>: a hub's own agent (local-cluster) that the uninstall left, the documented way
+  local c=$1
+  help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
+  if some "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
+    act "$c: delete klusterlet/klusterlet (the hub's own agent for local-cluster; its operator cleans up after it)" \
+      oc --context "$c" delete klusterlets.operator.open-cluster-management.io klusterlet --ignore-not-found --wait=false
+    if [ "$DRY" = 0 ] && ! try_until 300 "$c's klusterlet to finish its cleanup" none "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
+      if some "$c" deployments.apps klusterlet -n open-cluster-management-agent; then
+        red "$c: the klusterlet is still there after 5 min, with its operator running"
+        die "$c's klusterlet does not finish its cleanup: see the link above"
+      fi
+      act "$c: clear the klusterlet's finalizer (its operator, which would clear it, is gone)" oc --context "$c" patch \
+        klusterlets.operator.open-cluster-management.io klusterlet --type merge -p '{"metadata":{"finalizers":null}}'
+      gone "$c" 120 "the klusterlet" klusterlets.operator.open-cluster-management.io klusterlet
+    fi
+  fi
+  ns_gone "$c" open-cluster-management-agent-addon
+  ns_gone "$c" open-cluster-management-agent
+}
+
 remove_operator() {   # remove_operator <context> <package>: its Subscription, then its CSVs
   local c=$1 s ns csvs
   s=$(sub_of "$c" "$2")
@@ -441,7 +467,7 @@ remove_operator() {   # remove_operator <context> <package>: its Subscription, t
 
 cmd_acm() {
   local c mch x n
-  stage "ACM" "Where ACM goes, it goes the documented way: the MultiClusterHub first (it takes the multicluster engine, the add-ons and the backup operator with it, which takes 5 to 15 minutes), then the ACM operator, then what ACM's own cleanup script lists and the namespaces ACM made. Where ACM stays, the two changes the build made to it are undone."
+  stage "ACM" "Where ACM goes, it goes the documented way: the MultiClusterHub first (it takes the multicluster engine, the add-ons and the backup operator with it, which takes 5 to 15 minutes), then the ACM operator, then what ACM's own cleanup script lists and the namespaces ACM made, and last the hub's own agent for local-cluster if the uninstall left it. Where ACM stays, the two changes the build made to it are undone."
   for c in "${HUBS[@]}"; do
     case ${ACM_PLAN[$c]} in
       none) continue ;;
@@ -504,12 +530,17 @@ cmd_acm() {
       "${OP_NS[$c/mce]:-multicluster-engine}" "${OP_NS[$c/acm]:-open-cluster-management}"; do
       ns_gone "$c" "$n"
     done
-    # the agent namespaces belong to the hub's own klusterlet (local-cluster), unless another hub manages this one
-    if [ "$DRY" = 0 ] && some "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
-      note "$c still runs a klusterlet: another hub manages it, so its agent namespaces stay"
+    # the agent left on the hub is its own (local-cluster), which the uninstall can leave behind, unless another hub manages it
+    if some "$c" klusterlets.operator.open-cluster-management.io klusterlet && ! self_agent "$c"; then
+      note "$c still runs a klusterlet for the hub at $(klusterlet_hub "$c"): that hub manages $c, so its agent stays"
     else
-      ns_gone "$c" open-cluster-management-agent-addon
-      ns_gone "$c" open-cluster-management-agent
+      remove_own_agent "$c"
+    fi
+  done
+  for c in "${CLUSTERS[@]}"; do
+    if [ "${ORPHAN[$c]:-0}" = 1 ]; then
+      say "$c: the ACM agent an earlier uninstall left"
+      remove_own_agent "$c"
     fi
   done
 }
