@@ -144,28 +144,28 @@ del() {   # del <context> <kind> <name> [namespace]: delete it if it is there an
   local c=$1 k=$2 n=$3 ns=${4:-} where
   where=$k/$n${ns:+ in $ns}
   if mine "$c" "$k" "$n" ${ns:+-n "$ns"}; then
-    act "$c: delete $where" oc --context "$c" delete "$k" "$n" ${ns:+-n "$ns"} --ignore-not-found --wait=false
+    act "$(cl "$c"): delete $where" oc --context "$c" delete "$k" "$n" ${ns:+-n "$ns"} --ignore-not-found --wait=false
   elif some "$c" "$k" "$n" ${ns:+-n "$ns"}; then
-    note "$c: kept $where (it does not carry this repo's label; --full removes it)"
+    note "$(cl "$c"): kept $where (it does not carry this repo's label; --full removes it)"
   fi
 }
 gone() {   # gone <context> <seconds> <what> <oc get args...>: wait until it is gone
   if [ "$DRY" = 1 ]; then return 0; fi
   if some "$1" "${@:4}"; then
-    try_until "$2" "$3 to be gone from $1" none "$1" "${@:4}" || die "$1: $3 still there after $(upto "$2")"
+    try_until "$2" "$3 to be gone from $(cl "$1")" none "$1" "${@:4}" || die "$(cl "$1"): $3 still there after $(upto "$2")"
   fi
 }
 ns_gone() {   # ns_gone <context> <namespace> [seconds]: delete a namespace and wait; on a stall, say what holds it
   local c=$1 n=$2 limit=${3:-900}
   if none "$c" ns "$n"; then return 0; fi
-  act "$c: delete namespace $n" oc --context "$c" delete ns "$n" --ignore-not-found --wait=false
+  act "$(cl "$c"): delete namespace $n" oc --context "$c" delete ns "$n" --ignore-not-found --wait=false
   if [ "$DRY" = 1 ]; then return 0; fi
   if ! try_until "$limit" "namespace $n to be gone from $c" none "$c" ns "$n"; then
     oc --context "$c" get ns "$n" -o json 2>/dev/null |
       jq -r '.status.conditions[]? | select(.status == "True") | "\(.type): \(.message)"' | show
     help_at docs/build.md#a-namespace-that-does-not-go
-    red "$c: namespace $n is still terminating after $(upto "$limit")"
-    die "namespace $n on $c does not go away: the lines above name what holds it"
+    red "$(cl "$c"): namespace $n is still terminating after $(upto "$limit")"
+    die "namespace $n on $(cl "$c") does not go away: the lines above name what holds it"
   fi
 }
 
@@ -178,9 +178,9 @@ stage() {   # stage <title> <what and why>
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
-    printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$1" "$C_OFF"
+    printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$(paint "$1" "$C_B$C_ACC")" "$C_OFF"
   else
-    printf '\n#### Stage %d/%d: %s\n' "$STAGE" "${#STAGES[@]}" "$1"
+    printf '\n#### Stage %d/%d: %s\n' "$STAGE" "${#STAGES[@]}" "$(bare "$1")"
   fi
   explain "$2"
 }
@@ -201,7 +201,7 @@ git_plan() {   # git_plan: rows for dr/ on $BRANCH and for hack/dr.sh's branches
     if [ "$x" = "$v" ]; then continue; fi
     if [ "$x" = missing ]; then row git "dr/$c on $BRANCH" keep "there is no dr/$c/kustomization.yaml"; continue; fi
     if some "$c" "$APP" dr-role -n "$GNS" && ! mine "$c" "$APP" dr-role -n "$GNS"; then
-      row git "dr/$c on $BRANCH" keep "it is $x; $c's dr-role stays and would apply a change"
+      row git "dr/$c on $BRANCH" keep "it is $x; $(cl "$c")'s dr-role stays and would apply a change"
       continue
     fi
     GIT_RESET+="${GIT_RESET:+ }$c"
@@ -227,17 +227,17 @@ branches() { if [ "$1" = 1 ]; then echo "1 hack/dr.sh branch"; else echo "$1 hac
 
 preflight() {
   local c s v x mch blockers=0 had
-  stage "Pre-flight (read-only)" "Reads what is on $ACTIVE, $PASSIVE and $MANAGED and decides what goes. $(if [ "$FULL" = 1 ]; then
-    echo "With --full, ACM and OpenShift GitOps go wherever they are installed, whoever installed them, and $MANAGED is detached from its hub."
+  stage "Pre-flight (read-only)" "Reads what is on $(cl "$ACTIVE"), $(cl "$PASSIVE") and $(cl "$MANAGED") and decides what goes. $(if [ "$FULL" = 1 ]; then
+    echo "With --full, ACM and OpenShift GitOps go wherever they are installed, whoever installed them, and $(cl "$MANAGED") is detached from its hub."
   elif [ "$RESET" = 1 ]; then
-    echo "With --reset, only the exercise goes: the DR roles and the demo apps. ACM, OpenShift GitOps, the backup storage and $MANAGED's import stay, for the next hack/build.sh to reuse."
+    echo "With --reset, only the exercise goes: the DR roles and the demo apps. ACM, OpenShift GitOps, the backup storage and $(cl "$MANAGED")'s import stay, for the next hack/build.sh to reuse."
   else
     echo "Without --full, only what carries this repo's label goes (every manifest in manifests/ and dr/ has it), plus ACM and OpenShift GitOps where hack/build.sh installed them. An ACM or OpenShift GitOps that was there before the build stays, and so does everything else on the clusters."
   fi) It refuses when removing ACM or OpenShift GitOps would take something that is not this repo's with it. Nothing changes in this stage."
   sec_begin "Clusters" "Clusters"
   help_at docs/build.md#clusters
   for c in "${CLUSTERS[@]}"; do
-    if alive "$c"; then ok "$c API answers"; else red "$c API does not answer"; blockers=1; fi
+    if alive "$c"; then ok "$(cl "$c") API answers"; else red "$(cl "$c") API does not answer"; blockers=1; fi
   done
   sec_end "all three APIs answer"
   if [ "$blockers" = 1 ]; then verdict bad "TEARDOWN RED: every cluster must answer; power them on and run it again"; return 1; fi
@@ -265,31 +265,31 @@ preflight() {
     s=$(sub_of "$c" advanced-cluster-management)
     v=$(if [ -n "$s" ]; then sub_get "$c" "$s" '{.status.installedCSV}'; fi)
     case ${ACM_PLAN[$c]} in
-      none) row "$c" ACM "-" "not installed" ;;
-      remove) row "$c" "ACM ${v#advanced-cluster-management.}" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
+      none) row "$(cl "$c")" ACM "-" "not installed" ;;
+      remove) row "$(cl "$c")" "ACM ${v#advanced-cluster-management.}" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
       keep)
-        row "$c" "ACM ${v#advanced-cluster-management.}" keep "$(kept_why)"
+        row "$(cl "$c")" "ACM ${v#advanced-cluster-management.}" keep "$(kept_why)"
         if [ "$RESET" = 0 ]; then   # with --reset, the build's changes to it stay too, for the next build
           mch=$(mch_of "$c")
           if [ -n "$mch" ] && [ "$(mch_get "$c" "$mch" "{.metadata.annotations.$A_BACKUP}")" = enabled-by-build ]; then
-            row "$c" "  cluster-backup" "turn off" "the build turned it on"
+            row "$(cl "$c")" "  cluster-backup" "turn off" "the build turned it on"
           fi
           x=$(sub_get "$c" "$s" "{.metadata.annotations.$A_APPROVAL}")
-          if [ -n "$x" ]; then row "$c" "  ACM approval" "back to $x" "the build set Manual"; fi
+          if [ -n "$x" ]; then row "$(cl "$c")" "  ACM approval" "back to $x" "the build set Manual"; fi
         fi
         ;;
     esac
     s=$(sub_of "$c" openshift-gitops-operator)
     v=$(if [ -n "$s" ]; then sub_get "$c" "$s" '{.status.installedCSV}'; fi)
     case ${GITOPS_PLAN[$c]} in
-      none) row "$c" "OpenShift GitOps" "-" "not installed" ;;
-      remove) row "$c" "OpenShift GitOps ${v#openshift-gitops-operator.}" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
-      keep) row "$c" "OpenShift GitOps ${v#openshift-gitops-operator.}" keep "$(kept_why)" ;;
+      none) row "$(cl "$c")" "OpenShift GitOps" "-" "not installed" ;;
+      remove) row "$(cl "$c")" "OpenShift GitOps ${v#openshift-gitops-operator.}" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
+      keep) row "$(cl "$c")" "OpenShift GitOps ${v#openshift-gitops-operator.}" keep "$(kept_why)" ;;
     esac
     if some "$c" managedcluster "$MANAGED"; then
-      if [ "$RESET" = 1 ]; then row "$c" "ManagedCluster $MANAGED" keep "--reset keeps the import"
-      elif mine "$c" managedcluster "$MANAGED"; then row "$c" "ManagedCluster $MANAGED" detach "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "the build imported it"; fi)"
-      else row "$c" "ManagedCluster $MANAGED" keep "managed before the build"; fi
+      if [ "$RESET" = 1 ]; then row "$(cl "$c")" "ManagedCluster $(cl "$MANAGED")" keep "--reset keeps the import"
+      elif mine "$c" managedcluster "$MANAGED"; then row "$(cl "$c")" "ManagedCluster $(cl "$MANAGED")" detach "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "the build imported it"; fi)"
+      else row "$(cl "$c")" "ManagedCluster $(cl "$MANAGED")" keep "managed before the build"; fi
     fi
     had=0
     for x in "$APP dr-role -n $GNS" "$BSCHED schedule-acm -n $NS" "$RESTORE restore-acm-passive-sync -n $NS" \
@@ -297,27 +297,27 @@ preflight() {
       # shellcheck disable=SC2086 # x is a kind, a name and a namespace flag
       if mine "$c" $x; then had=1; fi
     done
-    if [ "$had" = 1 ]; then row "$c" "DR roles, backups, demo wiring" remove "this repo's"; fi
+    if [ "$had" = 1 ]; then row "$(cl "$c")" "DR roles, backups, demo wiring" remove "this repo's"; fi
     if [ "$RESET" = 1 ] && mine "$c" dataprotectionapplications.oadp.openshift.io acm-dpa -n "$NS"; then
-      row "$c" "backup storage (DPA, S3 key)" keep "--reset keeps it"
+      row "$(cl "$c")" "backup storage (DPA, S3 key)" keep "--reset keeps it"
     fi
   done
   if some "$MANAGED" ns hello-failover || some "$MANAGED" ns hello-failover-push; then
-    if [ "$DEMO" = 1 ]; then row "$MANAGED" "demo apps" remove "with their ApplicationSets"; else row "$MANAGED" "demo apps" keep "their ApplicationSets stay"; fi
+    if [ "$DEMO" = 1 ]; then row "$(cl "$MANAGED")" "demo apps" remove "with their ApplicationSets"; else row "$(cl "$MANAGED")" "demo apps" keep "their ApplicationSets stay"; fi
   fi
   case ${GITOPS_PLAN[$MANAGED]} in
-    none) row "$MANAGED" "OpenShift GitOps" "-" "not installed" ;;
-    remove) row "$MANAGED" "OpenShift GitOps" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
-    keep) row "$MANAGED" "OpenShift GitOps" keep "$(kept_why)" ;;
+    none) row "$(cl "$MANAGED")" "OpenShift GitOps" "-" "not installed" ;;
+    remove) row "$(cl "$MANAGED")" "OpenShift GitOps" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
+    keep) row "$(cl "$MANAGED")" "OpenShift GitOps" keep "$(kept_why)" ;;
   esac
   for c in "${CLUSTERS[@]}"; do
     if [ "${ACM_PLAN[$c]}" = none ] && orphan_agent "$c"; then
-      if [ "$FULL" = 1 ]; then ORPHAN[$c]=1; row "$c" "ACM agent of its own former hub" remove "no hub left on $c (--full)"
-      else row "$c" "ACM agent of its own former hub" keep "--full removes it"; fi
+      if [ "$FULL" = 1 ]; then ORPHAN[$c]=1; row "$(cl "$c")" "ACM agent of its own former hub" remove "no hub left on $(cl "$c") (--full)"
+      else row "$(cl "$c")" "ACM agent of its own former hub" keep "--full removes it"; fi
     fi
   done
   if some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet && ! orphan_agent "$MANAGED"; then
-    if [ "$DETACH" = 1 ]; then row "$MANAGED" "ACM agent (klusterlet)" remove "the detach removes it"; else row "$MANAGED" "ACM agent (klusterlet)" keep "$MANAGED stays managed"; fi
+    if [ "$DETACH" = 1 ]; then row "$(cl "$MANAGED")" "ACM agent (klusterlet)" remove "the detach removes it"; else row "$(cl "$MANAGED")" "ACM agent (klusterlet)" keep "$(cl "$MANAGED") stays managed"; fi
   fi
   git_plan
   printf 'Cluster\tWhat\tPlan\tWhy\n%s' "$PLAN_ROWS" | table
@@ -329,10 +329,10 @@ preflight() {
   for c in "${HUBS[@]}"; do
     if [ "${ACM_PLAN[$c]}" = remove ]; then
       x=$(other_managed "$c")
-      if [ -z "$x" ]; then ok "$c: ACM manages nothing else"; else red "$c: ACM also manages $x: detach it first, or keep ACM"; blockers=1; fi
+      if [ -z "$x" ]; then ok "$(cl "$c"): ACM manages nothing else"; else red "$(cl "$c"): ACM also manages $x: detach it first, or keep ACM"; blockers=1; fi
       if [ "$FULL" = 0 ]; then
         for x in discoveryconfigs.discovery.open-cluster-management.io agentserviceconfigs.agent-install.openshift.io multiclusterobservabilities.observability.open-cluster-management.io; do
-          if some "$c" "$x" -A; then red "$c: ACM runs a ${x%%.*} this repo did not create; remove it first, or use --full"; blockers=1; fi
+          if some "$c" "$x" -A; then red "$(cl "$c"): ACM runs a ${x%%.*} this repo did not create; remove it first, or use --full"; blockers=1; fi
         done
       fi
     fi
@@ -340,16 +340,16 @@ preflight() {
   for c in "${CLUSTERS[@]}"; do
     if [ "${GITOPS_PLAN[$c]}" = remove ]; then
       x=$(argo_strangers "$c")
-      if [ -z "$x" ]; then ok "$c: Argo CD runs nothing else"
+      if [ -z "$x" ]; then ok "$(cl "$c"): Argo CD runs nothing else"
       else
-        red "$c: OpenShift GitOps also runs what this repo did not create:"
+        red "$(cl "$c"): OpenShift GitOps also runs what this repo did not create:"
         show <<<"$x"
         blockers=1
       fi
     fi
   done
   if [ "$DETACH" = 0 ] && some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet && [ "$FULL" = 1 ] && ! orphan_agent "$MANAGED"; then
-    note "$MANAGED runs an ACM agent but neither hub lists it: its hub is elsewhere; detach it there"
+    note "$(cl "$MANAGED") runs an ACM agent but neither hub lists it: its hub is elsewhere; detach it there"
   fi
   sec_end "what goes takes nothing that is not this repo's with it"
   HELP=""
@@ -363,10 +363,10 @@ cmd_roles() {
   local c n
   stage "DR roles" "Stops the DR machinery first, so nothing re-creates what the later stages delete: each hub's dr-role application (its own Argo CD would put the role back), the role it applied (the active hub's BackupSchedule, the passive hub's continuous restore, any activation restore), and the RBAC that let it."
   for c in "${HUBS[@]}"; do
-    say "$c"
+    say "$(cl "$c")"
     del "$c" "$APP" dr-role "$GNS"
     if some "$c" "$APP" dr-role -n "$GNS" && ! mine "$c" "$APP" dr-role -n "$GNS"; then
-      note "$c: dr-role stays, so the role it applies stays too (its own Argo CD would put it back)"
+      note "$(cl "$c"): dr-role stays, so the role it applies stays too (its own Argo CD would put it back)"
       continue
     fi
     gone "$c" 120 "application dr-role" "$APP" dr-role -n "$GNS"
@@ -382,15 +382,15 @@ cmd_roles() {
 
 cmd_demo() {
   local c n
-  stage "Demo apps" "Removes what delivers the demo apps: the ApplicationSets and the applications they made, the GitOpsCluster that registers $MANAGED with each hub's Argo CD, its placements and cluster secrets. Then the apps themselves on $MANAGED. The passive hub has copies too: its continuous restore brought them over from the active hub."
+  stage "Demo apps" "Removes what delivers the demo apps: the ApplicationSets and the applications they made, the GitOpsCluster that registers $(cl "$MANAGED") with each hub's Argo CD, its placements and cluster secrets. Then the apps themselves on $(cl "$MANAGED"). The passive hub has copies too: its continuous restore brought them over from the active hub."
   for c in "${HUBS[@]}"; do
-    say "$c"
+    say "$(cl "$c")"
     del "$c" "$APPSET" hello-failover "$GNS"
     del "$c" "$APPSET" hello-failover-push "$GNS"
     for n in "hello-failover-$MANAGED" "hello-failover-push-$MANAGED"; do
       # the ApplicationSets made these (they carry no label of their own) and take them along
       if [ "$DEMO" = 1 ] && some "$c" "$APP" "$n" -n "$GNS"; then
-        act "$c: delete $APP/$n in $GNS" oc --context "$c" delete "$APP" "$n" -n "$GNS" --ignore-not-found --wait=false
+        act "$(cl "$c"): delete $APP/$n in $GNS" oc --context "$c" delete "$APP" "$n" -n "$GNS" --ignore-not-found --wait=false
       fi
     done
     del "$c" gitopsclusters.apps.open-cluster-management.io gitops-cluster "$GNS"
@@ -402,13 +402,13 @@ cmd_demo() {
       for n in $(oc --context "$c" get secret -n "$GNS" -l apps.open-cluster-management.io/acm-cluster=true \
         -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true); do
         if [[ $n == "$MANAGED"-* ]]; then
-          act "$c: delete secret/$n in $GNS (the GitOpsCluster's cluster secret)" \
+          act "$(cl "$c"): delete secret/$n in $GNS (the GitOpsCluster's cluster secret)" \
             oc --context "$c" delete secret "$n" -n "$GNS" --ignore-not-found --wait=false
         fi
       done
     fi
   done
-  say "$MANAGED"
+  say "$(cl "$MANAGED")"
   if [ "$DEMO" = 0 ]; then
     if some "$MANAGED" ns hello-failover || some "$MANAGED" ns hello-failover-push; then note "the demo apps stay: their ApplicationSets do"; fi
     return 0
@@ -420,7 +420,7 @@ cmd_demo() {
       note "it is still there: deleting it directly"
     fi
     if some "$MANAGED" "$APP" "hello-failover-$MANAGED" -n "$GNS"; then
-      act "$MANAGED: delete $APP/hello-failover-$MANAGED in $GNS" \
+      act "$(cl "$MANAGED"): delete $APP/hello-failover-$MANAGED in $GNS" \
         oc --context "$MANAGED" delete "$APP" "hello-failover-$MANAGED" -n "$GNS" --ignore-not-found --wait=false
       gone "$MANAGED" 120 "the pull app" "$APP" "hello-failover-$MANAGED" -n "$GNS"
     fi
@@ -431,9 +431,9 @@ cmd_demo() {
 
 cmd_detach() {
   local c order=() t0
-  stage "Detach $MANAGED" "Deletes the ManagedCluster $MANAGED. A hub that can still reach $MANAGED then removes its ACM agent (the klusterlet) and the add-ons, which takes a few minutes. A hub whose copy is stale (Unknown) goes first: deleting it there touches nothing on $MANAGED."
+  stage "Detach $(cl "$MANAGED")" "Deletes the ManagedCluster $(cl "$MANAGED"). A hub that can still reach $(cl "$MANAGED") then removes its ACM agent (the klusterlet) and the add-ons, which takes a few minutes. A hub whose copy is stale (Unknown) goes first: deleting it there touches nothing on $(cl "$MANAGED")."
   if [ "$DETACH" = 0 ]; then
-    if some "$ACTIVE" managedcluster "$MANAGED" || some "$PASSIVE" managedcluster "$MANAGED"; then note "$MANAGED stays managed: it was managed before the build (--full detaches it)"; fi
+    if some "$ACTIVE" managedcluster "$MANAGED" || some "$PASSIVE" managedcluster "$MANAGED"; then note "$(cl "$MANAGED") stays managed: it was managed before the build (--full detaches it)"; fi
     return 0
   fi
   for c in "${HUBS[@]}"; do
@@ -446,7 +446,7 @@ cmd_detach() {
   done
   for c in "${order[@]}"; do
     if some "$c" managedcluster "$MANAGED"; then
-      act "$c: delete managedcluster/$MANAGED" oc --context "$c" delete managedcluster "$MANAGED" --ignore-not-found --wait=false
+      act "$(cl "$c"): delete managedcluster/$MANAGED" oc --context "$c" delete managedcluster "$MANAGED" --ignore-not-found --wait=false
       gone "$c" 900 "managedcluster $MANAGED" managedcluster "$MANAGED"
     fi
   done
@@ -455,18 +455,18 @@ cmd_detach() {
   if some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet || some "$MANAGED" ns open-cluster-management-agent; then
     help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
     if ! try_until 900 "the ACM agent to leave $MANAGED" not some "$MANAGED" ns open-cluster-management-agent; then
-      red "$MANAGED still has namespace open-cluster-management-agent after 15 min"
-      die "the detach did not remove $MANAGED's ACM agent: see the link above"
+      red "$(cl "$MANAGED") still has namespace open-cluster-management-agent after 15 min"
+      die "the detach did not remove $(cl "$MANAGED")'s ACM agent: see the link above"
     fi
   fi
-  finished "$MANAGED is detached ($(dur $((SECONDS - t0))))"
+  finished "$(cl "$MANAGED") is detached ($(dur $((SECONDS - t0))))"
 }
 
 cmd_storage() {
   local c
   stage "Backup storage" "Deletes each hub's DataProtectionApplication (Velero and its connection to the S3 bucket) and the secret with the S3 key. The bucket and the backups in it stay: empty it with your S3 tool if the next build should start from nothing."
   for c in "${HUBS[@]}"; do
-    say "$c"
+    say "$(cl "$c")"
     del "$c" dataprotectionapplications.oadp.openshift.io acm-dpa "$NS"
     del "$c" secret cloud-credentials "$NS"
     gone "$c" 300 "the DataProtectionApplication" dataprotectionapplications.oadp.openshift.io acm-dpa -n "$NS"
@@ -500,14 +500,14 @@ remove_own_agent() {   # remove_own_agent <context>: a hub's own agent (local-cl
   local c=$1
   help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
   if some "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
-    act "$c: delete klusterlet/klusterlet (the hub's own agent for local-cluster; its operator cleans up after it)" \
+    act "$(cl "$c"): delete klusterlet/klusterlet (the hub's own agent for local-cluster; its operator cleans up after it)" \
       oc --context "$c" delete klusterlets.operator.open-cluster-management.io klusterlet --ignore-not-found --wait=false
     if [ "$DRY" = 0 ] && ! try_until 300 "$c's klusterlet to finish its cleanup" none "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
       if some "$c" deployments.apps klusterlet -n open-cluster-management-agent; then
-        red "$c: the klusterlet is still there after 5 min, with its operator running"
-        die "$c's klusterlet does not finish its cleanup: see the link above"
+        red "$(cl "$c"): the klusterlet is still there after 5 min, with its operator running"
+        die "$(cl "$c")'s klusterlet does not finish its cleanup: see the link above"
       fi
-      act "$c: clear the klusterlet's finalizer (its operator, which would clear it, is gone)" oc --context "$c" patch \
+      act "$(cl "$c"): clear the klusterlet's finalizer (its operator, which would clear it, is gone)" oc --context "$c" patch \
         klusterlets.operator.open-cluster-management.io klusterlet --type merge -p '{"metadata":{"finalizers":null}}'
       gone "$c" 120 "the klusterlet" klusterlets.operator.open-cluster-management.io klusterlet
     fi
@@ -523,11 +523,11 @@ remove_operator() {   # remove_operator <context> <package>: its Subscription, t
   ns=${s% *}
   csvs=$(oc --context "$c" get "$CSV" -n "$ns" -o json 2>/dev/null |
     jq -r --arg p "$2." '.items[] | select(.metadata.name | startswith($p)) | .metadata.name' | paste -sd' ' -)
-  act "$c: delete subscription ${s#* } in $ns (no more installs or upgrades of $2)" \
+  act "$(cl "$c"): delete subscription ${s#* } in $ns (no more installs or upgrades of $2)" \
     oc --context "$c" delete "$SUB" "${s#* }" -n "$ns" --ignore-not-found
   if [ -n "$csvs" ]; then
     # shellcheck disable=SC2086 # one CSV name per word
-    act "$c: delete $csvs in $ns (the operator itself)" oc --context "$c" delete "$CSV" $csvs -n "$ns" --ignore-not-found --wait=false
+    act "$(cl "$c"): delete $csvs in $ns (the operator itself)" oc --context "$c" delete "$CSV" $csvs -n "$ns" --ignore-not-found --wait=false
     # shellcheck disable=SC2086
     gone "$c" 300 "the $2 operator" "$CSV" $csvs -n "$ns"
   fi
@@ -540,37 +540,37 @@ cmd_acm() {
     case ${ACM_PLAN[$c]} in
       none) continue ;;
       keep)
-        say "$c: ACM stays"
+        say "$(cl "$c"): ACM stays"
         mch=$(mch_of "$c")
         if [ -n "$mch" ] && [ "$(mch_get "$c" "$mch" "{.metadata.annotations.$A_BACKUP}")" = enabled-by-build ]; then
           x=$(oc --context "$c" get multiclusterhubs.operator.open-cluster-management.io "${mch#* }" -n "${mch% *}" -o json |
             jq -c --arg a "$A_BACKUP" '{metadata: {annotations: {($a): null}}, spec: {overrides: {components:
               ((.spec.overrides.components // [] | map(select(.name != "cluster-backup"))) + [{name: "cluster-backup", enabled: false}])}}}')
-          act "$c: disable cluster-backup again (the build enabled it)" \
+          act "$(cl "$c"): disable cluster-backup again (the build enabled it)" \
             oc --context "$c" patch multiclusterhubs.operator.open-cluster-management.io "${mch#* }" -n "${mch% *}" --type merge -p "$x"
           ns_gone "$c" "$NS"
         fi
         x=$(sub_of "$c" advanced-cluster-management)
         n=$(sub_get "$c" "$x" "{.metadata.annotations.$A_APPROVAL}")
         if [ -n "$n" ]; then
-          act "$c: set the ACM subscription's approval back to $n" oc --context "$c" patch "$SUB" "${x#* }" -n "${x% *}" --type merge \
+          act "$(cl "$c"): set the ACM subscription's approval back to $n" oc --context "$c" patch "$SUB" "${x#* }" -n "${x% *}" --type merge \
             -p "{\"metadata\":{\"annotations\":{\"$A_APPROVAL\":null}},\"spec\":{\"installPlanApproval\":\"$n\"}}"
         fi
         ;;
       remove)
-        say "$c: remove ACM"
+        say "$(cl "$c"): remove ACM"
         if [ "$FULL" = 1 ]; then
           for x in discoveryconfigs.discovery.open-cluster-management.io agentserviceconfigs.agent-install.openshift.io \
             multiclusterobservabilities.observability.open-cluster-management.io; do
             if some "$c" "$x" -A; then
-              act "$c: delete every ${x%%.*} (the ACM docs remove them before the MultiClusterHub)" \
+              act "$(cl "$c"): delete every ${x%%.*} (the ACM docs remove them before the MultiClusterHub)" \
                 oc --context "$c" delete "$x" --all --all-namespaces --ignore-not-found --wait=false
             fi
           done
         fi
         mch=$(mch_of "$c")
         if [ -n "$mch" ]; then
-          act "$c: delete multiclusterhub/${mch#* } in ${mch% *}" oc --context "$c" delete multiclusterhubs.operator.open-cluster-management.io \
+          act "$(cl "$c"): delete multiclusterhub/${mch#* } in ${mch% *}" oc --context "$c" delete multiclusterhubs.operator.open-cluster-management.io \
             "${mch#* }" -n "${mch% *}" --ignore-not-found --wait=false
         fi
         ;;
@@ -578,36 +578,36 @@ cmd_acm() {
   done
   for c in "${HUBS[@]}"; do
     if [ "${ACM_PLAN[$c]}" != remove ]; then continue; fi
-    say "$c: after the MultiClusterHub$(if [ "$DRY" = 1 ]; then echo ", whatever of this it leaves behind"; fi)"
+    say "$(cl "$c"): after the MultiClusterHub$(if [ "$DRY" = 1 ]; then echo ", whatever of this it leaves behind"; fi)"
     help_at docs/build.md#a-multiclusterhub-that-does-not-go
     if [ "$DRY" = 0 ] && ! try_until 1800 "$c's MultiClusterHub to finish uninstalling" not some "$c" multiclusterhubs.operator.open-cluster-management.io -A; then
       oc --context "$c" get multiclusterhubs.operator.open-cluster-management.io -A -o json |
         jq -r '.items[].status | "phase \(.phase // "?")", (.conditions[]? | "\(.type) \(.status): \(.message // "")")' | show
-      red "$c: the MultiClusterHub is still there after 30 min"
-      die "$c's MultiClusterHub does not finish uninstalling: its status is above"
+      red "$(cl "$c"): the MultiClusterHub is still there after 30 min"
+      die "$(cl "$c")'s MultiClusterHub does not finish uninstalling: its status is above"
     fi
     remove_operator "$c" advanced-cluster-management
     for x in $(oc --context "$c" get multiclusterengines.multicluster.openshift.io -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true); do
-      act "$c: delete multiclusterengine/$x (left by the MultiClusterHub)" \
+      act "$(cl "$c"): delete multiclusterengine/$x (left by the MultiClusterHub)" \
         oc --context "$c" delete multiclusterengines.multicluster.openshift.io "$x" --ignore-not-found --wait=false
       gone "$c" 1200 "multiclusterengine $x" multiclusterengines.multicluster.openshift.io "$x"
     done
     remove_operator "$c" multicluster-engine
-    act "$c: delete what ACM's cleanup script lists (API services, cluster image sets, cluster roles, CRDs, webhooks)" cleanup_script "$c"
+    act "$(cl "$c"): delete what ACM's cleanup script lists (API services, cluster image sets, cluster roles, CRDs, webhooks)" cleanup_script "$c"
     for n in "$NS" open-cluster-management-global-set open-cluster-management-hub hive local-cluster "$MANAGED" \
       "${OP_NS[$c/mce]:-multicluster-engine}" "${OP_NS[$c/acm]:-open-cluster-management}"; do
       ns_gone "$c" "$n"
     done
     # the agent left on the hub is its own (local-cluster), which the uninstall can leave behind, unless another hub manages it
     if some "$c" klusterlets.operator.open-cluster-management.io klusterlet && ! self_agent "$c"; then
-      note "$c still runs a klusterlet for the hub at $(klusterlet_hub "$c"): that hub manages $c, so its agent stays"
+      note "$(cl "$c") still runs a klusterlet for the hub at $(klusterlet_hub "$c"): that hub manages $(cl "$c"), so its agent stays"
     else
       remove_own_agent "$c"
     fi
   done
   for c in "${CLUSTERS[@]}"; do
     if [ "${ORPHAN[$c]:-0}" = 1 ]; then
-      say "$c: the ACM agent an earlier uninstall left"
+      say "$(cl "$c"): the ACM agent an earlier uninstall left"
       remove_own_agent "$c"
     fi
   done
@@ -619,15 +619,15 @@ cmd_gitops() {
   for c in "${CLUSTERS[@]}"; do
     case ${GITOPS_PLAN[$c]} in
       none) continue ;;
-      keep) say "$c: OpenShift GitOps stays"; continue ;;
+      keep) say "$(cl "$c"): OpenShift GitOps stays"; continue ;;
     esac
-    say "$c: remove OpenShift GitOps"
+    say "$(cl "$c"): remove OpenShift GitOps"
     if some "$c" gitopsservices.pipelines.openshift.io cluster -n "$GNS"; then
-      act "$c: delete gitopsservice/cluster (the operator then deletes its Argo CD instance)" \
+      act "$(cl "$c"): delete gitopsservice/cluster (the operator then deletes its Argo CD instance)" \
         oc --context "$c" delete gitopsservices.pipelines.openshift.io cluster -n "$GNS" --ignore-not-found --wait=false
     fi
     if some "$c" argocds.argoproj.io -n "$GNS"; then
-      act "$c: delete the Argo CD instances in $GNS" oc --context "$c" delete argocds.argoproj.io --all -n "$GNS" --ignore-not-found --wait=false
+      act "$(cl "$c"): delete the Argo CD instances in $GNS" oc --context "$c" delete argocds.argoproj.io --all -n "$GNS" --ignore-not-found --wait=false
     fi
     gone "$c" 600 "the Argo CD instance" argocds.argoproj.io -n "$GNS"
     s=$(sub_of "$c" openshift-gitops-operator)
@@ -665,7 +665,7 @@ push_reset() {   # push_reset <hub...>: one commit on top of origin/$BRANCH, mad
 
 cmd_git() {
   local c what=""
-  stage "Git" "Now that no dr-role application reads it, resets dr/ on $BRANCH to the roles the build starts from: $ACTIVE active, $PASSIVE passive, and no activation one-shot left by a git-driven failover. Then deletes the branches hack/dr.sh pushed for its pull requests, once $BRANCH has merged them."
+  stage "Git" "Now that no dr-role application reads it, resets dr/ on $BRANCH to the roles the build starts from: $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive, and no activation one-shot left by a git-driven failover. Then deletes the branches hack/dr.sh pushed for its pull requests, once $BRANCH has merged them."
   if [ "$GIT_OK" = 0 ]; then note "could not fetch $BRANCH from origin: git stays as it is"; return 0; fi
   help_at dr/README.md
   for c in $GIT_RESET; do what+="${what:+, }dr/$c to $(want_role "$c")"; done
@@ -688,7 +688,7 @@ cmd_git() {
     act "git: delete the merged hack/dr.sh branches in your checkout" git branch -q -D $LOCAL_BRANCHES
   fi
   if [ -z "$GIT_RESET" ] && [ -z "$RUN_BRANCHES" ] && [ -z "$LOCAL_BRANCHES" ]; then
-    ok "dr/ on $BRANCH already gives $ACTIVE the active role and $PASSIVE the passive one"
+    ok "dr/ on $BRANCH already gives $(cl "$ACTIVE") the active role and $(cl "$PASSIVE") the passive one"
   fi
 }
 
@@ -697,13 +697,13 @@ summary() {
   stage "Summary" "What is left of the exercise on each cluster."
   steps_end
   for c in "${CLUSTERS[@]}"; do
-    printf '%s\t%s\t%s\t%s\n' "$c" \
+    printf '%s\t%s\t%s\t%s\n' "$(cl "$c")" \
       "$(if [ -n "$(sub_of "$c" advanced-cluster-management)" ]; then echo installed; else echo -; fi)" \
       "$(if [ -n "$(sub_of "$c" openshift-gitops-operator)" ]; then echo installed; else echo -; fi)" \
       "$(if some "$c" klusterlets.operator.open-cluster-management.io klusterlet; then echo yes; else echo -; fi)"
   done | { printf 'Cluster\tACM\tOpenShift GitOps\tACM agent\n'; cat; } | table
-  if [ "$GIT_OK" = 1 ]; then note "dr/ on $BRANCH: $ACTIVE $(git_role "$ACTIVE"), $PASSIVE $(git_role "$PASSIVE")"; fi
-  if [ "$RESET" = 1 ]; then note "ACM, OpenShift GitOps, the backup storage and $MANAGED's import stay (--reset): hack/build.sh reuses them"; fi
+  if [ "$GIT_OK" = 1 ]; then note "dr/ on $BRANCH: $(cl "$ACTIVE") $(git_role "$ACTIVE"), $(cl "$PASSIVE") $(git_role "$PASSIVE")"; fi
+  if [ "$RESET" = 1 ]; then note "ACM, OpenShift GitOps, the backup storage and $(cl "$MANAGED")'s import stay (--reset): hack/build.sh reuses them"; fi
   note "the S3 bucket still holds the old backups; the next build's first backup is newer, so restores use that"
   note "CRDs the operators installed stay (ACM's, Velero's, Argo CD's): harmless, and a new install adopts them"
   box rounded 10 "Teardown done in $(dur $((SECONDS - T0)))" "Next: hack/build.sh builds the exercise again (docs/build.md)." \
@@ -775,7 +775,7 @@ trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
-STEPS_TITLE="Teardown$(mode_flag)$(if [ "$DRY" = 1 ]; then echo " dry run"; fi) · $ACTIVE, $PASSIVE, $MANAGED"
+STEPS_TITLE="Teardown$(mode_flag)$(if [ "$DRY" = 1 ]; then echo " dry run"; fi) · $(cl "$ACTIVE"), $(cl "$PASSIVE"), $(cl "$MANAGED")"
 steps_pin   # the stages stay at the top, and the output stays in the window under them
 COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
@@ -785,7 +785,7 @@ if [ "$DRY" = 1 ]; then
 fi
 if ! preflight; then DIED=1; exit 1; fi
 if [ "$DRY" = 0 ]; then
-  confirm "Remove what the table marks remove, detach, turn off or reset, on $ACTIVE, $PASSIVE, $MANAGED and in git?"
+  confirm "Remove what the table marks remove, detach, turn off or reset, on $(cl "$ACTIVE"), $(cl "$PASSIVE"), $(cl "$MANAGED") and in git?"
 fi
 cmd_roles
 cmd_demo

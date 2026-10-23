@@ -120,7 +120,7 @@ act() {   # act <what> <command...>: do it; stop if it fails
   finished "$1"
 }
 apply() {   # apply <context> <file> [what]
-  act "$1: apply ${3:-$2}" oc --context "$1" apply -f "$2"
+  act "$(cl "$1"): apply ${3:-$2}" oc --context "$1" apply -f "$2"
 }
 pinned() {   # pinned <manifest> <channel> <csv> <out>: a copy of the Subscription with Manual approval, starting at <csv>
   sed -e "s/^  channel: .*/  channel: $2/" \
@@ -208,9 +208,9 @@ stage() {   # stage <title> <what and why>
   logln "" "#### $n$1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
-    printf '\n %s── %s%s%s\n' "$C_B$C_ACC" "$n" "$1" "$C_OFF"
+    printf '\n %s── %s%s%s\n' "$C_B$C_ACC" "$n" "$(paint "$1" "$C_B$C_ACC")" "$C_OFF"
   else
-    printf '\n#### %s%s\n' "$n" "$1"
+    printf '\n#### %s%s\n' "$n" "$(bare "$1")"
   fi
   explain "$2"
 }
@@ -224,22 +224,22 @@ row() { PLAN_ROWS+="$1"$'\t'"$2"$'\t'"$3"$'\n'; }
 preflight() {
   local c s v="" x url origin rev
   BAD=0
-  stage "Pre-flight (read-only)" "Checks that the three clusters are healthy, that your copy of the repo is what the clusters will pull from, and what is installed already. It decides what the build installs and what it reuses, and refuses what would break: a hub that another hub manages, $MANAGED managed by some other hub, or two hubs on different ACM versions. Nothing changes in this stage."
+  stage "Pre-flight (read-only)" "Checks that the three clusters are healthy, that your copy of the repo is what the clusters will pull from, and what is installed already. It decides what the build installs and what it reuses, and refuses what would break: a hub that another hub manages, $(cl "$MANAGED") managed by some other hub, or two hubs on different ACM versions. Nothing changes in this stage."
 
   sec_begin "Clusters" "Clusters"
   explain "All three must answer, with nodes Ready, no certificate requests waiting, and every cluster operator Available and not Degraded. A cluster that has just been installed or powered on takes 10 to 20 minutes to settle."
   help_at docs/build.md#clusters
   for c in "${CLUSTERS[@]}"; do
-    if alive "$c"; then ok "$c API answers"; else red "$c API does not answer"; continue; fi
-    expect "$c nodes Ready, no pending certificate requests" "$c has nodes not Ready or pending certificate requests (hack/dr.sh nodes $c)" settled "$c"
+    if alive "$c"; then ok "$(cl "$c") API answers"; else red "$(cl "$c") API does not answer"; continue; fi
+    expect "$(cl "$c") nodes Ready, no pending certificate requests" "$(cl "$c") has nodes not Ready or pending certificate requests (hack/dr.sh nodes $(cl "$c"))" settled "$c"
     x=$(oc --context "$c" get clusteroperators --no-headers 2>/dev/null | awk '$3 != "True" || $5 != "False" {print $1}' | paste -sd' ' - || true)
-    if [ -z "$x" ]; then ok "$c cluster operators Available, none Degraded"; else red "$c cluster operators not settled: $x"; fi
+    if [ -z "$x" ]; then ok "$(cl "$c") cluster operators Available, none Degraded"; else red "$(cl "$c") cluster operators not settled: $x"; fi
   done
   sec_end "APIs answer, nodes Ready, cluster operators settled"
   if [ "$BAD" = 1 ]; then HELP=""; verdict bad "BUILD RED: the clusters must be up and settled first"; return 1; fi
 
   sec_begin "Your copy of the repo" "Repo"
-  explain "The demo apps and the dr-role applications pull from the repoURL and targetRevision in the manifests, so they must name your copy and the branch the settings file names. dr/ in git must give $ACTIVE the active role and $PASSIVE the passive one, as the settings file does: each hub's dr-role application applies exactly what git says."
+  explain "The demo apps and the dr-role applications pull from the repoURL and targetRevision in the manifests, so they must name your copy and the branch the settings file names. dr/ in git must give $(cl "$ACTIVE") the active role and $(cl "$PASSIVE") the passive one, as the settings file does: each hub's dr-role application applies exactly what git says."
   help_at README.md#getting-started
   git fetch -q origin "$BRANCH" 2>/dev/null || true
   if git rev-parse -q --verify "origin/$BRANCH" >/dev/null; then ok "origin/$BRANCH exists"; else red "no branch $BRANCH on origin (BRANCH in $DR_ENV)"; fi
@@ -258,12 +258,12 @@ preflight() {
   if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"
   elif [[ $x == "active with "* ]]; then
     help_at docs/build.md#7-git-driven-paths-only-bootstrap-dr
-    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. hack/teardown.sh --reset resets dr/ on $BRANCH and keeps ACM and OpenShift GitOps; or remove the file and its entry there by hand"
+    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $(cl "$ACTIVE")'s new dr-role would apply it next to the BackupSchedule. hack/teardown.sh --reset resets dr/ on $BRANCH and keeps ACM and OpenShift GitOps; or remove the file and its entry there by hand"
     help_at dr/README.md
-  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active (hack/teardown.sh --reset resets dr/)"; fi
+  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $(cl "$ACTIVE") active (hack/teardown.sh --reset resets dr/)"; fi
   x=$(git_role "$PASSIVE")
-  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive (hack/teardown.sh --reset resets dr/)"; fi
-  sec_end "tracks $BRANCH on your origin; dr/ has $ACTIVE active, $PASSIVE passive"
+  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $(cl "$PASSIVE") passive (hack/teardown.sh --reset resets dr/)"; fi
+  sec_end "tracks $BRANCH on your origin; dr/ has $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive"
 
   sec_begin "What is installed" "Installed"
   explain "An ACM or OpenShift GitOps that is already there is reused, not installed again. Both hubs must end up on the same ACM version (a backup does not restore on an older one), so the build pins both to one version with Manual approval: the installed one if a hub has ACM, otherwise the newest in channel $ACM_CHANNEL."
@@ -273,23 +273,23 @@ preflight() {
     if [ -n "$s" ]; then
       ACM_NS[$c]=${s% *} ACM_HAS[$c]=$(sub_get "$c" "$s" '{.status.installedCSV}')
       if labeled "$c" "$SUB" "${s#* }" -n "${s% *}"; then
-        ok "$c: ACM ${ACM_HAS[$c]#advanced-cluster-management.} (this build's, from an earlier attempt)"
-        row "$c" ACM "continue: ${ACM_HAS[$c]#advanced-cluster-management.} (this build's)"
+        ok "$(cl "$c"): ACM ${ACM_HAS[$c]#advanced-cluster-management.} (this build's, from an earlier attempt)"
+        row "$(cl "$c")" ACM "continue: ${ACM_HAS[$c]#advanced-cluster-management.} (this build's)"
       else
-        ok "$c: ACM ${ACM_HAS[$c]#advanced-cluster-management.} already installed: reused"
-        row "$c" ACM "reuse ${ACM_HAS[$c]#advanced-cluster-management.}$(if [ "$(sub_get "$c" "$s" '{.spec.installPlanApproval}')" != Manual ]; then echo ", approval set to Manual"; fi)$(if ! backup_on "$c"; then echo ", cluster-backup turned on"; fi)"
+        ok "$(cl "$c"): ACM ${ACM_HAS[$c]#advanced-cluster-management.} already installed: reused"
+        row "$(cl "$c")" ACM "reuse ${ACM_HAS[$c]#advanced-cluster-management.}$(if [ "$(sub_get "$c" "$s" '{.spec.installPlanApproval}')" != Manual ]; then echo ", approval set to Manual"; fi)$(if ! backup_on "$c"; then echo ", cluster-backup turned on"; fi)"
         if [ "$(oc --context "$c" get operatorgroups.operators.coreos.com -n "${s% *}" -o name 2>/dev/null | wc -l)" -gt 1 ]; then
-          red "$c: more than one OperatorGroup in ${s% *} (OLM fails every operator there: TooManyOperatorGroups)"
+          red "$(cl "$c"): more than one OperatorGroup in ${s% *} (OLM fails every operator there: TooManyOperatorGroups)"
         fi
       fi
-      if [ -z "${ACM_HAS[$c]}" ]; then red "$c: the ACM Subscription has no installed version yet; let it finish, or remove it"; fi
+      if [ -z "${ACM_HAS[$c]}" ]; then red "$(cl "$c"): the ACM Subscription has no installed version yet; let it finish, or remove it"; fi
     else
       ACM_NS[$c]=$(manifest_value manifests/10-acm-operator.yaml namespace) ACM_HAS[$c]=""
       x=$(klusterlet_hub "$c")
       help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
-      if orphan_agent "$c"; then red "$c still runs the ACM agent of its own former hub (local-cluster), left by an uninstall: hack/teardown.sh --full removes it"
-      elif [ -n "$x" ]; then red "$c is managed by the hub at $x: detach it from that hub first"
-      else ok "$c: no ACM, not managed by another hub"; fi
+      if orphan_agent "$c"; then red "$(cl "$c") still runs the ACM agent of its own former hub (local-cluster), left by an uninstall: hack/teardown.sh --full removes it"
+      elif [ -n "$x" ]; then red "$(cl "$c") is managed by the hub at $x: detach it from that hub first"
+      else ok "$(cl "$c"): no ACM, not managed by another hub"; fi
       help_at docs/build.md#1-hubs-acm-with-the-backup-component
     fi
   done
@@ -301,10 +301,10 @@ preflight() {
   for c in "${HUBS[@]}"; do
     if [ -n "${ACM_HAS[$c]}" ]; then continue; fi
     if [ -n "$ACM_CSV" ] && channel_has "$c" advanced-cluster-management "$ACM_CHANNEL" "$ACM_CSV"; then
-      ok "$c: its catalog offers $ACM_CSV in $ACM_CHANNEL"
-      row "$c" ACM "install ${ACM_CSV#advanced-cluster-management.} (Manual approval) and the MultiClusterHub"
+      ok "$(cl "$c"): its catalog offers $ACM_CSV in $ACM_CHANNEL"
+      row "$(cl "$c")" ACM "install ${ACM_CSV#advanced-cluster-management.} (Manual approval) and the MultiClusterHub"
     else
-      red "$c: its catalog does not offer '${ACM_CSV:-any ACM}' in channel $ACM_CHANNEL"
+      red "$(cl "$c"): its catalog does not offer '${ACM_CSV:-any ACM}' in channel $ACM_CHANNEL"
     fi
   done
 
@@ -313,11 +313,11 @@ preflight() {
     s=$(sub_of "$c" openshift-gitops-operator)
     GITOPS_HAS[$c]=$(if [ -n "$s" ]; then sub_get "$c" "$s" '{.status.installedCSV}'; fi)
     if [ -n "$s" ] && labeled "$c" "$SUB" "${s#* }" -n "${s% *}"; then
-      ok "$c: OpenShift GitOps ${GITOPS_HAS[$c]#openshift-gitops-operator.} (this build's, from an earlier attempt)"
-      row "$c" "OpenShift GitOps" "continue: ${GITOPS_HAS[$c]#openshift-gitops-operator.} (this build's)"
+      ok "$(cl "$c"): OpenShift GitOps ${GITOPS_HAS[$c]#openshift-gitops-operator.} (this build's, from an earlier attempt)"
+      row "$(cl "$c")" "OpenShift GitOps" "continue: ${GITOPS_HAS[$c]#openshift-gitops-operator.} (this build's)"
     elif [ -n "$s" ]; then
-      ok "$c: OpenShift GitOps ${GITOPS_HAS[$c]#openshift-gitops-operator.} already installed: reused"
-      row "$c" "OpenShift GitOps" "reuse ${GITOPS_HAS[$c]#openshift-gitops-operator.}"
+      ok "$(cl "$c"): OpenShift GitOps ${GITOPS_HAS[$c]#openshift-gitops-operator.} already installed: reused"
+      row "$(cl "$c")" "OpenShift GitOps" "reuse ${GITOPS_HAS[$c]#openshift-gitops-operator.}"
     fi
   done
   for c in "${HUBS[@]}"; do
@@ -330,19 +330,19 @@ preflight() {
       if [ -z "$x" ]; then x=$(sub_get "$PASSIVE" "$(sub_of "$PASSIVE" openshift-gitops-operator)" '{.spec.channel}'); fi
       GITOPS_CHANNEL_PIN=${x:-$GITOPS_CHANNEL}
       if channel_has "$c" openshift-gitops-operator "$GITOPS_CHANNEL_PIN" "${GITOPS_PIN[$c]}"; then
-        row "$c" "OpenShift GitOps" "install ${GITOPS_PIN[$c]#openshift-gitops-operator.} to match the other hub (Manual approval)"
+        row "$(cl "$c")" "OpenShift GitOps" "install ${GITOPS_PIN[$c]#openshift-gitops-operator.} to match the other hub (Manual approval)"
       else
-        red "$c: its catalog does not offer ${GITOPS_PIN[$c]} in channel $GITOPS_CHANNEL_PIN, the other hub's version"
+        red "$(cl "$c"): its catalog does not offer ${GITOPS_PIN[$c]} in channel $GITOPS_CHANNEL_PIN, the other hub's version"
       fi
     else
-      row "$c" "OpenShift GitOps" "install from channel $GITOPS_CHANNEL"
+      row "$(cl "$c")" "OpenShift GitOps" "install from channel $GITOPS_CHANNEL"
     fi
   done
-  if [ -z "${GITOPS_HAS[$MANAGED]}" ]; then row "$MANAGED" "OpenShift GitOps" "install from channel $GITOPS_CHANNEL"; fi
+  if [ -z "${GITOPS_HAS[$MANAGED]}" ]; then row "$(cl "$MANAGED")" "OpenShift GitOps" "install from channel $GITOPS_CHANNEL"; fi
   for c in "${CLUSTERS[@]}"; do
     x=$(if [ -z "${GITOPS_HAS[$c]}" ]; then manual_neighbours "$c" openshift-operators openshift-gitops-operator; fi)
     if [ -n "$x" ]; then
-      note "$c: $x in openshift-operators is on Manual approval, so OLM holds OpenShift GitOps' InstallPlan there too; the build approves it if it installs OpenShift GitOps alone"
+      note "$(cl "$c"): $x in openshift-operators is on Manual approval, so OLM holds OpenShift GitOps' InstallPlan there too; the build approves it if it installs OpenShift GitOps alone"
     fi
   done
   if [ -n "${GITOPS_HAS[$ACTIVE]}" ] && [ -n "${GITOPS_HAS[$PASSIVE]}" ] && [ "${GITOPS_HAS[$ACTIVE]}" != "${GITOPS_HAS[$PASSIVE]}" ]; then
@@ -350,39 +350,39 @@ preflight() {
   fi
   sec_end "nothing in the way; the plan below lists what is reused"
 
-  sec_begin "$MANAGED" "$MANAGED"
-  explain "$MANAGED must be managed by $ACTIVE or by no hub at all, and the passive hub must not list it: one cluster, one hub."
+  sec_begin "$(cl "$MANAGED")" "$(cl "$MANAGED")"
+  explain "$(cl "$MANAGED") must be managed by $(cl "$ACTIVE") or by no hub at all, and the passive hub must not list it: one cluster, one hub."
   help_at docs/build.md#4-active-hub-import-the-spoke
   x=$(klusterlet_hub "$MANAGED")
   if [ -z "$x" ]; then
-    ok "$MANAGED is not managed by any hub yet"
+    ok "$(cl "$MANAGED") is not managed by any hub yet"
     v="not managed by any hub yet"
-    row "$MANAGED" "ACM import" "import into $ACTIVE"
+    row "$(cl "$MANAGED")" "ACM import" "import into $(cl "$ACTIVE")"
   elif orphan_agent "$MANAGED"; then
     help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
-    red "$MANAGED still runs the ACM agent of its own former hub (local-cluster), left by an uninstall: hack/teardown.sh --full removes it"
+    red "$(cl "$MANAGED") still runs the ACM agent of its own former hub (local-cluster), left by an uninstall: hack/teardown.sh --full removes it"
   elif [ -n "${ACM_HAS[$ACTIVE]}" ] && mc_available "$ACTIVE" True; then
     SPOKE_HAD=1
-    ok "$MANAGED is already managed by $ACTIVE: kept"
+    ok "$(cl "$MANAGED") is already managed by $(cl "$ACTIVE"): kept"
     v="already managed by $ACTIVE: kept"
-    row "$MANAGED" "ACM import" "already managed by $ACTIVE: kept"
+    row "$(cl "$MANAGED")" "ACM import" "already managed by $(cl "$ACTIVE"): kept"
   else
     help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
-    red "$MANAGED is managed by the hub at $x, not by $ACTIVE: detach it there first"
+    red "$(cl "$MANAGED") is managed by the hub at $x, not by $(cl "$ACTIVE"): detach it there first"
   fi
   if [ -n "${ACM_HAS[$PASSIVE]}" ] && some "$PASSIVE" managedcluster "$MANAGED"; then
-    red "$PASSIVE also lists $MANAGED: two hubs would claim it"
+    red "$(cl "$PASSIVE") also lists $(cl "$MANAGED"): two hubs would claim it"
   fi
   help_at docs/build.md#shared-clusters
   for c in "${HUBS[@]}"; do
     if [ -z "${ACM_HAS[$c]}" ]; then continue; fi
     x=$(oc --context "$c" get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' |
       grep -vx -e local-cluster -e "$MANAGED" | paste -sd' ' - || true)
-    if [ -n "$x" ]; then red "$c also manages $x: manifests/61 binds the default cluster set, so Argo CD would register them too"; fi
+    if [ -n "$x" ]; then red "$(cl "$c") also manages $x: manifests/61 binds the default cluster set, so Argo CD would register them too"; fi
   done
   help_at docs/build.md#build-time-gotchas
   for c in "${CLUSTERS[@]}"; do
-    if some "$c" crd routes.route.openshift.io; then red "$c has a stray routes.route.openshift.io CRD (gotcha 3)"; fi
+    if some "$c" crd routes.route.openshift.io; then red "$(cl "$c") has a stray routes.route.openshift.io CRD (gotcha 3)"; fi
   done
   sec_end "$v; no other hub claims it"
 
@@ -395,17 +395,17 @@ preflight() {
     STORAGE_DONE=1
     ok "both hubs already reach the bucket: kept"
     v="both hubs already reach the bucket: kept"
-    row "$ACTIVE, $PASSIVE" "backup storage" "already connected: kept"
+    row "$(cl "$ACTIVE"), $(cl "$PASSIVE")" "backup storage" "already connected: kept"
   elif [ -n "$S3_URL" ] && ! url_ok "$S3_URL"; then
     red "S3_URL in $DR_ENV is '$S3_URL', not an http(s) URL: fix the line, or delete it to be asked again"
   else
     ok "bucket s3://$S3_BUCKET/$S3_PREFIX in $S3_REGION at ${S3_URL:-(asked for at the start)}"
     v="s3://$S3_BUCKET/$S3_PREFIX at ${S3_URL:-AWS S3}"
-    row "$ACTIVE, $PASSIVE" "backup storage" "connect to s3://$S3_BUCKET/$S3_PREFIX"
+    row "$(cl "$ACTIVE"), $(cl "$PASSIVE")" "backup storage" "connect to s3://$S3_BUCKET/$S3_PREFIX"
   fi
-  row "$ACTIVE" "demo apps, backups" "pull and push apps on $MANAGED, BackupSchedule"
-  row "$PASSIVE" "backups" "continuous passive restore"
-  row "$ACTIVE, $PASSIVE" "dr/ roles" "each hub's dr-role application adopts its role"
+  row "$(cl "$ACTIVE")" "demo apps, backups" "pull and push apps on $(cl "$MANAGED"), BackupSchedule"
+  row "$(cl "$PASSIVE")" "backups" "continuous passive restore"
+  row "$(cl "$ACTIVE"), $(cl "$PASSIVE")" "dr/ roles" "each hub's dr-role application adopts its role"
   sec_end "$v"
 
   HELP=""
@@ -415,7 +415,7 @@ preflight() {
     verdict bad "BUILD RED: nothing was installed; fix the RED lines (each links to the section that explains it) and run it again"
     return 1
   fi
-  verdict ok "PRE-FLIGHT GREEN: $ACTIVE active, $PASSIVE passive, ACM ${ACM_CSV#advanced-cluster-management.}"
+  verdict ok "PRE-FLIGHT GREEN: $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive, ACM ${ACM_CSV#advanced-cluster-management.}"
 }
 
 expect() {   # expect <ok text> <red text> <command...>: one pre-flight line
@@ -483,41 +483,41 @@ stage_acm() {
   stage ACM "Installs ACM where it is missing, pinned to ${ACM_CSV#advanced-cluster-management.} with Manual approval, so neither hub upgrades alone: a backup does not restore on a hub that runs an older ACM. Then the MultiClusterHub with the cluster-backup component, which brings the multicluster engine and OADP (Velero). On an ACM that was already there, it turns cluster-backup on in place and sets Manual approval, and marks both changes so hack/teardown.sh can undo them. This takes 10 to 20 minutes per hub; the hubs install side by side."
   pinned manifests/10-acm-operator.yaml "$ACM_CHANNEL" "$ACM_CSV" "$TMP/10-acm-operator.yaml"
   for c in "${HUBS[@]}"; do
-    say "$c"
+    say "$(cl "$c")"
     s=$(sub_of "$c" advanced-cluster-management)
     if [ -z "$s" ]; then
       apply "$c" "$TMP/10-acm-operator.yaml" "manifests/10-acm-operator.yaml pinned to $ACM_CSV"
     elif ! labeled "$c" "$SUB" "${s#* }" -n "${s% *}" && [ "$(sub_get "$c" "$s" '{.spec.installPlanApproval}')" != Manual ]; then
-      act "$c: set the existing ACM subscription to Manual approval (and mark it, so the teardown can set it back)" manual_approval "$c" "$s"
+      act "$(cl "$c"): set the existing ACM subscription to Manual approval (and mark it, so the teardown can set it back)" manual_approval "$c" "$s"
     fi
   done
   for c in "${HUBS[@]}"; do
-    wait_until 1800 "$c: $ACM_CSV to install" acm_installed "$c"
+    wait_until 1800 "$(cl "$c"): $ACM_CSV to install" acm_installed "$c"
     mch=$(mch_ref "$c")
     if [ -z "$mch" ]; then
       apply "$c" manifests/20-multiclusterhub.yaml
     elif ! backup_on "$c"; then
       x=$(oc --context "$c" get "$MCH" "${mch#* }" -n "${mch% *}" -o json | jq -c --arg a "$A_BACKUP" '{metadata: {annotations: {($a): "enabled-by-build"}},
         spec: {overrides: {components: ((.spec.overrides.components // [] | map(select(.name != "cluster-backup"))) + [{name: "cluster-backup", enabled: true}])}}}')
-      act "$c: turn cluster-backup on in the existing MultiClusterHub (keeping every other component)" \
+      act "$(cl "$c"): turn cluster-backup on in the existing MultiClusterHub (keeping every other component)" \
         oc --context "$c" patch "$MCH" "${mch#* }" -n "${mch% *}" --type merge -p "$x"
     fi
   done
   for c in "${HUBS[@]}"; do
     t0=$SECONDS
-    wait_until 2700 "$c: the MultiClusterHub to reach Running (approving the engine's and OADP's first InstallPlans)" mch_running "$c"
-    wait_until 600 "$c: the backup operator's namespace" some "$c" ns "$NS"
+    wait_until 2700 "$(cl "$c"): the MultiClusterHub to reach Running (approving the engine's and OADP's first InstallPlans)" mch_running "$c"
+    wait_until 600 "$(cl "$c"): the backup operator's namespace" some "$c" ns "$NS"
     if none "$c" ns open-cluster-management-global-set; then
-      act "$c: create namespace open-cluster-management-global-set (gotcha 1: without it no add-on reaches any cluster)" \
+      act "$(cl "$c"): create namespace open-cluster-management-global-set (gotcha 1: without it no add-on reaches any cluster)" \
         oc --context "$c" create ns open-cluster-management-global-set
     fi
-    finished "$c: ACM $(oc --context "$c" get "$SUB" -A -o json | jq -r 'first(.items[] | select(.spec.name == "advanced-cluster-management")) | .status.installedCSV') Running ($(dur $((SECONDS - t0))) after the install)"
+    finished "$(cl "$c"): ACM $(oc --context "$c" get "$SUB" -A -o json | jq -r 'first(.items[] | select(.spec.name == "advanced-cluster-management")) | .status.installedCSV') Running ($(dur $((SECONDS - t0))) after the install)"
   done
 }
 
 stage_gitops() {
   local c x
-  stage "OpenShift GitOps" "Installs the OpenShift GitOps operator where it is missing: on both hubs, whose Argo CD instances deliver the push app and apply each hub's DR role, and on $MANAGED, whose own Argo CD syncs the pull app straight from git. A hub that gets it next to a hub that already runs it is pinned to the same version. Each install ends when the default Argo CD instance in openshift-gitops is Available."
+  stage "OpenShift GitOps" "Installs the OpenShift GitOps operator where it is missing: on both hubs, whose Argo CD instances deliver the push app and apply each hub's DR role, and on $(cl "$MANAGED"), whose own Argo CD syncs the pull app straight from git. A hub that gets it next to a hub that already runs it is pinned to the same version. Each install ends when the default Argo CD instance in openshift-gitops is Available."
   for c in "${CLUSTERS[@]}"; do
     if [ -n "${GITOPS_HAS[$c]}" ]; then continue; fi
     if [ -n "${GITOPS_PIN[$c]:-}" ]; then
@@ -531,8 +531,8 @@ stage_gitops() {
     if ! try_until 1500 "$c: OpenShift GitOps and its Argo CD instance" gitops_installed "$c"; then
       x=$(held_plan "$c" openshift-gitops-operator)
       help_at docs/build.md#2-all-clusters-openshift-gitops
-      if [ -n "$x" ]; then red "$c: $x. The build approves only a plan that installs OpenShift GitOps alone: approve this one yourself if those changes are wanted, then run it again"; fi
-      die "$c: OpenShift GitOps is not installed after 25 min"
+      if [ -n "$x" ]; then red "$(cl "$c"): $x. The build approves only a plan that installs OpenShift GitOps alone: approve this one yourself if those changes are wanted, then run it again"; fi
+      die "$(cl "$c"): OpenShift GitOps is not installed after 25 min"
     fi
   done
 }
@@ -553,17 +553,17 @@ stage_storage() {
     sed -i "s#^          prefix: \(.*\)\$#          prefix: \1\n          caCert: $(base64 -w0 <"$S3_CA_FILE")#" "$dpa"
   fi
   for c in "${HUBS[@]}"; do
-    say "$c"
-    act "$c: create or update secret cloud-credentials (the S3 key)" s3_secret "$c"
+    say "$(cl "$c")"
+    act "$(cl "$c"): create or update secret cloud-credentials (the S3 key)" s3_secret "$c"
     apply "$c" "$dpa" "manifests/50-dpa.yaml for s3://$S3_BUCKET/$S3_PREFIX"
   done
   for c in "${HUBS[@]}"; do
-    wait_until 600 "$c: its BackupStorageLocation to be Available" bsl_available "$c"
+    wait_until 600 "$(cl "$c"): its BackupStorageLocation to be Available" bsl_available "$c"
   done
 }
 
 stage_import() {
-  stage "Import $MANAGED" "Makes $MANAGED a managed cluster of $ACTIVE: the ManagedCluster and its add-ons from manifests/40-import-spoke.yaml, and an auto-import secret holding $MANAGED's kubeconfig, which the hub uses once to install its agent and then deletes. It ends when $MANAGED is Joined and Available and its add-ons (among them the managed service account and the cluster proxy) are Available."
+  stage "Import $(cl "$MANAGED")" "Makes $(cl "$MANAGED") a managed cluster of $(cl "$ACTIVE"): the ManagedCluster and its add-ons from manifests/40-import-spoke.yaml, and an auto-import secret holding $(cl "$MANAGED")'s kubeconfig, which the hub uses once to install its agent and then deletes. It ends when $(cl "$MANAGED") is Joined and Available and its add-ons (among them the managed service account and the cluster proxy) are Available."
   if [ "$SPOKE_HAD" = 1 ]; then
     if labeled "$ACTIVE" managedcluster "$MANAGED"; then
       apply "$ACTIVE" manifests/40-import-spoke.yaml
@@ -574,31 +574,31 @@ stage_import() {
     fi
     if [ -n "$(oc --context "$ACTIVE" get secret auto-import-secret -n "$MANAGED" --ignore-not-found \
       -o jsonpath='{.metadata.annotations.managedcluster-import-controller\.open-cluster-management\.io/keeping-auto-import-secret}' 2>/dev/null)" ]; then
-      act "$ACTIVE: delete the kept auto-import-secret (the backups' managed service account token is the import credential)" \
+      act "$(cl "$ACTIVE"): delete the kept auto-import-secret (the backups' managed service account token is the import credential)" \
         oc --context "$ACTIVE" delete secret auto-import-secret -n "$MANAGED"
     fi
   else
     # the KlusterletAddonConfig needs the namespace the ManagedCluster creates: apply again until it lands
-    wait_until 180 "$ACTIVE: manifests/40-import-spoke.yaml to apply (the ManagedCluster first, then its add-on config)" \
+    wait_until 180 "$(cl "$ACTIVE"): manifests/40-import-spoke.yaml to apply (the ManagedCluster first, then its add-on config)" \
       apply_import manifests/40-import-spoke.yaml
     if none "$ACTIVE" secret auto-import-secret -n "$MANAGED" && ! mc_joined "$ACTIVE"; then
-      act "$ACTIVE: create auto-import-secret from $MANAGED's kubeconfig" import_secret
+      act "$(cl "$ACTIVE"): create auto-import-secret from $(cl "$MANAGED")'s kubeconfig" import_secret
     fi
   fi
-  wait_until 1200 "$MANAGED to be Joined and Available on $ACTIVE" mc_joined "$ACTIVE"
-  wait_until 900 "$MANAGED's add-ons to be Available" addons_available "$ACTIVE"
+  wait_until 1200 "$(cl "$MANAGED") to be Joined and Available on $(cl "$ACTIVE")" mc_joined "$ACTIVE"
+  wait_until 900 "$(cl "$MANAGED")'s add-ons to be Available" addons_available "$ACTIVE"
   oc --context "$ACTIVE" get managedclusteraddon -n "$MANAGED" 2>&1 | to_log
 }
 
 stage_demo() {
   local c a url push
-  stage "Demo apps" "Registers $MANAGED with $ACTIVE's Argo CD (GitOpsCluster and placements) and creates the two ApplicationSets: the pull app, which ACM hands to $MANAGED's own Argo CD, and the push app, which $ACTIVE's Argo CD syncs through the cluster proxy. These objects come before the backups start, so the first backup set already carries them to $PASSIVE. It ends when both apps are synced and healthy and answer on their routes; their URLs go into the settings file for hack/dr.sh."
+  stage "Demo apps" "Registers $(cl "$MANAGED") with $(cl "$ACTIVE")'s Argo CD (GitOpsCluster and placements) and creates the two ApplicationSets: the pull app, which ACM hands to $(cl "$MANAGED")'s own Argo CD, and the push app, which $(cl "$ACTIVE")'s Argo CD syncs through the cluster proxy. These objects come before the backups start, so the first backup set already carries them to $(cl "$PASSIVE"). It ends when both apps are synced and healthy and answer on their routes; their URLs go into the settings file for hack/dr.sh."
   apply "$ACTIVE" manifests/61-gitops-integration.yaml
   apply "$ACTIVE" manifests/62-appset-pull.yaml
   apply "$ACTIVE" manifests/63-appset-push.yaml
   for a in "$MANAGED/hello-failover-$MANAGED" "$ACTIVE/hello-failover-push-$MANAGED"; do
     c=${a%%/*}
-    wait_until 900 "${a#*/} to sync and be healthy on $c" app_done "$c" "${a#*/}"
+    wait_until 900 "${a#*/} to sync and be healthy on $(cl "$c")" app_done "$c" "${a#*/}"
   done
   url=https://$(oc --context "$MANAGED" get routes.route.openshift.io -n hello-failover -o jsonpath='{.items[0].spec.host}')
   push=https://$(oc --context "$MANAGED" get routes.route.openshift.io -n hello-failover-push -o jsonpath='{.items[0].spec.host}')
@@ -613,37 +613,37 @@ stage_demo() {
 
 stage_backups() {
   local t
-  stage "Backup roles" "Makes $ACTIVE the active hub: its BackupSchedule writes a backup set to the bucket every 30 minutes, the first one right away, and keeps a managed service account token for $MANAGED in it, which is what lets the other hub re-import $MANAGED. Once the first set has completed, $PASSIVE starts its continuous passive restore, so it always holds the newest set and is ready to take over."
+  stage "Backup roles" "Makes $(cl "$ACTIVE") the active hub: its BackupSchedule writes a backup set to the bucket every 30 minutes, the first one right away, and keeps a managed service account token for $(cl "$MANAGED") in it, which is what lets the other hub re-import $(cl "$MANAGED"). Once the first set has completed, $(cl "$PASSIVE") starts its continuous passive restore, so it always holds the newest set and is ready to take over."
   if none "$ACTIVE" "$BSCHED" -n "$NS"; then apply "$ACTIVE" manifests/55-backupschedule.yaml; fi
   # the cluster's clock, not this workstation's, decides which backups are new
   t=$(oc --context "$ACTIVE" get "$BSCHED" schedule-acm -n "$NS" -o jsonpath='{.metadata.creationTimestamp}')
-  wait_until 1800 "the first backup set on $ACTIVE to complete" backup_set_after "$ACTIVE" "$t"
-  wait_until 300 "$ACTIVE's BackupSchedule to be Enabled" schedule_enabled "$ACTIVE"
-  wait_until 600 "the managed service account token for $MANAGED" msa_fresh "$ACTIVE"
+  wait_until 1800 "the first backup set on $(cl "$ACTIVE") to complete" backup_set_after "$ACTIVE" "$t"
+  wait_until 300 "$(cl "$ACTIVE")'s BackupSchedule to be Enabled" schedule_enabled "$ACTIVE"
+  wait_until 600 "the managed service account token for $(cl "$MANAGED")" msa_fresh "$ACTIVE"
   if none "$PASSIVE" "$RESTORE" restore-acm-passive-sync -n "$NS"; then apply "$PASSIVE" manifests/56-restore-passive.yaml; fi
-  wait_until 900 "$PASSIVE's passive restore to be Enabled" restore_enabled "$PASSIVE" restore-acm-passive-sync
+  wait_until 900 "$(cl "$PASSIVE")'s passive restore to be Enabled" restore_enabled "$PASSIVE" restore-acm-passive-sync
 }
 
 stage_roles() {
   local c before after obj
   stage "dr/ roles" "Hands each hub's role to git (Automated Pull Path, Phase P): the RBAC that lets each hub's Argo CD manage its BackupSchedule and Restores, then each hub's dr-role application, which reconciles dr/<hub> from $BRANCH. It adopts the BackupSchedule and the passive restore the last stage created rather than re-creating them. From here on the git-driven runs change roles through pull requests; the manual runs pause dr-role first (D.0)."
   for c in "${HUBS[@]}"; do
-    say "$c"
+    say "$(cl "$c")"
     apply "$c" dr/bootstrap/dr-role-rbac.yaml
     BAD=0
     help_at docs/runbooks/dr-failover-pull-gitops/README.md#p0-rbac-first--the-grant-that-makes-git-driven-dr-possible
-    expect "$c: the Argo CD controller may manage backup schedules (P.0)" "$c: the Argo CD controller may not patch backupschedules (P.0)" \
+    expect "$(cl "$c"): the Argo CD controller may manage backup schedules (P.0)" "$(cl "$c"): the Argo CD controller may not patch backupschedules (P.0)" \
       oc --context "$c" auth can-i patch "$BSCHED" -n "$NS" --as=system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller
     HELP=""
-    if [ "$BAD" = 1 ]; then die "the dr-role RBAC does not take effect on $c"; fi
+    if [ "$BAD" = 1 ]; then die "the dr-role RBAC does not take effect on $(cl "$c")"; fi
     if [ "$c" = "$ACTIVE" ]; then obj="$BSCHED schedule-acm"; else obj="$RESTORE restore-acm-passive-sync"; fi
     # shellcheck disable=SC2086 # obj is a kind and a name
     before=$(oc --context "$c" get $obj -n "$NS" -o jsonpath='{.metadata.creationTimestamp}')
     apply "$c" "dr/bootstrap/dr-role-$c.yaml"
-    wait_until 600 "dr-role on $c to sync" app_done "$c" dr-role
+    wait_until 600 "dr-role on $(cl "$c") to sync" app_done "$c" dr-role
     # shellcheck disable=SC2086
     after=$(oc --context "$c" get $obj -n "$NS" -o jsonpath='{.metadata.creationTimestamp}')
-    if [ "$before" = "$after" ]; then ok "$c: dr-role adopted ${obj#* } (created $before)"; else note "$c: dr-role re-created ${obj#* } instead of adopting it"; fi
+    if [ "$before" = "$after" ]; then ok "$(cl "$c"): dr-role adopted ${obj#* } (created $before)"; else note "$(cl "$c"): dr-role re-created ${obj#* } instead of adopting it"; fi
   done
 }
 
@@ -651,7 +651,7 @@ stage_check() {
   stage Check "Runs hack/dr.sh check, the pre-flight every exercise starts with, against what was just built."
   if DR_CLEAR=0 COMPACT=$PIN bash "$REPO/hack/dr.sh" check; then
     steps_end
-    box rounded 10 "Build done in $(dur $((SECONDS - T0))): $ACTIVE active, $PASSIVE passive" \
+    box rounded 10 "Build done in $(dur $((SECONDS - T0))): $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive" \
       "Next: hack/dr.sh, then pick a run from the menu (docs/runbooks)." "Log: $LOGFILE"
   else
     die "the build finished, but hack/dr.sh check is RED: fix what it names, then run hack/dr.sh check again"
@@ -723,7 +723,7 @@ set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
 if [ "$CHECK" = 1 ]; then STAGES=(Pre-flight); fi   # --check runs only the pre-flight: its plan says what the other stages would do
-STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " check"; fi) · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
+STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " check"; fi) · $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive, $(cl "$MANAGED") workload"
 steps_pin   # the stages stay at the top, and the output stays in the window under them
 COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
@@ -733,7 +733,7 @@ if [ "$CHECK" = 1 ]; then
   finished "pre-flight only: nothing changed. Log: ${LOGFILE/#$HOME/\~}"
   exit 0
 fi
-confirm "Build it: install and configure what the plan lists on $ACTIVE, $PASSIVE and $MANAGED?"
+confirm "Build it: install and configure what the plan lists on $(cl "$ACTIVE"), $(cl "$PASSIVE") and $(cl "$MANAGED")?"
 s3_inputs
 stage_acm
 stage_gitops

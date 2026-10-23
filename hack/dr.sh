@@ -80,19 +80,20 @@ mode_name() { if [ "$GIT" = 1 ]; then echo git-driven; else echo manual; fi; }
 event() {   # a milestone: on the screen, in the log and in events.log
   local t
   t=$(now)
-  echo "$t $*" >>"$LOGDIR/events.log"
+  bare "$t $*"$'\n' >>"$LOGDIR/events.log"
   logln "$t $*"
-  if [ "$UI" = gum ]; then printf '   %s◆ %s%s %s\n' "$C_ACC" "${t:11:8}" "$C_OFF" "$*"; else echo "$t $*"; fi
+  if [ "$UI" = gum ]; then printf '   %s◆ %s%s %s\n' "$C_ACC" "${t:11:8}" "$C_OFF" "$(paint "$*")"; else echo "$t $(bare "$*")"; fi
   pin_draw
 }
 
 STAGES=(Pre-flight Outage Deploy Failover Rejoin Summary)
 IN_RUN=0 RUN_T0=0 STAGE_EV=0 STAGE_N=1
 run_rule() {   # run_rule <width>: the run's title line, with the time since it started
-  local rule fill
-  rule="── Run $RUN · $(mode_name) · $ACTIVE goes down, $PASSIVE takes over · $(dur $((SECONDS - RUN_T0))) "
-  printf -v fill '%*s' $(($1 - ${#rule} > 0 ? $1 - ${#rule} : 0)) ''
-  printf '%s' "$rule${fill// /─}"
+  local rule fill b
+  rule="── Run $RUN · $(mode_name) · $(cl "$ACTIVE") goes down, $(cl "$PASSIVE") takes over · $(dur $((SECONDS - RUN_T0))) "
+  b=$(bare "$rule")
+  printf -v fill '%*s' $(($1 - ${#b} > 0 ? $1 - ${#b} : 0)) ''
+  paint "$rule${fill// /─}" "$C_DIM"
 }
 declare -A HUB_URL
 probe_counts() {   # probe_counts <log>: "<samples> <not 200>"
@@ -113,9 +114,9 @@ run_header() {   # run_header <width>: the pinned lines of a run: where it stand
   printf '%s\n' "$x"
   read -r t u <<<"$(awk '$2 != last {t = $1; last = $2} END {print t, last}' "$LOGDIR/hub-pointer.log" 2>/dev/null || true)"
   h=${u:-(read failed)}
-  for c in "${!HUB_URL[@]}"; do if [ -n "$u" ] && [ "${u%/}" = "${HUB_URL[$c]%/}" ]; then h=$c; fi; done
-  x="$MANAGED reports to $h${t:+ since ${t:11:8}}"
-  if [ ! -f "$LOGDIR/hub-pointer.log" ]; then x="$MANAGED reports to $ACTIVE, as the settings file says"; fi
+  for c in "${!HUB_URL[@]}"; do if [ -n "$u" ] && [ "${u%/}" = "${HUB_URL[$c]%/}" ]; then h=$(cl "$c"); fi; done
+  x="$(cl "$MANAGED") reports to $h${t:+ since ${t:11:8}}"
+  if [ ! -f "$LOGDIR/hub-pointer.log" ]; then x="$(cl "$MANAGED") reports to $(cl "$ACTIVE"), as the settings file says"; fi
   u=$(tail -n 1 "$LOGDIR/revisions.log" 2>/dev/null | cut -d' ' -f2- || true)
   printf '   %s\n' "$(fit $((w - 3)) "$x${u:+ · serving $u}")"
   read -r t u <<<"$(tail -n 1 "$LOGDIR/events.log" 2>/dev/null || true)"
@@ -154,23 +155,23 @@ stage_text() {   # stage_text <n>: what the stage does and why
   local a=$ACTIVE p=$PASSIVE
   case $1 in
     1) echo "Read-only checks that the lab is in the posture the settings file names, so the outage tests DR and not a broken lab. Nothing on the clusters changes here. A section that is all green shows as one line; one with a RED line or a note shows in full." ;;
-    2) echo "The probes start: every 10 s until the summary they record both apps' HTTP status, which hub $MANAGED reports to, and what each app serves. Then an etcd backup of $a as a lab safety net, a wait for a cut time clear of the :00/:30 backup slots, and your power cut. The apps on $MANAGED should not notice." ;;
-    3) echo "With no hub alive, the script commits a new REVISION of both apps to $BRANCH. The pull app is delivered by $MANAGED's own Argo CD straight from git, so it updates with no hub at all, within one Argo poll (up to about 6.5 min). The push app is delivered by a hub's Argo CD, so it stays on the old revision until $p is active: that wait is the push model's delivery RTO." ;;
+    2) echo "The probes start: every 10 s until the summary they record both apps' HTTP status, which hub $(cl "$MANAGED") reports to, and what each app serves. Then an etcd backup of $(cl "$a") as a lab safety net, a wait for a cut time clear of the :00/:30 backup slots, and your power cut. The apps on $(cl "$MANAGED") should not notice." ;;
+    3) echo "With no hub alive, the script commits a new REVISION of both apps to $BRANCH. The pull app is delivered by $(cl "$MANAGED")'s own Argo CD straight from git, so it updates with no hub at all, within one Argo poll (up to about 6.5 min). The push app is delivered by a hub's Argo CD, so it stays on the old revision until $(cl "$p") is active: that wait is the push model's delivery RTO." ;;
     4)
       if [ "$GIT" = 1 ]; then
-        echo "First the death gate: $a must stay unreachable, because activating $p while $a lives would leave two hubs claiming $MANAGED. Then the failover goes through git (Automated Pull Path). PR-A puts an activation restore in dr/$p; when you merge it, $p's own Argo CD applies it, $p restores the newest backup and re-imports $MANAGED. Once the claim is verified, PR-B makes $p fully active, which starts its backups. The script writes both PRs and waits for your merges."
+        echo "First the death gate: $(cl "$a") must stay unreachable, because activating $(cl "$p") while $(cl "$a") lives would leave two hubs claiming $(cl "$MANAGED"). Then the failover goes through git (Automated Pull Path). PR-A puts an activation restore in dr/$p; when you merge it, $(cl "$p")'s own Argo CD applies it, $(cl "$p") restores the newest backup and re-imports $(cl "$MANAGED"). Once the claim is verified, PR-B makes $(cl "$p") fully active, which starts its backups. The script writes both PRs and waits for your merges."
       else
-        echo "First the death gate: $a must stay unreachable, because activating $p while $a lives would leave two hubs claiming $MANAGED. Then the script activates $p as the Manual Pull Path does: it pauses $p's dr-role automation, replaces the continuous passive restore with the activation restore, and watches $p re-import $MANAGED. It then checks the addons, the import token and push delivery, and starts backups on $p, which makes $p the active hub."
+        echo "First the death gate: $(cl "$a") must stay unreachable, because activating $(cl "$p") while $(cl "$a") lives would leave two hubs claiming $(cl "$MANAGED"). Then the script activates $(cl "$p") as the Manual Pull Path does: it pauses $(cl "$p")'s dr-role automation, replaces the continuous passive restore with the activation restore, and watches $(cl "$p") re-import $(cl "$MANAGED"). It then checks the addons, the import token and push delivery, and starts backups on $(cl "$p"), which makes $(cl "$p") the active hub."
       fi
       ;;
     5)
       if [ "$GIT" = 1 ]; then
-        echo "$a comes back as the new passive hub instead of taking its role back. The demote PR goes first, so that $a boots into the passive role. Once you power it on, the script removes its old backup schedule before it can write to the shared bucket, waits until $a's view of $MANAGED goes stale (deleting the claim earlier would uninstall $MANAGED's agent), deletes that stale claim and checks the passive restore. At the end the settings file swaps ACTIVE and PASSIVE for the next run."
+        echo "$(cl "$a") comes back as the new passive hub instead of taking its role back. The demote PR goes first, so that $(cl "$a") boots into the passive role. Once you power it on, the script removes its old backup schedule before it can write to the shared bucket, waits until $(cl "$a")'s view of $(cl "$MANAGED") goes stale (deleting the claim earlier would uninstall $(cl "$MANAGED")'s agent), deletes that stale claim and checks the passive restore. At the end the settings file swaps ACTIVE and PASSIVE for the next run."
       else
-        echo "$a comes back as the new passive hub instead of taking its role back. Once you power it on, the script pauses its dr-role automation, removes its old backup schedule before it can write to the shared bucket, waits until $a's view of $MANAGED goes stale (deleting the claim earlier would uninstall $MANAGED's agent), deletes that stale claim and starts the passive restore. Then it commits the new roles to dr/ and turns automation back on. At the end the settings file swaps ACTIVE and PASSIVE for the next run."
+        echo "$(cl "$a") comes back as the new passive hub instead of taking its role back. Once you power it on, the script pauses its dr-role automation, removes its old backup schedule before it can write to the shared bucket, waits until $(cl "$a")'s view of $(cl "$MANAGED") goes stale (deleting the claim earlier would uninstall $(cl "$MANAGED")'s agent), deletes that stale claim and starts the passive restore. Then it commits the new roles to dr/ and turns automation back on. At the end the settings file swaps ACTIVE and PASSIVE for the next run."
       fi
       ;;
-    6) echo "The probes stop. The summary shows everything they recorded: each app's availability before and after the power cut, when $MANAGED switched hubs, when each app served each revision, and how long each step took." ;;
+    6) echo "The probes stop. The summary shows everything they recorded: each app's availability before and after the power cut, when $(cl "$MANAGED") switched hubs, when each app served each revision, and how long each step took." ;;
   esac
 }
 
@@ -183,11 +184,11 @@ recent_backups() {   # recent_backups <context>: the newest backup in one line; 
     -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -n 6)
   to_log <<<"$out"
   read -r n p t <<<"$(tail -n 1 <<<"$out")"
-  if [ "$UI" = gum ]; then finished "newest backup on $1: $p, started ${t:11:8} (${n%-*})"; fi
+  if [ "$UI" = gum ]; then finished "newest backup on $(cl "$1"): $p, started ${t:11:8} (${n%-*})"; fi
 }
 hub_name() {   # hub_name <API url>: the context name of that hub, or the url
   local c
-  for c in "${!HUB_URL[@]}"; do if [ -n "$1" ] && [ "${1%/}" = "${HUB_URL[$c]%/}" ]; then echo "$c"; return 0; fi; done
+  for c in "${!HUB_URL[@]}"; do if [ -n "$1" ] && [ "${1%/}" = "${HUB_URL[$c]%/}" ]; then cl "$c"; return 0; fi; done
   echo "${1:-(not read yet)}"
 }
 
@@ -217,16 +218,16 @@ token_adopted() {
 
 ready_up() {   # wait for <context>'s API, then approve certificates until its nodes are Ready (G.1's power-on note)
   local c=$1 t0 end=$((SECONDS + 1800))
-  alive "$c" || wait_until 7200 "$c's API to answer" alive "$c"
+  alive "$c" || wait_until 7200 "$(cl "$c")'s API to answer" alive "$c"
   t0=$SECONDS
-  spin_begin "approving pending certificate requests on $c until its nodes are Ready (up to 30 min)"
+  spin_begin "approving pending certificate requests on $(cl "$c") until its nodes are Ready (up to 30 min)"
   until poll settled "$c"; do
-    [ "$SECONDS" -lt "$end" ] || die "$c: nodes not Ready, or certificate requests still pending, after 30 min"
+    [ "$SECONDS" -lt "$end" ] || die "$(cl "$c"): nodes not Ready, or certificate requests still pending, after 30 min"
     approve_csrs "$c" 2>&1 | to_log || true
     pause 20
   done
   spin_stop
-  finished "$c: nodes Ready, no pending certificate requests ($(dur $((SECONDS - t0))))"
+  finished "$(cl "$c"): nodes Ready, no pending certificate requests ($(dur $((SECONDS - t0))))"
 }
 
 # --- git ---------------------------------------------------------------------
@@ -287,36 +288,36 @@ cmd_check() {
   explain "All three clusters must be up and settled: an API that answers, nodes Ready and no certificate requests waiting (a cluster that was powered off for a while usually has some)."
   help_at docs/build.md#clusters
   for c in "$a" "$p" "$MANAGED"; do
-    expect "$c API answers" "$c API does not answer" alive "$c"
+    expect "$(cl "$c") API answers" "$(cl "$c") API does not answer" alive "$c"
   done
   if [ "$BAD" = 1 ]; then sec_end; HELP=""; verdict bad "PRE-FLIGHT RED: power the clusters on, then run hack/dr.sh nodes"; return 1; fi
   for c in "$a" "$p" "$MANAGED"; do
-    expect "$c nodes Ready" "$c has nodes not Ready (hack/dr.sh nodes $c)" nodes_ready "$c"
-    expect "$c has no pending certificate requests" "$c has pending certificate requests (hack/dr.sh nodes $c)" not pending_csrs "$c"
+    expect "$(cl "$c") nodes Ready" "$(cl "$c") has nodes not Ready (hack/dr.sh nodes $(cl "$c"))" nodes_ready "$c"
+    expect "$(cl "$c") has no pending certificate requests" "$(cl "$c") has pending certificate requests (hack/dr.sh nodes $(cl "$c"))" not pending_csrs "$c"
   done
   sec_end "APIs answer, nodes Ready, no pending certificates"
 
-  sec_begin "Posture: $a active, $p passive (0.1)" "Posture"
-  explain "Exactly one hub may be active. $a must be taking backups and managing $MANAGED; $p must be restoring those backups continuously, with no backup schedule of its own and no claim on $MANAGED."
+  sec_begin "Posture: $(cl "$a") active, $(cl "$p") passive (0.1)" "Posture"
+  explain "Exactly one hub may be active. $(cl "$a") must be taking backups and managing $(cl "$MANAGED"); $(cl "$p") must be restoring those backups continuously, with no backup schedule of its own and no claim on $(cl "$MANAGED")."
   help_at docs/runbooks/dr-failover-pull-manual/README.md#01-posture-sanity
-  expect "$a schedule-acm Enabled" "$a schedule-acm is '$(phase "$a" "$BSCHED" schedule-acm)'" schedule_enabled "$a"
-  expect "$a has no passive restore" "$a has a restore-acm-passive-sync" none "$a" "$RESTORE" restore-acm-passive-sync -n "$NS"
-  expect "$MANAGED Available on $a" "$MANAGED not Available on $a" mc_available "$a" True
-  expect "$p restore-acm-passive-sync Enabled" "$p passive restore is '$(phase "$p" "$RESTORE" restore-acm-passive-sync)'" \
+  expect "$(cl "$a") schedule-acm Enabled" "$(cl "$a") schedule-acm is '$(phase "$a" "$BSCHED" schedule-acm)'" schedule_enabled "$a"
+  expect "$(cl "$a") has no passive restore" "$(cl "$a") has a restore-acm-passive-sync" none "$a" "$RESTORE" restore-acm-passive-sync -n "$NS"
+  expect "$(cl "$MANAGED") Available on $(cl "$a")" "$(cl "$MANAGED") not Available on $(cl "$a")" mc_available "$a" True
+  expect "$(cl "$p") restore-acm-passive-sync Enabled" "$(cl "$p") passive restore is '$(phase "$p" "$RESTORE" restore-acm-passive-sync)'" \
     restore_enabled "$p" restore-acm-passive-sync
-  expect "$p does not list $MANAGED" "$p also lists $MANAGED (two hubs claim it)" none "$p" managedcluster "$MANAGED"
-  expect "$p has no BackupSchedule" "$p has a BackupSchedule" none "$p" "$BSCHED" -n "$NS"
-  expect "$p has no Velero schedules" "$p has Velero schedules (Manual Pull Path G.2)" none "$p" "$VSCHED" -n "$NS"
+  expect "$(cl "$p") does not list $(cl "$MANAGED")" "$(cl "$p") also lists $(cl "$MANAGED") (two hubs claim it)" none "$p" managedcluster "$MANAGED"
+  expect "$(cl "$p") has no BackupSchedule" "$(cl "$p") has a BackupSchedule" none "$p" "$BSCHED" -n "$NS"
+  expect "$(cl "$p") has no Velero schedules" "$(cl "$p") has Velero schedules (Manual Pull Path G.2)" none "$p" "$VSCHED" -n "$NS"
   if some "$p" "$RESTORE" restore-acm-activate -n "$NS"; then
-    note "$p still holds a fixed-name restore-acm-activate: a manual failover deletes it first (D.2)"
+    note "$(cl "$p") still holds a fixed-name restore-acm-activate: a manual failover deletes it first (D.2)"
   fi
-  sec_end "$a backing up, $p restoring, $MANAGED on $a only"
+  sec_end "$(cl "$a") backing up, $(cl "$p") restoring, $(cl "$MANAGED") on $(cl "$a") only"
 
   sec_begin "MSA token chain (0.2)" "Import token"
-  explain "The new hub re-imports $MANAGED with the auto-import token it restores from the backups. The token must be valid and rotating, or the failover stalls in Pending Import."
+  explain "The new hub re-imports $(cl "$MANAGED") with the auto-import token it restores from the backups. The token must be valid and rotating, or the failover stalls in Pending Import."
   help_at docs/runbooks/dr-failover-pull-manual/README.md#02-msa-token-chain--the-load-bearing-check
-  expect "auto-import-account on $a: $(msa_token "$a")" \
-    "auto-import-account on $a: '$(msa_token "$a")' (want True and an expiry more than a day out; 0.2)" msa_fresh "$a"
+  expect "auto-import-account on $(cl "$a"): $(msa_token "$a")" \
+    "auto-import-account on $(cl "$a"): '$(msa_token "$a")' (want True and an expiry more than a day out; 0.2)" msa_fresh "$a"
   out=$(msa_token "$a")
   sec_end "valid until ${out:5:10} ${out:16:5}"
 
@@ -340,27 +341,27 @@ cmd_check() {
   sec_end "newest set Completed, started ${out:21:8}"
 
   sec_begin "Passive hub readiness (0.4)" "Passive hub"
-  explain "Things that would only break at activation: the addon namespace, a stray Route CRD, $p's Argo CD, and both hubs' access to the backup bucket."
+  explain "Things that would only break at activation: the addon namespace, a stray Route CRD, $(cl "$p")'s Argo CD, and both hubs' access to the backup bucket."
   help_at docs/runbooks/dr-failover-pull-manual/README.md#04-remaining-static-checks
-  expect "$p has namespace open-cluster-management-global-set" "$p lacks namespace open-cluster-management-global-set" \
+  expect "$(cl "$p") has namespace open-cluster-management-global-set" "$(cl "$p") lacks namespace open-cluster-management-global-set" \
     some "$p" ns open-cluster-management-global-set
-  expect "$p has no stray Route CRD" "$p has a stray routes.route.openshift.io CRD" none "$p" crd routes.route.openshift.io
+  expect "$(cl "$p") has no stray Route CRD" "$(cl "$p") has a stray routes.route.openshift.io CRD" none "$p" crd routes.route.openshift.io
   out=$(oc --context "$p" get pods -n "$GNS" --no-headers 2>/dev/null | awk '$3 != "Running" && $3 != "Completed" {print $1, $3}' || true)
-  if [ -z "$out" ]; then ok "$p Argo CD pods Running"; else red "$p Argo CD pods not Running: $out"; fi
+  if [ -z "$out" ]; then ok "$(cl "$p") Argo CD pods Running"; else red "$(cl "$p") Argo CD pods not Running: $out"; fi
   help_at docs/build.md#3-hubs-backup-storage
   for c in "$a" "$p"; do
     out=$(oc --context "$c" get backupstoragelocation -n "$NS" -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
-    if [ "$out" = Available ]; then ok "$c BSL Available"; else red "$c BSL is '$out'"; fi
+    if [ "$out" = Available ]; then ok "$(cl "$c") BSL Available"; else red "$(cl "$c") BSL is '$out'"; fi
   done
-  sec_end "$p ready to activate; both hubs reach the bucket"
+  sec_end "$(cl "$p") ready to activate; both hubs reach the bucket"
 
   if has_dr_role "$a" || has_dr_role "$p"; then
     sec_begin "Git-driven roles (Automated Pull Path P.2 and pre-flight)" "Git-driven roles"
     explain "Each hub's own Argo CD (the dr-role app) applies its role from dr/ in git. Both must be in sync with automation on, and dr-role must never be in a backup, or a restore would hand the other hub the wrong role."
     help_at docs/runbooks/dr-failover-pull-gitops/README.md#p1-bootstrap-each-hubs-dr-role-application
     for c in "$a" "$p"; do
-      expect "$c dr-role Synced Healthy" "$c dr-role is '$(dr_role_state "$c")'" dr_role_synced "$c"
-      expect "$c dr-role automation on" "$c dr-role automation is off (finish H.1)" dr_role_automated "$c"
+      expect "$(cl "$c") dr-role Synced Healthy" "$(cl "$c") dr-role is '$(dr_role_state "$c")'" dr_role_synced "$c"
+      expect "$(cl "$c") dr-role automation on" "$(cl "$c") dr-role automation is off (finish H.1)" dr_role_automated "$c"
     done
     newest=$(oc --context "$a" get "$VBACKUP" -n "$NS" -o json 2>/dev/null | jq -r '
       [.items[] | select((.metadata.name | startswith("acm-resources-schedule-")) and .status.phase == "Completed")]
@@ -379,26 +380,26 @@ cmd_check() {
   fi
 
   sec_begin "Workload" "Demo apps"
-  explain "The two demo apps on $MANAGED: the pull app, delivered by $MANAGED's own Argo CD, and the push app, delivered by $a's Argo CD. Both must answer and be in sync before the outage, or the probes prove nothing."
+  explain "The two demo apps on $(cl "$MANAGED"): the pull app, delivered by $(cl "$MANAGED")'s own Argo CD, and the push app, delivered by $(cl "$a")'s Argo CD. Both must answer and be in sync before the outage, or the probes prove nothing."
   help_at docs/build.md#5-active-hub-gitops-wiring-and-the-demo-apps
   rp=$(revision "$APP_URL")
   expect "pull app answers 200 (serves $rp)" "pull app does not answer 200 (tried for 30 s)" wait_for 30 http_ok "$APP_URL"
   help_at docs/build.md#build-time-gotchas
   out=$(app_state "$MANAGED" "hello-failover-$MANAGED")
-  if [ "$out" = "Synced Healthy" ]; then ok "pull app Synced Healthy on $MANAGED"; else red "pull app on $MANAGED is '$out'"; fi
+  if [ "$out" = "Synced Healthy" ]; then ok "pull app Synced Healthy on $(cl "$MANAGED")"; else red "pull app on $(cl "$MANAGED") is '$out'"; fi
   if [ -n "$PUSH_APP_URL" ]; then
     help_at docs/build.md#5-active-hub-gitops-wiring-and-the-demo-apps
     rq=$(revision "$PUSH_APP_URL")
     expect "push app answers 200 (serves $rq)" "push app does not answer 200 (tried for 30 s)" wait_for 30 http_ok "$PUSH_APP_URL"
     help_at docs/build.md#build-time-gotchas
     out=$(app_state "$a" "hello-failover-push-$MANAGED")
-    if [ "$out" = "Synced Healthy" ]; then ok "push app Synced Healthy on $a"; else red "push app on $a is '$out'"; fi
+    if [ "$out" = "Synced Healthy" ]; then ok "push app Synced Healthy on $(cl "$a")"; else red "push app on $(cl "$a") is '$out'"; fi
   fi
   sec_end "pull app $rp${rq:+ and push app $rq} answer 200, Synced Healthy"
 
   HELP=""
   if [ "$BAD" = 0 ]; then
-    verdict ok "PRE-FLIGHT GREEN: $a active, $p passive"
+    verdict ok "PRE-FLIGHT GREEN: $(cl "$a") active, $(cl "$p") passive"
   else
     verdict bad "PRE-FLIGHT RED: fix the RED lines first; each links to the section that explains it"
     return 1
@@ -462,7 +463,7 @@ probe_start() {
   done | to_log
   if [ "$UI" = gum ]; then
     f=$(tail -n 1 "$LOGDIR/probe.log" 2>/dev/null | cut -d' ' -f2)
-    finished "probes running: pull app ${f:-?}$(if [ -n "$PUSH_APP_URL" ]; then echo ", push app $(tail -n 1 "$LOGDIR/probe-push.log" 2>/dev/null | cut -d' ' -f2)"; fi), $MANAGED reports to $(hub_name "$(tail -n 1 "$LOGDIR/hub-pointer.log" 2>/dev/null | cut -d' ' -f2)")"
+    finished "probes running: pull app ${f:-?}$(if [ -n "$PUSH_APP_URL" ]; then echo ", push app $(tail -n 1 "$LOGDIR/probe-push.log" 2>/dev/null | cut -d' ' -f2)"; fi), $(cl "$MANAGED") reports to $(hub_name "$(tail -n 1 "$LOGDIR/hub-pointer.log" 2>/dev/null | cut -d' ' -f2)")"
   fi
 }
 probe_stop() {
@@ -526,7 +527,7 @@ summary() {   # the tables come last, so they are what stays on the screen
   say "Run $RUN summary ($LOGDIR)"
   if [ -s "$LOGDIR/events.log" ]; then label "Events"; show <"$LOGDIR/events.log"; fi
   if [ -f "$LOGDIR/hub-pointer.log" ]; then
-    label "Hub pointer (which hub $MANAGED reports to)"
+    label "Hub pointer (which hub $(cl "$MANAGED") reports to)"
     awk '{s = $2 == "" ? "(read failed)" : $2} s != last {print $1, s; last = s}' "$LOGDIR/hub-pointer.log" | show
   fi
   if [ -s "$LOGDIR/revisions.log" ]; then label "Served revisions"; show <"$LOGDIR/revisions.log"; fi
@@ -579,27 +580,27 @@ slot_clear() {   # 5 to 26 min past a :00/:30 slot, and no backup in progress
 
 cmd_outage() {
   local a=$ACTIVE node n f
-  alive "$a" || die "$a's API does not answer: is it already down?"
-  say "B.0: lab safety net, an etcd backup of $a"
-  explain "A copy of $a's control plane, kept on its node, in case a lab hub does not come back cleanly from a hard power-off. It is not part of DR."
+  alive "$a" || die "$(cl "$a")'s API does not answer: is it already down?"
+  say "B.0: lab safety net, an etcd backup of $(cl "$a")"
+  explain "A copy of $(cl "$a")'s control plane, kept on its node, in case a lab hub does not come back cleanly from a hard power-off. It is not part of DR."
   node=$(oc --context "$a" get nodes -l node-role.kubernetes.io/master -o jsonpath='{.items[0].metadata.name}')
   spin_cmd "etcd backup on $node" \
     oc --context "$a" debug "node/$node" -- chroot /host /usr/local/bin/cluster-backup.sh /home/core/assets/backup ||
     die "the etcd backup on $node failed: its output is above"
-  event "B.0 etcd backup saved on $a ($node:/home/core/assets/backup)"
+  event "B.0 etcd backup saved on $(cl "$a") ($node:/home/core/assets/backup)"
   explain "A cut in the middle of a backup would leave a partial set in the bucket, so the script waits until 5 to 26 minutes past a :00 or :30 slot, with no backup running."
   wait_until 1800 "a cut time clear of the :00/:30 backup slots, with no backup in progress" slot_clear "$a"
   recent_backups "$a"
 
   say "B.1: the outage"
-  explain "A hard power-off is the realistic disaster: no clean shutdown and no chance to hand anything over. From now on $a is the failed hub."
-  your_turn "cut $a's power now" \
+  explain "A hard power-off is the realistic disaster: no clean shutdown and no chance to hand anything over. From now on $(cl "$a") is the failed hub."
+  your_turn "cut $(cl "$a")'s power now" \
     "Hold the power button about 5 s (a short press is a graceful shutdown), pull the plug, or use a hard power-off." \
-    "The script carries on when $a's API stops answering."
-  wait_until 1800 "$a's API to stop answering" dead "$a"
-  event "B.1 $a API dead (power cut by hand)"
+    "The script carries on when $(cl "$a")'s API stops answering."
+  wait_until 1800 "$(cl "$a")'s API to stop answering" dead "$a"
+  event "B.1 $(cl "$a") API dead (power cut by hand)"
   say "B.2: the workload does not care"
-  explain "$MANAGED runs its workloads by itself; a hub only manages it, so the probes should keep answering 200."
+  explain "$(cl "$MANAGED") runs its workloads by itself; a hub only manages it, so the probes should keep answering 200."
   spin_begin "letting the probes sample the outage"
   pause 20
   spin_stop
@@ -621,7 +622,7 @@ cmd_deploy() {
   git_ready
   n=$(($(rev_of "$f") + 1))
   np=$(($(rev_of "$fp") + 1))
-  say "C: push pull v$n and push v$np with $ACTIVE down"
+  say "C: push pull v$n and push v$np with $(cl "$ACTIVE") down"
   explain "One commit changes the REVISION text both apps serve. The script waits for the pull app to serve v$n, which proves a deploy needs no hub; the push app is checked again after the failover (E')."
   sed -i "s/REVISION v[0-9]*/REVISION v$n/" "$f"
   sed -i "s/REVISION v[0-9]*/REVISION v$np/" "$fp"
@@ -663,25 +664,25 @@ activation_restore() {   # wait for <name> to finish; one retry for the git-driv
 claim_and_verify() {   # D.3, E.1, E.2, E.3 on the new hub
   local p=$PASSIVE n
   say "D.3: the claim"
-  explain "$p uses the restored import token to re-import $MANAGED: the agent on $MANAGED switches to $p, and $MANAGED reads Available there."
-  wait_until 300 "the restored ManagedCluster $MANAGED on $p" some "$p" managedcluster "$MANAGED"
+  explain "$(cl "$p") uses the restored import token to re-import $(cl "$MANAGED"): the agent on $(cl "$MANAGED") switches to $(cl "$p"), and $(cl "$MANAGED") reads Available there."
+  wait_until 300 "the restored ManagedCluster $(cl "$MANAGED") on $(cl "$p")" some "$p" managedcluster "$MANAGED"
   EVERY=1 wait_until 900 "$MANAGED to be Available on $p" mc_available "$p" True
-  event "D.3 claim landed: $MANAGED Available on $p"
+  event "D.3 claim landed: $(cl "$MANAGED") Available on $(cl "$p")"
   show oc --context "$p" get managedclusters
   say "E.1: addons"
-  explain "The addons are $MANAGED's agents for applications, policies, search and the cluster proxy. Push delivery needs the cluster proxy and the application-manager account, so they must all re-register with $p."
-  wait_until 900 "every addon on $MANAGED to be Available" addons_available "$p"
+  explain "The addons are $(cl "$MANAGED")'s agents for applications, policies, search and the cluster proxy. Push delivery needs the cluster proxy and the application-manager account, so they must all re-register with $(cl "$p")."
+  wait_until 900 "every addon on $(cl "$MANAGED") to be Available" addons_available "$p"
   event "E.1 all addons Available"
   show oc --context "$p" get managedclusteraddon -n "$MANAGED"
   say "E.2: re-home evidence"
-  explain "The hub-pointer probe shows when $MANAGED's agent switched hubs; the availability probe shows whether the pull app noticed."
+  explain "The hub-pointer probe shows when $(cl "$MANAGED")'s agent switched hubs; the availability probe shows whether the pull app noticed."
   if [ -s "$LOGDIR/hub-pointer.log" ]; then
     awk '{s = $2 == "" ? "(read failed)" : $2} s != last {print $1, s; last = s}' "$LOGDIR/hub-pointer.log" | tail -n 3 | show
   fi
   n=$(grep -c -v ' 200$' "$LOGDIR/probe.log" 2>/dev/null || true)
   if [ "${n:-0}" = 0 ]; then ok "the pull app answered 200 at every availability sample so far"; else note "$n availability samples were not 200"; fi
   say "E.3: the restored MSA secret"
-  explain "The restored import token has to keep rotating on $p, or the next failover fails in Pending Import. ACM 2.17.3 adopts and rotates it; older versions froze it, and then the script deletes it so a fresh one is minted."
+  explain "The restored import token has to keep rotating on $(cl "$p"), or the next failover fails in Pending Import. ACM 2.17.3 adopts and rotates it; older versions froze it, and then the script deletes it so a fresh one is minted."
   if try_until 120 "the controller to adopt the restored token" token_adopted "$p"; then
     event "E.3 restored token adopted and rotated by the controller ($(msa_token "$p"))"
   else
@@ -694,13 +695,13 @@ claim_and_verify() {   # D.3, E.1, E.2, E.3 on the new hub
 
 promote_checks() {   # F.1's gate and F.2
   local p=$PASSIVE t
-  wait_until 600 "schedule-acm Enabled on $p" schedule_enabled "$p"
+  wait_until 600 "schedule-acm Enabled on $(cl "$p")" schedule_enabled "$p"
   t=$(oc --context "$p" get "$BSCHED" schedule-acm -n "$NS" -o jsonpath='{.metadata.creationTimestamp}')
-  wait_until 900 "the first full backup set on $p" backup_set_after "$p" "$t"
-  event "F.1 first backup set Completed on $p"
+  wait_until 900 "the first full backup set on $(cl "$p")" backup_set_after "$p" "$t"
+  event "F.1 first backup set Completed on $(cl "$p")"
   recent_backups "$p"
   say "F.2: GitOps wiring"
-  explain "The GitOpsCluster, Placements and ApplicationSets came back with the restore, so $p's Argo CD now delivers the push app."
+  explain "The GitOpsCluster, Placements and ApplicationSets came back with the restore, so $(cl "$p")'s Argo CD now delivers the push app."
   show oc --context "$p" get gitopscluster,placement,applicationset -n "$GNS"
   show oc --context "$p" get "$APP" -n "$GNS"
 }
@@ -710,7 +711,7 @@ push_resurrection() {   # E': the push app serving the mid-outage revision is pu
   if [ -z "$PUSH_APP_URL" ] || [ ! -s "$LOGDIR/deploy.rev" ]; then return 0; fi
   np=$(cut -d' ' -f2 "$LOGDIR/deploy.rev")
   say "E': push delivery"
-  explain "The push app updates only when the new hub's Argo CD pushes to $MANAGED. The time from the deploy to the new revision is the push model's delivery RTO."
+  explain "The push app updates only when the new hub's Argo CD pushes to $(cl "$MANAGED"). The time from the deploy to the new revision is the push model's delivery RTO."
   show oc --context "$PASSIVE" get secret -n "$GNS" -l apps.open-cluster-management.io/acm-cluster=true
   if try_until 1200 "the push app to serve v$np" serves "$PUSH_APP_URL" "v$np"; then
     t=$(first_served push "$np")
@@ -723,13 +724,13 @@ push_resurrection() {   # E': the push app serving the mid-outage revision is pu
 
 failover_manual() {
   local p=$PASSIVE
-  say "D: activate $p by hand"
-  explain "D.0 pauses $p's dr-role app, which would otherwise put the passive restore straight back. D.1 deletes the continuous passive restore. D.2 applies restore-acm-activate, which restores the managed-cluster data from the newest backup, including $MANAGED's import token."
-  confirm "Activate $p now?"
+  say "D: activate $(cl "$p") by hand"
+  explain "D.0 pauses $(cl "$p")'s dr-role app, which would otherwise put the passive restore straight back. D.1 deletes the continuous passive restore. D.2 applies restore-acm-activate, which restores the managed-cluster data from the newest backup, including $(cl "$MANAGED")'s import token."
+  confirm "Activate $(cl "$p") now?"
   if has_dr_role "$p"; then
     suspend_dr_role "$p"
-    not dr_role_automated "$p" || die "could not suspend dr-role on $p"
-    event "D.0 dr-role automation suspended on $p"
+    not dr_role_automated "$p" || die "could not suspend dr-role on $(cl "$p")"
+    event "D.0 dr-role automation suspended on $(cl "$p")"
   fi
   # a Finished restore under the same name would make D.2's apply a silent no-op
   quiet oc --context "$p" delete "$RESTORE" restore-acm-activate -n "$NS" --ignore-not-found
@@ -740,17 +741,17 @@ failover_manual() {
   event "D.2 activation applied"
   activation_restore restore-acm-activate
   claim_and_verify
-  say "F.1: start backups on $p"
-  explain "$p becomes the only hub writing to the shared bucket. Its first full backup set runs right away, without waiting for a slot."
+  say "F.1: start backups on $(cl "$p")"
+  explain "$(cl "$p") becomes the only hub writing to the shared bucket. Its first full backup set runs right away, without waiting for a slot."
   quiet oc --context "$p" apply -f manifests/55-backupschedule.yaml
-  event "F.1 BackupSchedule applied on $p"
+  event "F.1 BackupSchedule applied on $(cl "$p")"
   promote_checks
 }
 
 failover_git() {
   local p=$PASSIVE stamp
-  has_dr_role "$p" || die "no dr-role on $p: dr/ was never bootstrapped, so use the manual path"
-  dr_role_automated "$p" || die "dr-role automation is off on $p: finish the last run's re-align (H.1) first"
+  has_dr_role "$p" || die "no dr-role on $(cl "$p"): dr/ was never bootstrapped, so use the manual path"
+  dr_role_automated "$p" || die "dr-role automation is off on $(cl "$p"): finish the last run's re-align (H.1) first"
   git_ready
   [ "$(overlay "$p")" = ../roles/passive ] || die "dr/$p lists '$(overlay "$p")', not ../roles/passive"
   stamp=$(new_stamp failover)
@@ -769,7 +770,7 @@ failover_git() {
   event "D'.1 PR-A branch failover-$stamp pushed"
   quiet git checkout -q "$BRANCH"
   say "D'.2: review = the death gate, merge = the decision"
-  explain "Reviewing PR-A is where a person confirms $ACTIVE is really dead. Merging it is the failover decision."
+  explain "Reviewing PR-A is where a person confirms $(cl "$ACTIVE") is really dead. Merging it is the failover decision."
   open_pr "failover-$stamp" "FAILOVER: activate $p" \
     "Activation only (PR-A). Review gate: $ACTIVE is dead; hack/dr.sh found its API refusing connections at $(now). Merging is the failover decision." \
     "The review is the death gate: confirm $ACTIVE is dead with the check below the link." \
@@ -777,16 +778,16 @@ failover_git() {
   line "   death check: curl -sk --max-time 5 $(server "$ACTIVE")/version || echo DEAD"
   wait_merged "$p" "restore-activate-$stamp.yaml"
   event "D'.2 PR-A merged"
-  if not dead "$ACTIVE"; then note "$ACTIVE no longer reads dead: if it is back, you now have two live hubs (B.1 failure)"; fi
+  if not dead "$ACTIVE"; then note "$(cl "$ACTIVE") no longer reads dead: if it is back, you now have two live hubs (B.1 failure)"; fi
 
-  say "D'.3: $p executes"
-  explain "$p's own Argo CD syncs the merge: it prunes the passive restore and creates the activation restore. The backup operator often sees the new restore before the old one is gone and ignores it; the script then deletes it, and Argo creates it again (the D'.3 race)."
+  say "D'.3: $(cl "$p") executes"
+  explain "$(cl "$p")'s own Argo CD syncs the merge: it prunes the passive restore and creates the activation restore. The backup operator often sees the new restore before the old one is gone and ignores it; the script then deletes it, and Argo creates it again (the D'.3 race)."
   refresh_dr_role "$p" normal
   activation_restore "restore-acm-activate-$stamp"
   claim_and_verify
 
   say "F': the promotion PR (PR-B)"
-  explain "PR-B adds the active role to dr/$p, which starts $p's backups. It comes only after the claim is verified, so a failed activation can never overwrite the bucket's newest backup with an empty fleet."
+  explain "PR-B adds the active role to dr/$p, which starts $(cl "$p")'s backups. It comes only after the claim is verified, so a failed activation can never overwrite the bucket's newest backup with an empty fleet."
   git_ready
   quiet git checkout -q -b "promote-$stamp"
   sed -i "s#^  - restore-activate-$stamp.yaml\$#  - ../roles/active\n  - restore-activate-$stamp.yaml#" "dr/$p/kustomization.yaml"
@@ -809,22 +810,22 @@ $(oc --context "$p" get managedclusters -o custom-columns='NAME:.metadata.name,A
 
 cmd_failover() {
   say "B: the death gate"
-  explain "Activating $PASSIVE while $ACTIVE still runs would give $MANAGED two hubs. The gate needs $ACTIVE's API to refuse connections or time out twice, 10 s apart, while $PASSIVE and $MANAGED both answer, so a network problem on this machine is not mistaken for a dead hub."
-  alive "$PASSIVE" || die "$PASSIVE does not answer either"
-  alive "$MANAGED" || die "$MANAGED does not answer: the network path is in doubt, so $ACTIVE's silence proves nothing"
+  explain "Activating $(cl "$PASSIVE") while $(cl "$ACTIVE") still runs would give $(cl "$MANAGED") two hubs. The gate needs $(cl "$ACTIVE")'s API to refuse connections or time out twice, 10 s apart, while $(cl "$PASSIVE") and $(cl "$MANAGED") both answer, so a network problem on this machine is not mistaken for a dead hub."
+  alive "$PASSIVE" || die "$(cl "$PASSIVE") does not answer either"
+  alive "$MANAGED" || die "$(cl "$MANAGED") does not answer: the network path is in doubt, so $(cl "$ACTIVE")'s silence proves nothing"
   if alive "$ACTIVE"; then
-    die "$ACTIVE's API still answers. Activating $PASSIVE now would leave two live hubs claiming $MANAGED. Cut its power first."
+    die "$(cl "$ACTIVE")'s API still answers. Activating $(cl "$PASSIVE") now would leave two live hubs claiming $(cl "$MANAGED"). Cut its power first."
   fi
-  dead "$ACTIVE" || die "$ACTIVE's API name does not resolve: that is DNS trouble, not proof of death"
-  spin_begin "checking that $ACTIVE stays dead"
+  dead "$ACTIVE" || die "$(cl "$ACTIVE")'s API name does not resolve: that is DNS trouble, not proof of death"
+  spin_begin "checking that $(cl "$ACTIVE") stays dead"
   pause 10
   spin_stop
-  dead "$ACTIVE" || die "$ACTIVE's API answered again"
-  event "B $ACTIVE API refuses connections or times out (death gate passed)"
+  dead "$ACTIVE" || die "$(cl "$ACTIVE")'s API answered again"
+  event "B $(cl "$ACTIVE") API refuses connections or times out (death gate passed)"
   if [ "$GIT" = 1 ]; then failover_git; else failover_manual; fi
   push_resurrection
-  event "failover done: $PASSIVE active"
-  say "Failover done: $PASSIVE is active and backing up"
+  event "failover done: $(cl "$PASSIVE") active"
+  say "Failover done: $(cl "$PASSIVE") is active and backing up"
   if [ "$IN_RUN" = 0 ]; then line "Next: hack/dr.sh rejoin$(flag)"; fi
 }
 
@@ -837,21 +838,21 @@ defuse() {   # G.2: the returned hub's BackupSchedule and the Velero schedules i
 }
 defuse_now() {   # retry while the returned hub settles, approving certificates meanwhile
   local a=$1 end=$((SECONDS + 1800))
-  spin_begin "deleting $a's BackupSchedule and Velero schedules (up to 30 min)"
+  spin_begin "deleting $(cl "$a")'s BackupSchedule and Velero schedules (up to 30 min)"
   until poll defuse "$a"; do
-    [ "$SECONDS" -lt "$end" ] || die "could not delete $a's schedules within 30 min"
+    [ "$SECONDS" -lt "$end" ] || die "could not delete $(cl "$a")'s schedules within 30 min"
     approve_csrs "$a" >/dev/null 2>&1 || true
     pause 10
   done
   spin_stop
-  event "G.2 $a has no BackupSchedule and no Velero schedules"
+  event "G.2 $(cl "$a") has no BackupSchedule and no Velero schedules"
   if ! schedule_enabled "$PASSIVE"; then
-    note "$PASSIVE schedule-acm is '$(phase "$PASSIVE" "$BSCHED" schedule-acm)', not Enabled (Manual Pull Path G.2 failure)"
+    note "$(cl "$PASSIVE") schedule-acm is '$(phase "$PASSIVE" "$BSCHED" schedule-acm)', not Enabled (Manual Pull Path G.2 failure)"
   fi
 }
 break_glass() {   # G.0: suspend dr-role on <context>, retrying while its API settles
-  wait_until 1800 "the dr-role patch to land on $1" suspend_dr_role "$1"
-  event "G.0 dr-role automation suspended on $1"
+  wait_until 1800 "the dr-role patch to land on $(cl "$1")" suspend_dr_role "$1"
+  event "G.0 dr-role automation suspended on $(cl "$1")"
 }
 
 demote_git() {   # G'.1: the demote PR, mergeable while the hub is still down
@@ -860,7 +861,7 @@ demote_git() {   # G'.1: the demote PR, mergeable while the hub is still down
   if [ "$(overlay "$a")" = ../roles/passive ]; then note "dr/$a already lists ../roles/passive"; return 0; fi
   stamp=$(new_stamp demote)
   say "G'.1: the demote PR"
-  explain "The demote PR makes dr/$a passive. Merge it while $a is still down: it then boots into the passive role, and its Argo CD removes its backup schedule."
+  explain "The demote PR makes dr/$a passive. Merge it while $(cl "$a") is still down: it then boots into the passive role, and its Argo CD removes its backup schedule."
   quiet git checkout -q -b "demote-$stamp"
   sed -i 's#^  - ../roles/active$#  - ../roles/passive#; /^  - restore-activate-.*\.yaml$/d' "dr/$a/kustomization.yaml"
   quiet git rm -q --ignore-unmatch "dr/$a"/restore-activate-*.yaml
@@ -897,13 +898,13 @@ realign_git() {   # H.1, after a manual failover
   rev=$(git rev-parse HEAD)
   for c in "$a" "$p"; do
     refresh_dr_role "$c" hard
-    wait_until 300 "dr-role on $c to compare against ${rev:0:7}" dr_role_has "$c" "$rev"
+    wait_until 300 "dr-role on $(cl "$c") to compare against ${rev:0:7}" dr_role_has "$c" "$rev"
   done
   for c in "$a" "$p"; do resume_dr_role "$c"; done
-  for c in "$a" "$p"; do wait_until 300 "dr-role Synced Healthy on $c" dr_role_synced "$c"; done
+  for c in "$a" "$p"; do wait_until 300 "dr-role Synced Healthy on $(cl "$c")" dr_role_synced "$c"; done
   event "H.1 dr/ re-aligned at ${rev:0:7}; dr-role automation back on both hubs"
   for c in "$a" "$p"; do
-    line "   $c:"
+    line "   $(cl "$c"):"
     show oc --context "$c" get "$BSCHED,$RESTORE" -n "$NS" \
       -o custom-columns='KIND:.kind,NAME:.metadata.name,CREATED:.metadata.creationTimestamp'
   done
@@ -914,7 +915,7 @@ cmd_rejoin() {
   if [ "$GIT" = 1 ]; then
     if alive "$a"; then
       # back before its demote merged: git still calls it active, so break glass as on the manual path
-      note "$a answers before its demote merged: suspending its dr-role until the demote lands"
+      note "$(cl "$a") answers before its demote merged: suspending its dr-role until the demote lands"
       early=1
       break_glass "$a"
       defuse_now "$a"
@@ -923,58 +924,58 @@ cmd_rejoin() {
     rev=$(git rev-parse HEAD)
   fi
 
-  say "G: $a comes back"
-  explain "$a comes back as the new passive hub. After a long power-off its nodes usually wait for certificate approvals; the script approves them. Its old backup schedule is removed first thing, before it can write to the bucket that $p now owns."
-  your_turn "power $a back on now" \
-    "The script carries on when its API answers: it approves certificate requests until the nodes are Ready, then makes $a passive."
-  wait_until 7200 "$a's API to answer" alive "$a"
-  event "G $a API answers"
+  say "G: $(cl "$a") comes back"
+  explain "$(cl "$a") comes back as the new passive hub. After a long power-off its nodes usually wait for certificate approvals; the script approves them. Its old backup schedule is removed first thing, before it can write to the bucket that $(cl "$p") now owns."
+  your_turn "power $(cl "$a") back on now" \
+    "The script carries on when its API answers: it approves certificate requests until the nodes are Ready, then makes $(cl "$a") passive."
+  wait_until 7200 "$(cl "$a")'s API to answer" alive "$a"
+  event "G $(cl "$a") API answers"
   if [ "$GIT" = 0 ] && has_dr_role "$a"; then break_glass "$a"; fi
   defuse_now "$a"
   ready_up "$a"
-  event "G $a nodes Ready"
+  event "G $(cl "$a") nodes Ready"
 
   if [ "$GIT" = 1 ]; then
-    say "G'.1: $a boots into the demote"
-    explain "$a's Argo CD syncs the merged demote: the passive restore replaces its old role."
+    say "G'.1: $(cl "$a") boots into the demote"
+    explain "$(cl "$a")'s Argo CD syncs the merged demote: the passive restore replaces its old role."
     refresh_dr_role "$a" hard
-    wait_until 900 "dr-role on $a to compare against ${rev:0:7}" dr_role_has "$a" "$rev"
-    if [ "$early" = 1 ]; then resume_dr_role "$a"; event "G'.1 dr-role automation back on $a"; fi
-    wait_until 900 "dr-role Synced Healthy on $a" dr_role_synced "$a"
+    wait_until 900 "dr-role on $(cl "$a") to compare against ${rev:0:7}" dr_role_has "$a" "$rev"
+    if [ "$early" = 1 ]; then resume_dr_role "$a"; event "G'.1 dr-role automation back on $(cl "$a")"; fi
+    wait_until 900 "dr-role Synced Healthy on $(cl "$a")" dr_role_synced "$a"
     defuse_now "$a"   # the pruned schedule's Velero schedules can outlive it after a boot
     quiet oc --context "$a" delete "$RESTORE" restore-acm-activate -n "$NS" --ignore-not-found   # untracked residue of a manual activation
   fi
 
   if some "$a" managedcluster "$MANAGED"; then
     say "G.1: wait out the lease"
-    explain "$a still lists $MANAGED as its own until the agent's lease, last renewed before the outage, runs out (usually 2 to 4 minutes after boot). Deleting the claim while it still reads True would uninstall $MANAGED's agent and its hub-delivered workloads."
-    wait_until 1800 "$MANAGED to read Available=Unknown on $a" mc_available "$a" Unknown
-    event "G.1 $MANAGED Unknown on $a"
+    explain "$(cl "$a") still lists $(cl "$MANAGED") as its own until the agent's lease, last renewed before the outage, runs out (usually 2 to 4 minutes after boot). Deleting the claim while it still reads True would uninstall $(cl "$MANAGED")'s agent and its hub-delivered workloads."
+    wait_until 1800 "$(cl "$MANAGED") to read Available=Unknown on $(cl "$a")" mc_available "$a" Unknown
+    event "G.1 $(cl "$MANAGED") Unknown on $(cl "$a")"
     say "G.3: drop the stale claim"
-    explain "Now that it reads Unknown, deleting $a's stale ManagedCluster is safe: $MANAGED keeps reporting to $p."
-    spin_cmd "deleting the stale ManagedCluster $MANAGED on $a" oc --context "$a" delete managedcluster "$MANAGED" --timeout=5m ||
-      die "could not delete the stale ManagedCluster $MANAGED on $a (Manual Pull Path G.3)"
-    event "G.3 stale claim on $a deleted"
+    explain "Now that it reads Unknown, deleting $(cl "$a")'s stale ManagedCluster is safe: $(cl "$MANAGED") keeps reporting to $(cl "$p")."
+    spin_cmd "deleting the stale ManagedCluster $(cl "$MANAGED") on $(cl "$a")" oc --context "$a" delete managedcluster "$MANAGED" --timeout=5m ||
+      die "could not delete the stale ManagedCluster $(cl "$MANAGED") on $(cl "$a") (Manual Pull Path G.3)"
+    event "G.3 stale claim on $(cl "$a") deleted"
   fi
 
-  say "G.4: $a as passive"
-  explain "The continuous passive restore makes $a follow $p's backups, ready for the next failover."
+  say "G.4: $(cl "$a") as passive"
+  explain "The continuous passive restore makes $(cl "$a") follow $(cl "$p")'s backups, ready for the next failover."
   if [ "$GIT" = 0 ]; then quiet oc --context "$a" apply -f manifests/56-restore-passive.yaml; fi
-  wait_until 900 "restore-acm-passive-sync Enabled on $a" restore_enabled "$a" restore-acm-passive-sync
-  event "G.4 $a passive sync Enabled"
+  wait_until 900 "restore-acm-passive-sync Enabled on $(cl "$a")" restore_enabled "$a" restore-acm-passive-sync
+  event "G.4 $(cl "$a") passive sync Enabled"
   if [ "$GIT" = 0 ]; then
     say "G.5: the stale activation restores"
-    explain "Restores are one-shot: $a's old activation restores have done their job and would only get in the way of a later activation."
+    explain "Restores are one-shot: $(cl "$a")'s old activation restores have done their job and would only get in the way of a later activation."
     oc --context "$a" get "$RESTORE" -n "$NS" -o name | { grep restore-acm-activate || true; } |
       xargs -r -n1 oc --context "$a" delete -n "$NS" 2>&1 | to_log
-    event "G.5 old activation restores on $a deleted"
+    event "G.5 old activation restores on $(cl "$a") deleted"
     if has_dr_role "$a" && has_dr_role "$p"; then realign_git; fi
   fi
   show oc --context "$a" get "$RESTORE" -n "$NS"
 
   sed -i -e "s/^ACTIVE=.*/ACTIVE=$p/" -e "s/^PASSIVE=.*/PASSIVE=$a/" "$DR_ENV"
   if grep -q '^RUN=' "$DR_ENV"; then sed -i "s/^RUN=.*/RUN=$((RUN + 1))/" "$DR_ENV"; else echo "RUN=$((RUN + 1))" >>"$DR_ENV"; fi
-  event "rejoin done: $p active, $a passive (settings file: ACTIVE=$p PASSIVE=$a RUN=$((RUN + 1)))"
+  event "rejoin done: $(cl "$p") active, $(cl "$a") passive (settings file: ACTIVE=$(cl "$p") PASSIVE=$(cl "$a") RUN=$((RUN + 1)))"
   cmd_check "$p" "$a" || note "the new posture is not green yet: rerun hack/dr.sh check in a few minutes"
 }
 
@@ -994,7 +995,7 @@ cmd_run() {
     for c in "$ACTIVE" "$PASSIVE"; do HUB_URL[$c]=$(server "$c" 2>/dev/null || true); done
     pin_on 6 run_header   # the run's state stays at the top until the summary
   fi
-  box double 13 "Run $RUN · $(mode_name): $ACTIVE goes down, $PASSIVE takes over" \
+  box double 13 "Run $RUN · $(mode_name): $(cl "$ACTIVE") goes down, $(cl "$PASSIVE") takes over" \
     "The script pauses when it needs you: $stops." \
     "Logs: ${LOGDIR/#$HOME/\~}"
   stage 1
@@ -1022,7 +1023,7 @@ cmd_run() {
   stage 6
   probe_stop
   summary
-  box rounded 10 "Run $RUN finished in $(dur $((SECONDS - RUN_T0))): $PASSIVE is active, $ACTIVE passive" \
+  box rounded 10 "Run $RUN finished in $(dur $((SECONDS - RUN_T0))): $(cl "$PASSIVE") is active, $(cl "$ACTIVE") passive" \
     "Run hack/dr.sh again for run $((RUN + 1)), which fails over the other way."
 }
 
@@ -1056,7 +1057,7 @@ sanity() {
   local c ctxs
   ctxs=$(oc config get-contexts -o name)
   for c in "$ACTIVE" "$PASSIVE" "$MANAGED"; do
-    grep -qx -- "$c" <<<"$ctxs" || die "no kubeconfig context named '$c' (KUBECONFIG=${KUBECONFIG:-default})"
+    grep -qx -- "$c" <<<"$ctxs" || die "no kubeconfig context named '$(cl "$c")' (KUBECONFIG=${KUBECONFIG:-default})"
   done
   if [ "$ACTIVE" = "$PASSIVE" ] || [ "$ACTIVE" = "$MANAGED" ] || [ "$PASSIVE" = "$MANAGED" ]; then
     die "ACTIVE, PASSIVE and MANAGED must be three different contexts"
