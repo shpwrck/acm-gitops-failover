@@ -663,7 +663,7 @@ menu() {
     "Sets up two ACM hubs, one active and one passive, and a workload cluster they take turns managing. It installs ACM and OpenShift GitOps where they are missing, connects both hubs to the S3 bucket for backups, imports the workload cluster, deploys the two demo apps and hands each hub's role to git." \
     "" \
     "It takes 40 to 60 minutes and asks for the S3 keys at the start."
-  items=("Pre-flight check only (read-only)" "Build" "List the options" "Quit")
+  items=(Check Build Quit)
   echo
   if [ "$UI" = gum ]; then
     choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
@@ -672,9 +672,8 @@ menu() {
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
-    "Pre-flight check only"*) CHECK=1 ;;
+    Check) CHECK=1 ;;
     Build) ;;
-    "List the options") usage; exit 0 ;;
     *) exit 0 ;;
   esac
 }
