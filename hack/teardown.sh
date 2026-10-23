@@ -802,7 +802,7 @@ cmd_git
 if [ "$DRY" = 1 ]; then
   stage "Summary" "Nothing changed: this was a dry run. The log has every 'would' line: ${LOGFILE/#$HOME/\~}"
   steps_end
-  verdict ok "DRY RUN: nothing changed. Run it without --dry-run to remove what the 'would' lines name."
+  verdict ok "DRY RUN: nothing changed. To do what the 'would' lines name: hack/teardown.sh$(mode_flag)"
 else
   summary
 fi
