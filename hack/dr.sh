@@ -1044,14 +1044,13 @@ cmd_run() {
 # --- main --------------------------------------------------------------------
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
-menu() {   # no command on a terminal: show the posture, then pick what to do
+menu() {   # no command on a terminal: say what the exercise does, then pick what to do
   local choice prev=$((RUN - 1)) items
-  box rounded 13 "DR exercise: run $RUN is next" \
-    "$ACTIVE is the active hub. In this run it goes down and $PASSIVE takes over." \
-    "Workload cluster: $MANAGED. The clusters follow branch $BRANCH." \
+  box rounded 13 "ACM hub disaster recovery exercise" \
+    "Tests losing the active ACM hub. You cut its power, and the passive hub takes over the workload cluster while probes record whether the two demo apps keep answering and how fast a new git revision reaches them. The hub you cut then rejoins as the new passive hub, so each run fails over the other way." \
     "" \
-    "Manual: once $ACTIVE is confirmed down, the script runs the failover commands." \
-    "Git-driven: the failover and the return go through 3 PRs in dr/ that you merge."
+    "Manual: the script runs the failover commands." \
+    "Git-driven: you merge 3 PRs in dr/ for the failover and the return."
   items=("Run a manual failover" "Run a git-driven failover (PRs)" "Check the lab only (changes nothing)")
   if [ -s "$HOME/acm-dr/runs/run-$prev/events.log" ]; then items+=("Show the summary of run $prev"); fi
   items+=("Approve node certificates (after a power-on)" "Show all commands" "Quit")
@@ -1108,6 +1107,7 @@ on_exit() {   # put the terminal back, and say why the script stopped if die did
   if [ "$CMD" = run ] && probes_running; then note "the probes are still running: hack/dr.sh probe stop ends them"; fi
 }
 
+case $CMD in _probe-*) ;; *) start_screen ;; esac
 if [ -z "$CMD" ]; then
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
 fi

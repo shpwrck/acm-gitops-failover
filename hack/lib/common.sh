@@ -56,8 +56,8 @@ box() {   # box <border> <color> <title> [line...]: a framed message with gum, p
   if [ "$UI" = gum ]; then
     w=$(cols)
     w=$((w > 80 ? 76 : w - 4))
-    printf '\n%s\n' "$(gumc style --border "$border" --border-foreground "$color" --padding '0 2' --margin '0 1' --width "$w" \
-      "$(gumc style --bold --foreground "$color" "$title")" "$@")"
+    printf '\n%s\n' "$(gumc style --border "$border" --border-foreground "$color" --padding '0 2' --margin '0 1' --width "$w" -- \
+      "$(gumc style --bold --foreground "$color" -- "$title")" "$@")"
   else
     printf '\n== %s\n' "$title"
     for l in "$@"; do printf '%s\n' "$l" | fold -s -w 76 | sed 's/ *$//; s/^/   /'; done
@@ -123,7 +123,7 @@ verdict() {   # verdict ok|bad <text>
   if [ "$1" = ok ]; then color=10; fi
   logln "" "$2"
   if [ "$UI" = gum ]; then
-    printf '\n%s\n' "$(gumc style --border rounded --border-foreground "$color" --foreground "$color" --bold --padding '0 1' --margin '0 1' "$2")"
+    printf '\n%s\n' "$(gumc style --border rounded --border-foreground "$color" --foreground "$color" --bold --padding '0 1' --margin '0 1' -- "$2")"
   else
     printf '\n%s\n' "$2"
   fi
@@ -309,6 +309,7 @@ spin_cmd() {   # spin_cmd <title> <command...>: a slow command; its output goes 
   return "$rc"
 }
 
+start_screen() { if [ "$UI" = gum ]; then fresh_screen; fi; }   # with gum, a script starts on a clear screen
 fresh_screen() {   # scroll what the screen shows into the scrollback, then write from the top
   local rows
   rows=$(stty size 2>/dev/null </dev/tty) || rows=""

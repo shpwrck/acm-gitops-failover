@@ -689,6 +689,7 @@ on_exit() {
 }
 
 trap on_exit EXIT
+start_screen
 if [ "$ARGC" = 0 ]; then
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
 fi
