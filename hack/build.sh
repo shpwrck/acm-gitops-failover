@@ -202,13 +202,15 @@ set_setting() {   # set_setting <name> <value>: in the settings file
 STAGES=(Pre-flight ACM "OpenShift GitOps" "Backup storage" "Import $MANAGED" "Demo apps" "Backup roles" "dr/ roles" Check)
 STAGE=0
 stage() {   # stage <title> <what and why>
+  local n=""
   STAGE=$((STAGE + 1))
-  logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
+  if [ "${#STAGES[@]}" -gt 1 ]; then n="Stage $STAGE/${#STAGES[@]}: "; fi   # --check has the one stage
+  logln "" "#### $n$1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
-    printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$1" "$C_OFF"
+    printf '\n %s── %s%s%s\n' "$C_B$C_ACC" "$n" "$1" "$C_OFF"
   else
-    printf '\n#### Stage %d/%d: %s\n' "$STAGE" "${#STAGES[@]}" "$1"
+    printf '\n#### %s%s\n' "$n" "$1"
   fi
   explain "$2"
 }
@@ -720,12 +722,14 @@ trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
-STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " pre-flight"; fi) · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
+if [ "$CHECK" = 1 ]; then STAGES=(Pre-flight); fi   # --check runs only the pre-flight: its plan says what the other stages would do
+STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " check"; fi) · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
 steps_pin   # the stages stay at the top, and the output stays in the window under them
 COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if ! preflight; then DIED=1; exit 1; fi
 if [ "$CHECK" = 1 ]; then
+  steps_end
   finished "pre-flight only: nothing changed. Log: ${LOGFILE/#$HOME/\~}"
   exit 0
 fi

@@ -130,8 +130,10 @@ screen in place: the nine stages (done, current and to come) and the
 time since it started. Each stage starts on an empty
 window under it, and a pre-flight section that is all green shows as one
 line, so the output stays in the window; the log keeps everything,
-including what a later stage cleared from the screen. `--check` works
-the same way and logs to `~/acm-dr/logs/build-check-<time>.log`. The
+including what a later stage cleared from the screen. `--check` runs
+only the pre-flight, so its header has that one stage; the plan at its
+end lists what the other eight would install or reuse. It logs to
+`~/acm-dr/logs/build-check-<time>.log`. The
 pinned header needs a terminal of at least 72 columns and 20 lines (a
 smaller one gets a note, and the output scrolls), and `DR_PIN=0` turns
 it off.
