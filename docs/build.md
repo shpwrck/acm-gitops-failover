@@ -125,13 +125,16 @@ hack/build.sh --check   # read-only: what it would install, reuse or refuse, and
 hack/build.sh           # a menu; --yes builds without asking
 ```
 
-With gum, the script starts on a clear screen, and during a build the top
-of the screen stays put: the nine stages (done, current and to come), the
-time since the build started, and the current step. The output scrolls
-under it. What scrolls off is gone from the screen but kept in the log;
-the last stage (Check) scrolls as usual, so the scrollback keeps its
-result. The pinned header needs a terminal of at least 72 columns and 21
-lines, and `DR_PIN=0` turns it off. `--check` scrolls like a report.
+With gum, the script starts on a clear screen and keeps the top of the
+screen in place: the nine stages (done, current and to come), the time
+since it started, and the current step. Each stage starts on an empty
+window under it, and a pre-flight section that is all green shows as one
+line, so the output stays in the window; the log keeps everything,
+including what a later stage cleared from the screen. `--check` works
+the same way and logs to `~/acm-dr/logs/build-check-<time>.log`. The
+pinned header needs a terminal of at least 72 columns and 21 lines (a
+smaller one gets a note, and the output scrolls), and `DR_PIN=0` turns
+it off.
 
 It takes 40 to 60 minutes, most of it waiting for operators. Every RED
 line links to the section of this document that explains it, and the
@@ -621,10 +624,11 @@ and its backups, the settings file, and the CRDs the operators installed
 (harmless, and a new install adopts them). In git, only `dr/` on the
 branch and the branches `hack/dr.sh` pushed change (stage 8). The log is in
 `~/acm-dr/logs/teardown-<time>.log`. After a stop, run it again: each
-stage skips what is already gone. A real teardown keeps the same header
-at the top of the screen as the build (the stages, the time, the current
-step); a dry run scrolls like a report, so the scrollback keeps all of
-it. The stages, in order:
+stage skips what is already gone. The teardown keeps the same header at
+the top of the screen as the build (the stages, the time, the current
+step), and each stage starts on an empty window under it. A dry run does
+too, and logs every 'would' line to
+`~/acm-dr/logs/teardown-dryrun-<time>.log`. The stages, in order:
 
 1. **Pre-flight** (read-only): every cluster must answer; then a table of
    what goes and what stays, and the checks under [What the teardown

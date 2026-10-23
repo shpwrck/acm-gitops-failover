@@ -339,7 +339,10 @@ pin_fits() { PIN_ROWS=$(term_rows) PIN_COLS=$(cols); [ "$PIN_ROWS" -ge $((PIN_H 
 pin_on() {   # pin_on <rows> <draw function>: pin the header, and start the output under it on an empty screen
   if [ "$UI" != gum ] || [ "${DR_PIN:-1}" = 0 ] || [ "$PIN" = 1 ]; then return 0; fi
   PIN_H=$1 PIN_DRAW=$2
-  pin_fits || return 0
+  if ! pin_fits; then
+    note "the terminal is ${PIN_COLS}x$PIN_ROWS; the progress header needs 72x$((PIN_H + 16)) or more, so the output scrolls instead"
+    return 0
+  fi
   PIN=1
   fresh_screen
   printf '\e[%d;%dr' $((PIN_H + 1)) "$PIN_ROWS"   # the scrolling region: everything under the header
@@ -375,6 +378,7 @@ pin_off() {   # the whole screen scrolls again; the header stays on it as last d
 }
 crumbs() {   # crumbs <n> [width]: the stages in STAGES, done, current and to come; wrapped at <width>
   local i t len=0 s=""
+  # shellcheck disable=SC2153 # each script sets STAGES
   for i in "${!STAGES[@]}"; do
     t=${STAGES[i]}
     if [ "$i" -gt 0 ]; then
@@ -402,6 +406,10 @@ steps_header() {   # steps_header <width>: build.sh's and teardown.sh's pinned l
   printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(fit $((w - 2)) "${PIN_STEP:-${STAGES[STAGE - 1]}}")" "$C_OFF"
   printf -v fill '%*s' "$w" ''
   printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
+}
+steps_end() {   # steps_end <text>: every stage done, and <text> as the header's last step
+  STAGE=$((${#STAGES[@]} + 1)) PIN_STEP=$1
+  pin_draw
 }
 fit() {   # fit <width> <text>: the text, cut to <width> characters with an ellipsis
   if [ "${#2}" -le "$1" ]; then printf '%s' "$2"; else printf '%s…' "${2:0:$(($1 - 1))}"; fi
