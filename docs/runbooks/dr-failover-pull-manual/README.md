@@ -34,9 +34,16 @@ hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr
 With [gum](https://github.com/charmbracelet/gum) installed, the script
 shows a stage tracker, a spinner with the elapsed time while it waits,
 a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
-timing table at the end. Each stage starts on a clear screen; the
-earlier output stays in the terminal's scrollback and in `console.log`. Without gum, or with `DR_PLAIN=1`, it prints
-the same steps as plain text.
+timing table at the end. Each stage starts on a clear screen. From the
+outage on, the top of the screen stays put: the stage tracker and the
+time since the run started, the current step, both probes' samples and
+failures, which hub `$MANAGED` reports to and which revisions are
+served, and the last milestone. The output scrolls under it. What
+scrolls off is gone from the screen but kept in `console.log`; the
+summary at the end scrolls as usual, so the scrollback keeps it. The
+pinned header needs a terminal of at least 72 columns and 23 lines, and
+`DR_PIN=0` turns it off. Without gum, or with `DR_PLAIN=1`, the script
+prints the same steps as plain text.
 
 Each stage opens with a paragraph on what it is about to do and why, and
 each step with a line or two, so a run can be followed (or presented)
@@ -291,7 +298,14 @@ log as failures instead of masquerading as slow successes.
 
 **Failure:** Any non-200 during the exercise is a finding — timestamp it
 and correlate (a non-200 *after* the exercise window may just be your lab
-powering down; check before writing it up as a DR failure).
+powering down; check before writing it up as a DR failure). A lone `000`
+is curl giving up after 5 s with no answer. If the other app answered
+through the same router in the same seconds, and the app's pod, route and
+endpoints did not change, suspect the probe's own side (a slow DNS lookup
+or connect from the workstation) before the cluster. `hack/dr.sh` writes
+curl's exit code and timings (in seconds) on every sample that is not
+`200`: exit 28 is the timeout, and a `dns=` near 5 means the lookup was
+what stalled.
 
 ### A.2 Hub-pointer probe (second terminal)
 
