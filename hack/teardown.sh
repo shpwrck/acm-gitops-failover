@@ -163,8 +163,10 @@ ns_gone() {   # ns_gone <context> <namespace> [seconds]: delete a namespace and 
 STAGES=(Pre-flight "DR roles" "Demo apps" Detach "Backup storage" ACM "OpenShift GitOps" Git Summary)
 STAGE=0
 stage() {   # stage <title> <what and why>
-  STAGE=$((STAGE + 1))
+  STAGE=$((STAGE + 1)) PIN_STEP=""
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
+  pin_draw
+  if [ "$STAGE" = "${#STAGES[@]}" ]; then pin_off; fi   # the last stage scrolls, so the scrollback keeps it
   if [ "$UI" = gum ]; then
     printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$1" "$C_OFF"
   else
@@ -722,6 +724,7 @@ on_exit() {
   local rc=$?
   if [ -n "$POLL_PID" ]; then kill "$POLL_PID" 2>/dev/null || true; fi
   spin_stop
+  pin_off
   if [ "$rc" = 0 ] || [ "$DIED" = 1 ]; then return 0; fi
   if [ "$rc" = 130 ]; then
     box thick 9 "STOP" "interrupted: run it again to carry on; every stage skips what is already gone" ${LOGFILE:+"" "Log: $LOGFILE"}
@@ -749,6 +752,10 @@ trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
+if [ "$DRY" = 0 ]; then   # a dry run is a report to read back, so it scrolls like one
+  STEPS_TITLE="Teardown$(if [ "$FULL" = 1 ]; then echo " --full"; fi) · $ACTIVE, $PASSIVE, $MANAGED"
+  pin_on 5 steps_header   # the stages stay at the top until the last one
+fi
 
 if [ "$DRY" = 1 ]; then
   box rounded 13 "Dry run$(if [ "$FULL" = 1 ]; then echo " with --full"; fi): nothing changes" \
