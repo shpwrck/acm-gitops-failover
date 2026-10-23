@@ -3,7 +3,7 @@
 # docs/build.md and hack/build.sh. docs/build.md ("Tearing it down") explains
 # each stage, and what stays.
 #
-# Usage: hack/teardown.sh [--dry-run] [--full] [--yes]
+# Usage: hack/teardown.sh [--dry-run] [--reset | --full] [--yes]
 #
 # With no options, on a terminal, it shows a menu.
 #
@@ -12,6 +12,10 @@
 #              (every manifest in manifests/ and dr/ does), including ACM and
 #              OpenShift GitOps when the build installed them, and undo the two
 #              changes the build makes to an ACM that was there before it
+#   --reset     reset the exercise, not the platform: remove the DR roles and
+#              the demo apps, and reset dr/ in git, but keep ACM, OpenShift
+#              GitOps, the backup storage and the workload cluster's import,
+#              so the next hack/build.sh reuses them and takes minutes
 #   --full     remove ACM, OpenShift GitOps and the demo whoever installed
 #              them, and detach the workload cluster: afterwards none of the
 #              three clusters runs ACM or OpenShift GitOps
@@ -41,11 +45,12 @@ BRANCH=${BRANCH:-main}
 if [ -n "${KUBECONFIG:-}" ]; then export KUBECONFIG; fi
 cd "$REPO"
 
-DRY=0 FULL=0 YES=0 ARGC=$#
+DRY=0 FULL=0 RESET=0 YES=0 ARGC=$#
 for a in "$@"; do
   case $a in
     --dry-run) DRY=1 ;;
     --full) FULL=1 ;;
+    --reset) RESET=1 ;;
     --yes) YES=1 ;;
     *) sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; exit 2 ;;
   esac
@@ -83,9 +88,12 @@ operator_plan() {   # operator_plan <context> <package>: remove, keep, or none (
   local s
   s=$(sub_of "$1" "$2")
   if [ -z "$s" ]; then echo none
+  elif [ "$RESET" = 1 ]; then echo keep
   elif [ "$FULL" = 1 ] || [ "$(sub_get "$1" "$s" '{.metadata.labels.app\.kubernetes\.io/part-of}')" = "$PV" ]; then echo remove
   else echo keep; fi
 }
+kept_why() { if [ "$RESET" = 1 ]; then echo "--reset keeps it"; else echo "there before the build"; fi; }
+mode_flag() { if [ "$FULL" = 1 ]; then echo " --full"; elif [ "$RESET" = 1 ]; then echo " --reset"; fi; }
 mch_of() {   # mch_of <context>: "<namespace> <name>" of the MultiClusterHub
   oc --context "$1" get multiclusterhubs.operator.open-cluster-management.io -A -o json 2>/dev/null |
     jq -r 'first(.items[] | "\(.metadata.namespace) \(.metadata.name)") // empty'
@@ -165,7 +173,7 @@ ns_gone() {   # ns_gone <context> <namespace> [seconds]: delete a namespace and 
 STAGES=(Pre-flight "DR roles" "Demo apps" Detach "Backup storage" ACM "OpenShift GitOps" Git Summary)
 STAGE=0
 stage() {   # stage <title> <what and why>
-  STAGE=$((STAGE + 1)) PIN_STEP=""
+  STAGE=$((STAGE + 1))
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
@@ -220,6 +228,8 @@ preflight() {
   local c s v x mch blockers=0 had
   stage "Pre-flight (read-only)" "Reads what is on $ACTIVE, $PASSIVE and $MANAGED and decides what goes. $(if [ "$FULL" = 1 ]; then
     echo "With --full, ACM and OpenShift GitOps go wherever they are installed, whoever installed them, and $MANAGED is detached from its hub."
+  elif [ "$RESET" = 1 ]; then
+    echo "With --reset, only the exercise goes: the DR roles and the demo apps. ACM, OpenShift GitOps, the backup storage and $MANAGED's import stay, for the next hack/build.sh to reuse."
   else
     echo "Without --full, only what carries this repo's label goes (every manifest in manifests/ and dr/ has it), plus ACM and OpenShift GitOps where hack/build.sh installed them. An ACM or OpenShift GitOps that was there before the build stays, and so does everything else on the clusters."
   fi) It refuses when removing ACM or OpenShift GitOps would take something that is not this repo's with it. Nothing changes in this stage."
@@ -247,6 +257,7 @@ preflight() {
     if mine "$c" "$APPSET" hello-failover -n "$GNS" || mine "$c" "$APPSET" hello-failover-push -n "$GNS"; then DEMO=1; fi
   done
   if [ "$FULL" = 1 ]; then DEMO=1; fi
+  if [ "$RESET" = 1 ]; then DETACH=0; fi
   spin_stop
 
   for c in "${HUBS[@]}"; do
@@ -256,13 +267,15 @@ preflight() {
       none) row "$c" ACM "-" "not installed" ;;
       remove) row "$c" "ACM ${v#advanced-cluster-management.}" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
       keep)
-        row "$c" "ACM ${v#advanced-cluster-management.}" keep "there before the build"
-        mch=$(mch_of "$c")
-        if [ -n "$mch" ] && [ "$(mch_get "$c" "$mch" "{.metadata.annotations.$A_BACKUP}")" = enabled-by-build ]; then
-          row "$c" "  cluster-backup" "turn off" "the build turned it on"
+        row "$c" "ACM ${v#advanced-cluster-management.}" keep "$(kept_why)"
+        if [ "$RESET" = 0 ]; then   # with --reset, the build's changes to it stay too, for the next build
+          mch=$(mch_of "$c")
+          if [ -n "$mch" ] && [ "$(mch_get "$c" "$mch" "{.metadata.annotations.$A_BACKUP}")" = enabled-by-build ]; then
+            row "$c" "  cluster-backup" "turn off" "the build turned it on"
+          fi
+          x=$(sub_get "$c" "$s" "{.metadata.annotations.$A_APPROVAL}")
+          if [ -n "$x" ]; then row "$c" "  ACM approval" "back to $x" "the build set Manual"; fi
         fi
-        x=$(sub_get "$c" "$s" "{.metadata.annotations.$A_APPROVAL}")
-        if [ -n "$x" ]; then row "$c" "  ACM approval" "back to $x" "the build set Manual"; fi
         ;;
     esac
     s=$(sub_of "$c" openshift-gitops-operator)
@@ -270,10 +283,11 @@ preflight() {
     case ${GITOPS_PLAN[$c]} in
       none) row "$c" "OpenShift GitOps" "-" "not installed" ;;
       remove) row "$c" "OpenShift GitOps ${v#openshift-gitops-operator.}" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
-      keep) row "$c" "OpenShift GitOps ${v#openshift-gitops-operator.}" keep "there before the build" ;;
+      keep) row "$c" "OpenShift GitOps ${v#openshift-gitops-operator.}" keep "$(kept_why)" ;;
     esac
     if some "$c" managedcluster "$MANAGED"; then
-      if mine "$c" managedcluster "$MANAGED"; then row "$c" "ManagedCluster $MANAGED" detach "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "the build imported it"; fi)"
+      if [ "$RESET" = 1 ]; then row "$c" "ManagedCluster $MANAGED" keep "--reset keeps the import"
+      elif mine "$c" managedcluster "$MANAGED"; then row "$c" "ManagedCluster $MANAGED" detach "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "the build imported it"; fi)"
       else row "$c" "ManagedCluster $MANAGED" keep "managed before the build"; fi
     fi
     had=0
@@ -283,6 +297,9 @@ preflight() {
       if mine "$c" $x; then had=1; fi
     done
     if [ "$had" = 1 ]; then row "$c" "DR roles, backups, demo wiring" remove "this repo's"; fi
+    if [ "$RESET" = 1 ] && mine "$c" dataprotectionapplications.oadp.openshift.io acm-dpa -n "$NS"; then
+      row "$c" "backup storage (DPA, S3 key)" keep "--reset keeps it"
+    fi
   done
   if some "$MANAGED" ns hello-failover || some "$MANAGED" ns hello-failover-push; then
     if [ "$DEMO" = 1 ]; then row "$MANAGED" "demo apps" remove "with their ApplicationSets"; else row "$MANAGED" "demo apps" keep "their ApplicationSets stay"; fi
@@ -290,7 +307,7 @@ preflight() {
   case ${GITOPS_PLAN[$MANAGED]} in
     none) row "$MANAGED" "OpenShift GitOps" "-" "not installed" ;;
     remove) row "$MANAGED" "OpenShift GitOps" remove "$(if [ "$FULL" = 1 ]; then echo "--full"; else echo "hack/build.sh installed it"; fi)" ;;
-    keep) row "$MANAGED" "OpenShift GitOps" keep "there before the build" ;;
+    keep) row "$MANAGED" "OpenShift GitOps" keep "$(kept_why)" ;;
   esac
   for c in "${CLUSTERS[@]}"; do
     if [ "${ACM_PLAN[$c]}" = none ] && orphan_agent "$c"; then
@@ -304,6 +321,7 @@ preflight() {
   git_plan
   printf 'Cluster\tWhat\tPlan\tWhy\n%s' "$PLAN_ROWS" | table
 
+  if [ "$RESET" = 1 ]; then HELP=""; return 0; fi   # ACM and OpenShift GitOps stay
   sec_begin "Would removing ACM or OpenShift GitOps take anything else with it?" "Nothing else"
   explain "Removing ACM detaches every cluster it manages, and removing OpenShift GitOps deletes every Argo CD application on that cluster. So both must find nothing that is not this repo's."
   help_at docs/build.md#what-the-teardown-refuses
@@ -676,7 +694,7 @@ cmd_git() {
 summary() {
   local c
   stage "Summary" "What is left of the exercise on each cluster."
-  steps_end "Teardown done in $(dur $((SECONDS - T0)))"
+  steps_end
   for c in "${CLUSTERS[@]}"; do
     printf '%s\t%s\t%s\t%s\n' "$c" \
       "$(if [ -n "$(sub_of "$c" advanced-cluster-management)" ]; then echo installed; else echo -; fi)" \
@@ -684,6 +702,7 @@ summary() {
       "$(if some "$c" klusterlets.operator.open-cluster-management.io klusterlet; then echo yes; else echo -; fi)"
   done | { printf 'Cluster\tACM\tOpenShift GitOps\tACM agent\n'; cat; } | table
   if [ "$GIT_OK" = 1 ]; then note "dr/ on $BRANCH: $ACTIVE $(git_role "$ACTIVE"), $PASSIVE $(git_role "$PASSIVE")"; fi
+  if [ "$RESET" = 1 ]; then note "ACM, OpenShift GitOps, the backup storage and $MANAGED's import stay (--reset): hack/build.sh reuses them"; fi
   note "the S3 bucket still holds the old backups; the next build's first backup is newer, so restores use that"
   note "CRDs the operators installed stay (ACM's, Velero's, Argo CD's): harmless, and a new install adopts them"
   box rounded 10 "Teardown done in $(dur $((SECONDS - T0)))" "Next: hack/build.sh builds the exercise again (docs/build.md)." \
@@ -696,10 +715,11 @@ menu() {
   intro "Tear down the ACM hub DR exercise" \
     "Removes what hack/build.sh put on the clusters, including ACM and OpenShift GitOps where the build installed them. ACM or OpenShift GitOps that was there before stays. Other workloads and the S3 bucket always stay, and dr/ in git goes back to the roles the build starts from." \
     "" \
+    "With --reset: only the exercise goes (the DR roles, the demo apps, dr/ in git). ACM, OpenShift GitOps, the backup storage and the workload cluster's import stay, so the next build takes minutes." \
     "With --full: also removes ACM, OpenShift GitOps and the demo whoever installed them, and detaches the workload cluster." \
     "A dry run changes nothing: it shows what would go and what stays."
-  local items=("Dry run: what the teardown would remove (read-only)" "Dry run with --full (read-only)"
-    "Tear down what this repo installed" "Tear down with --full" "List the options" "Quit")
+  local items=("Dry run: what the teardown would remove (read-only)" "Dry run with --reset (read-only)" "Dry run with --full (read-only)"
+    "Tear down what this repo installed" "Reset the exercise, keep the operators (--reset)" "Tear down with --full" "List the options" "Quit")
   echo
   if [ "$UI" = gum ]; then
     choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
@@ -709,8 +729,10 @@ menu() {
   fi
   case $choice in
     "Dry run: what"*) DRY=1 ;;
+    "Dry run with --reset"*) DRY=1 RESET=1 ;;
     "Dry run with --full"*) DRY=1 FULL=1 ;;
     "Tear down what"*) ;;
+    "Reset the exercise"*) RESET=1 ;;
     "Tear down with --full") FULL=1 ;;
     "List the options") usage; exit 0 ;;
     *) exit 0 ;;
@@ -741,6 +763,8 @@ start_screen
 if [ "$ARGC" = 0 ]; then
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
 fi
+if [ "$FULL" = 1 ] && [ "$RESET" = 1 ]; then echo "--reset keeps what --full removes: pick one" >&2; exit 2; fi
+if [ "$RESET" = 1 ]; then STAGES=(Pre-flight "DR roles" "Demo apps" Git Summary); fi
 for c in "${CLUSTERS[@]}"; do
   grep -qx -- "$c" <<<"$(oc config get-contexts -o name)" || { echo "no kubeconfig context named '$c' (KUBECONFIG=${KUBECONFIG:-default})" >&2; exit 2; }
 done
@@ -748,18 +772,18 @@ mkdir -p "$HOME/acm-dr/logs"
 LOGFILE=$HOME/acm-dr/logs/teardown$(if [ "$DRY" = 1 ]; then echo -dryrun; fi)-$(date -u +%Y%m%dT%H%M%SZ).log
 # shellcheck disable=SC2094 # both append
 exec 3>>"$LOGFILE" 2> >(tee -a "$LOGFILE" >&2)
-logln "#### $(now) hack/teardown.sh$(if [ "$FULL" = 1 ]; then echo " --full"; fi)$(if [ "$DRY" = 1 ]; then echo " --dry-run"; fi)"
+logln "#### $(now) hack/teardown.sh$(mode_flag)$(if [ "$DRY" = 1 ]; then echo " --dry-run"; fi)"
 trap on_exit EXIT
 trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
-STEPS_TITLE="Teardown$(if [ "$FULL" = 1 ]; then echo " --full"; fi)$(if [ "$DRY" = 1 ]; then echo " dry run"; fi) · $ACTIVE, $PASSIVE, $MANAGED"
-pin_on 5 steps_header   # the stages stay at the top, and the output stays in the window under them
+STEPS_TITLE="Teardown$(mode_flag)$(if [ "$DRY" = 1 ]; then echo " dry run"; fi) · $ACTIVE, $PASSIVE, $MANAGED"
+steps_pin   # the stages stay at the top, and the output stays in the window under them
 COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if [ "$DRY" = 1 ]; then
-  box rounded 13 "Dry run$(if [ "$FULL" = 1 ]; then echo " with --full"; fi): nothing changes" \
+  box rounded 13 "Dry run$(if [ -n "$(mode_flag)" ]; then echo " with$(mode_flag)"; fi): nothing changes" \
     "Lines marked 'would' are what a real run does, read from the clusters as they are now. A real run checks again at each step, so what an earlier step removes is not removed twice."
 fi
 if ! preflight; then DIED=1; exit 1; fi
@@ -768,14 +792,16 @@ if [ "$DRY" = 0 ]; then
 fi
 cmd_roles
 cmd_demo
-cmd_detach
-cmd_storage
-cmd_acm
-cmd_gitops
+if [ "$RESET" = 0 ]; then
+  cmd_detach
+  cmd_storage
+  cmd_acm
+  cmd_gitops
+fi
 cmd_git
 if [ "$DRY" = 1 ]; then
   stage "Summary" "Nothing changed: this was a dry run. The log has every 'would' line: ${LOGFILE/#$HOME/\~}"
-  steps_end "Dry run done in $(dur $((SECONDS - T0))): nothing changed"
+  steps_end
   verdict ok "DRY RUN: nothing changed. Run it without --dry-run to remove what the 'would' lines name."
 else
   summary

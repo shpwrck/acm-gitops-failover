@@ -126,13 +126,13 @@ hack/build.sh           # a menu; --yes builds without asking
 ```
 
 With gum, the script starts on a clear screen and keeps the top of the
-screen in place: the nine stages (done, current and to come), the time
-since it started, and the current step. Each stage starts on an empty
+screen in place: the nine stages (done, current and to come) and the
+time since it started. Each stage starts on an empty
 window under it, and a pre-flight section that is all green shows as one
 line, so the output stays in the window; the log keeps everything,
 including what a later stage cleared from the screen. `--check` works
 the same way and logs to `~/acm-dr/logs/build-check-<time>.log`. The
-pinned header needs a terminal of at least 72 columns and 21 lines (a
+pinned header needs a terminal of at least 72 columns and 20 lines (a
 smaller one gets a note, and the output scrolls), and `DR_PIN=0` turns
 it off.
 
@@ -609,24 +609,26 @@ Start with a dry run: it reads the clusters, prints the plan and every
 step a real run would take, and changes nothing.
 
 ```bash
-hack/teardown.sh --dry-run          # what the default removes, and what stays
-hack/teardown.sh --full --dry-run   # the same with --full
-hack/teardown.sh                    # a menu; --yes removes without asking
+hack/teardown.sh --dry-run           # what the default removes, and what stays
+hack/teardown.sh --reset --dry-run   # the same with --reset
+hack/teardown.sh --full --dry-run    # the same with --full
+hack/teardown.sh                     # a menu; --yes removes without asking
 ```
 
 | Mode | What goes |
 | --- | --- |
 | default | Everything that carries the label `app.kubernetes.io/part-of: acm-gitops-failover`, which every object in `manifests/` and `dr/` has (`hack/validate.sh` checks it), so a manual build is labeled the same way as a scripted one. ACM and OpenShift GitOps go where their Subscription carries the label, that is, where the build installed them. On an ACM that was there before, the two marked changes of [A hub that already runs ACM](#a-hub-that-already-runs-acm) are undone, and the rest of it stays. |
+| `--reset` | Only the exercise: the DR roles (stage 2), the demo apps (stage 3) and `dr/` in git (stage 8). ACM, OpenShift GitOps, the backup storage and the spoke's import stay, with the build's changes to them, so the next `hack/build.sh` reuses them and re-creates only the demo apps, the backups and the roles, in minutes. Use it to build again without reinstalling the operators. |
 | `--full` | ACM, OpenShift GitOps and the demo, whoever installed them, and the spoke is detached: afterwards none of the three clusters runs ACM or OpenShift GitOps. |
 
-Either way, other operators and workloads stay, and so do the S3 bucket
+In every mode, other operators and workloads stay, and so do the S3 bucket
 and its backups, the settings file, and the CRDs the operators installed
 (harmless, and a new install adopts them). In git, only `dr/` on the
 branch and the branches `hack/dr.sh` pushed change (stage 8). The log is in
 `~/acm-dr/logs/teardown-<time>.log`. After a stop, run it again: each
 stage skips what is already gone. The teardown keeps the same header at
-the top of the screen as the build (the stages, the time, the current
-step), and each stage starts on an empty window under it. A dry run does
+the top of the screen as the build (the stages and the time), and each
+stage starts on an empty window under it. A dry run does
 too, and logs every 'would' line to
 `~/acm-dr/logs/teardown-dryrun-<time>.log`. The stages, in order:
 

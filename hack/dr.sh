@@ -98,11 +98,10 @@ declare -A HUB_URL
 probe_counts() {   # probe_counts <log>: "<samples> <not 200>"
   if [ -f "$1" ]; then awk '{n++} $2 != "200" {f++} END {printf "%d %d", n, f}' "$1"; else echo "0 0"; fi
 }
-run_header() {   # run_header <width>: the pinned lines of a run: where it stands, its step, and what the probes see
+run_header() {   # run_header <width>: the pinned lines of a run: where it stands, and what the probes see
   local w=$(($1 > 80 ? 78 : $1)) n f c h t u x="" fill
   printf ' %s%s%s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF"
   printf ' %s\n' "$(crumbs "$STAGE_N")"
-  printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(fit $((w - 2)) "${PIN_STEP:-${STAGES[STAGE_N - 1]}}")" "$C_OFF"
   if [ ! -f "$LOGDIR/probe.log" ]; then x="   the probes start when the run does, after the pre-flight"; fi
   for c in pull push; do
     [ -f "$LOGDIR/probe.log" ] || break
@@ -128,7 +127,7 @@ stage() {   # stage <n>: where the run stands. With gum, each stage after the fi
   local i s w recap="" n
   n=$(wc -l 2>/dev/null <"$LOGDIR/events.log" || echo 0)
   if [ "$1" -gt 1 ] && [ "$n" -gt "$STAGE_EV" ]; then recap=$(sed -n "$((STAGE_EV + 1)),\$p" "$LOGDIR/events.log" | tail -n 3); fi
-  STAGE_EV=$n STAGE_N=$1 PIN_STEP=""
+  STAGE_EV=$n STAGE_N=$1
   logln "" "#### Stage $1/${#STAGES[@]}: ${STAGES[$1 - 1]}"
   if [ "$UI" != gum ]; then
     printf '\n#### Stage %d/%d: %s\n' "$1" "${#STAGES[@]}" "${STAGES[$1 - 1]}"
@@ -993,7 +992,7 @@ cmd_run() {
   if [ "$GIT" = 1 ]; then stops="to cut $ACTIVE's power, to merge 3 PRs, and to power $ACTIVE back on"; fi
   if [ "$UI" = gum ]; then
     for c in "$ACTIVE" "$PASSIVE"; do HUB_URL[$c]=$(server "$c" 2>/dev/null || true); done
-    pin_on 7 run_header   # the run's state stays at the top until the summary
+    pin_on 6 run_header   # the run's state stays at the top until the summary
   fi
   box double 13 "Run $RUN · $(mode_name): $ACTIVE goes down, $PASSIVE takes over" \
     "The script pauses when it needs you: $stops." \

@@ -71,7 +71,7 @@ your_turn() {   # your_turn <what> [line...]: something only you can do; the bel
   if [ "$UI" = gum ]; then printf '\a'; fi
 }
 say() {
-  HELP_SHOWN="" PIN_STEP=$*
+  HELP_SHOWN=""
   logln "" "== $*"
   pin_draw
   if [ "$UI" = gum ]; then printf '\n %s▍%s%s%s\n' "$C_ACC" "$C_B" "$*" "$C_OFF"; else printf '\n== %s\n' "$*"; fi
@@ -328,7 +328,7 @@ fresh_screen() {   # scroll what the screen shows into the scrollback, then writ
 # <rows> + 16 lines, the top <rows> lines stay put and show what <draw>
 # prints, and the output scrolls under them. What scrolls off the top of
 # that part is gone from the screen (the log keeps it). DR_PIN=0 turns it off.
-PIN=0 PIN_H=0 PIN_DRAW="" PIN_AT=-1 PIN_ROWS=0 PIN_COLS=80 PIN_STEP=""
+PIN=0 PIN_H=0 PIN_DRAW="" PIN_AT=-1 PIN_ROWS=0 PIN_COLS=80
 term_rows() {   # the terminal's height; 0 when it does not say
   local s
   s=$(stty size 2>/dev/null </dev/tty) || s=""
@@ -396,19 +396,23 @@ crumbs() {   # crumbs <n> [width]: the stages in STAGES, done, current and to co
   printf '%s' "$s"
 }
 STEPS_TITLE=""
-steps_header() {   # steps_header <width>: build.sh's and teardown.sh's pinned lines: what runs and for how long, the stages, the step
+steps_header() {   # steps_header <width>: build.sh's and teardown.sh's pinned lines: what runs and for how long, and the stages
   local w=$(($1 > 80 ? 78 : $1)) rule fill l n=0
   rule="── $STEPS_TITLE · $(dur $((SECONDS - T0))) "
   printf -v fill '%*s' $((w - ${#rule} > 0 ? w - ${#rule} : 0)) ''
   printf ' %s%s%s\n' "$C_DIM" "$rule${fill// /─}" "$C_OFF"
   while IFS= read -r l; do printf ' %s\n' "$l"; n=$((n + 1)); done <<<"$(crumbs "$STAGE" $((w - 1)))"
-  while [ "$n" -lt 2 ]; do echo; n=$((n + 1)); done
-  printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(fit $((w - 2)) "${PIN_STEP:-${STAGES[STAGE - 1]}}")" "$C_OFF"
+  while [ "$n" -lt $((PIN_H - 2)) ]; do echo; n=$((n + 1)); done
   printf -v fill '%*s' "$w" ''
   printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
 }
-steps_end() {   # steps_end <text>: every stage done, and <text> as the header's last step
-  STAGE=$((${#STAGES[@]} + 1)) PIN_STEP=$1
+steps_pin() {   # pin steps_header, as tall as the stages need at this width
+  local w=$(($(cols) - 1))
+  w=$((w > 80 ? 78 : w))
+  pin_on $(($(crumbs 1 $((w - 1)) | grep -c '') + 2)) steps_header
+}
+steps_end() {   # every stage ticked in the header
+  STAGE=$((${#STAGES[@]} + 1))
   pin_draw
 }
 fit() {   # fit <width> <text>: the text, cut to <width> characters with an ellipsis
