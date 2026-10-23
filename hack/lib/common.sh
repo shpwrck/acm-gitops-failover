@@ -77,7 +77,7 @@ mark() {   # mark <plain tag> <gum mark> <text>
   logln "   $1 $3"
   if [ "$UI" = gum ]; then printf '   %s %s\n' "$2" "$3"; else printf '   %s %s\n' "$1" "$3"; fi
 }
-BAD=0
+BAD=0 RED_LIST=()
 ok() { mark "ok   " "${C_OK}✓${C_OFF}" "$*"; }
 HELP="" HELP_SHOWN=""
 help_at() { HELP=$1; }   # help_at <doc#anchor>: the section that explains the RED lines after it
@@ -92,7 +92,7 @@ link() {   # link <url>: the url, clickable where the terminal supports it
 }
 red() {   # a failed check, then (once per section) where the docs explain what could be wrong
   local u
-  BAD=1
+  BAD=1 RED_LIST+=("$*")
   mark "RED  " "${C_BAD}✗${C_OFF}" "$*"
   if [ -n "$HELP" ] && [ "$HELP" != "$HELP_SHOWN" ]; then
     HELP_SHOWN=$HELP
