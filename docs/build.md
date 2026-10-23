@@ -518,9 +518,9 @@ overlay still lists that failover's activation one-shot next to
 `../roles/active` (the "promoted" state in
 [dr/README.md](../dr/README.md)). Before you build new clusters from that
 branch, delete the `restore-activate-*.yaml` file from the overlay and its
-entry from the overlay's `kustomization.yaml`, and push. Otherwise the new
-hub's `dr-role` applies it next to the BackupSchedule, where the backup
-operator ignores it.
+entry from the overlay's `kustomization.yaml`, and push; `hack/teardown.sh`
+does this for you (its stage 8). Otherwise the new hub's `dr-role` applies
+it next to the BackupSchedule, where the backup operator ignores it.
 
 ## Build-time gotchas
 
@@ -581,8 +581,9 @@ hack/teardown.sh                    # a menu; --yes removes without asking
 | `--full` | ACM, OpenShift GitOps and the demo, whoever installed them, and the spoke is detached: afterwards none of the three clusters runs ACM or OpenShift GitOps. |
 
 Either way, other operators and workloads stay, and so do the S3 bucket
-and its backups, the settings file, git, and the CRDs the operators
-installed (harmless, and a new install adopts them). The log is in
+and its backups, the settings file, and the CRDs the operators installed
+(harmless, and a new install adopts them). In git, only `dr/` on the
+branch and the branches `hack/dr.sh` pushed change (stage 8). The log is in
 `~/acm-dr/logs/teardown-<time>.log`. After a stop, run it again: each
 stage skips what is already gone. The stages, in order:
 
@@ -615,8 +616,21 @@ stage skips what is already gone. The stages, in order:
 7. **OpenShift GitOps**: its Argo CD instance while the operator can still
    clean up after it, then the operator and the `openshift-gitops`
    namespace.
-8. **Summary**: what is left of ACM, OpenShift GitOps and the ACM agent on
-   each cluster.
+8. **Git**: once no `dr-role` Application reads it, `dr/` on the branch
+   goes back to the roles the build starts from: the settings file's
+   `ACTIVE` hub lists only `../roles/active`, the `PASSIVE` hub only
+   `../roles/passive`, and the `restore-activate-*.yaml` one-shots of
+   earlier git-driven failovers go (see [7. Git-driven paths
+   only](#7-git-driven-paths-only-bootstrap-dr)). It commits on top of
+   the branch on origin in a scratch worktree, pushes, and brings your
+   checkout up to date if it is on that branch with no changes. Then it
+   deletes the `failover-*`, `promote-*` and `demote-*` branches that
+   `hack/dr.sh` pushed for its pull requests, on origin and in your
+   checkout, once the branch has merged them; unmerged ones stay. A
+   hub whose `dr-role` stays (one this repo did not create) keeps its
+   overlay.
+9. **Summary**: what is left of ACM, OpenShift GitOps and the ACM agent on
+   each cluster, and the roles `dr/` gives each hub.
 
 ### What the teardown refuses
 

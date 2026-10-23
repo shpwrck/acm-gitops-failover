@@ -19,7 +19,10 @@
 #   --yes      do not ask before removing
 #
 # Other operators and workloads stay. So do the S3 bucket and its backups,
-# the settings file and git. It refuses (and says why) when removing ACM or
+# and the settings file. In git, it resets dr/ on BRANCH to the roles the
+# build starts from (ACTIVE active, PASSIVE passive, no activation one-shot),
+# and deletes the branches hack/dr.sh pushed once BRANCH has merged them.
+# It refuses (and says why) when removing ACM or
 # OpenShift GitOps would take something else with it: another managed
 # cluster, or Argo CD applications this repo did not create.
 # Settings: $DR_ENV (default ~/acm-dr/dr.env; see hack/dr.env.example).
@@ -109,6 +112,10 @@ argo_strangers() {   # argo_strangers <context>: Argo CD objects this repo did n
   } || true
 }
 
+want_role() { if [ "$1" = "$ACTIVE" ]; then echo active; else echo passive; fi; }   # want_role <hub>: the role the build starts it in
+run_branch() { [[ $1 =~ ^(failover|promote|demote)-[0-9]{12}$ ]]; }   # a branch hack/dr.sh pushes for a pull request
+merged() { git merge-base --is-ancestor "$1" "origin/$BRANCH" 2>/dev/null; }   # merged <commit>: $BRANCH on origin has it
+
 # --- doing it --------------------------------------------------------------------
 
 act() {   # act <what> <command...>: do it, or with --dry-run say it would
@@ -153,7 +160,7 @@ ns_gone() {   # ns_gone <context> <namespace> [seconds]: delete a namespace and 
 
 # --- stages -------------------------------------------------------------------------
 
-STAGES=(Pre-flight "DR roles" "Demo apps" Detach "Backup storage" ACM "OpenShift GitOps" Summary)
+STAGES=(Pre-flight "DR roles" "Demo apps" Detach "Backup storage" ACM "OpenShift GitOps" Git Summary)
 STAGE=0
 stage() {   # stage <title> <what and why>
   STAGE=$((STAGE + 1))
@@ -167,8 +174,44 @@ stage() {   # stage <title> <what and why>
 }
 
 declare -A ACM_PLAN GITOPS_PLAN OP_NS ORPHAN
-DETACH=0 DEMO=0 PLAN_ROWS=""
+DETACH=0 DEMO=0 PLAN_ROWS="" GIT_OK=0 GIT_RESET="" RUN_BRANCHES="" LOCAL_BRANCHES=""
 row() { PLAN_ROWS+="$1"$'\t'"$2"$'\t'"$3"$'\t'"$4"$'\n'; }
+
+git_plan() {   # git_plan: rows for dr/ on $BRANCH and for hack/dr.sh's branches
+  local c x v why sha ref kept=0 n
+  if ! git fetch -q origin "$BRANCH" 2>/dev/null || ! git rev-parse -q --verify "origin/$BRANCH" >/dev/null; then
+    row git "dr/ on $BRANCH" keep "could not fetch $BRANCH from origin"
+    return 0
+  fi
+  GIT_OK=1
+  for c in "${HUBS[@]}"; do
+    x=$(git_role "$c") v=$(want_role "$c")
+    if [ "$x" = "$v" ]; then continue; fi
+    if [ "$x" = missing ]; then row git "dr/$c on $BRANCH" keep "there is no dr/$c/kustomization.yaml"; continue; fi
+    if some "$c" "$APP" dr-role -n "$GNS" && ! mine "$c" "$APP" dr-role -n "$GNS"; then
+      row git "dr/$c on $BRANCH" keep "it is $x; $c's dr-role stays and would apply a change"
+      continue
+    fi
+    GIT_RESET+="${GIT_RESET:+ }$c"
+    if [ "$v" = active ] && [[ $x == "active with "* ]]; then why="drop the last failover's ${x#active with }"
+    else why="it is $x; the next build starts $c $v"; fi
+    row git "dr/$c on $BRANCH" "reset to $v" "$why"
+  done
+  while read -r sha ref; do
+    ref=${ref#refs/heads/}
+    if ! run_branch "$ref"; then continue; fi
+    if merged "$sha"; then RUN_BRANCHES+="${RUN_BRANCHES:+ }$ref"; else kept=$((kept + 1)); fi
+  done < <(git ls-remote --heads origin 2>/dev/null || true)
+  while read -r ref; do
+    if run_branch "$ref" && [ "$ref" != "$(git branch --show-current)" ] && merged "$ref"; then LOCAL_BRANCHES+="${LOCAL_BRANCHES:+ }$ref"; fi
+  done < <(git for-each-ref --format='%(refname:short)' refs/heads/)
+  n=$(wc -w <<<"$RUN_BRANCHES")
+  if [ "$n" -gt 0 ]; then row git "$(branches "$n") on origin" remove "merged into $BRANCH"; fi
+  if [ "$kept" -gt 0 ]; then row git "$(branches "$kept") on origin" keep "not merged into $BRANCH"; fi
+  n=$(wc -w <<<"$LOCAL_BRANCHES")
+  if [ "$n" -gt 0 ]; then row git "$(branches "$n") in your checkout" remove "merged into $BRANCH"; fi
+}
+branches() { if [ "$1" = 1 ]; then echo "1 hack/dr.sh branch"; else echo "$1 hack/dr.sh branches"; fi; }
 
 preflight() {
   local c s v x mch blockers=0 had
@@ -254,6 +297,7 @@ preflight() {
   if some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet && ! orphan_agent "$MANAGED"; then
     if [ "$DETACH" = 1 ]; then row "$MANAGED" "ACM agent (klusterlet)" remove "the detach removes it"; else row "$MANAGED" "ACM agent (klusterlet)" keep "$MANAGED stays managed"; fi
   fi
+  git_plan
   printf 'Cluster\tWhat\tPlan\tWhy\n%s' "$PLAN_ROWS" | table
 
   say "Would removing ACM or OpenShift GitOps take anything else with it?"
@@ -573,6 +617,57 @@ cmd_gitops() {
   done
 }
 
+dr_reset() {   # dr_reset <worktree> <hub>: dr/<hub> lists only the role the build starts it in, and no activation one-shot
+  local f=$1/dr/$2/kustomization.yaml v
+  v=$(want_role "$2")
+  awk -v r="  - ../roles/$v" '/^resources:/ {print; print r; skip = 1; next} skip && /^  - / {next} {skip = 0; print}' "$f" >"$f.new" &&
+    mv "$f.new" "$f" &&
+    git -C "$1" rm -q --ignore-unmatch "dr/$2/restore-activate-*.yaml" &&
+    [ "$(sed -n 's/^  - //p' "$f" | paste -sd' ' -)" = "../roles/$v" ]
+}
+push_reset() {   # push_reset <hub...>: one commit on top of origin/$BRANCH, made in a scratch worktree, so your checkout stays as it is
+  local w c rc=0
+  w=$(mktemp -d)
+  git worktree add -q --detach "$w" "origin/$BRANCH" || { rmdir "$w"; return 1; }
+  for c in "$@"; do dr_reset "$w" "$c" || rc=1; done
+  if [ "$rc" = 0 ]; then
+    git -C "$w" add -A dr/ &&
+      git -C "$w" commit -q -m "dr/: $ACTIVE active, $PASSIVE passive, as the next build starts them (hack/teardown.sh)" &&
+      git -C "$w" push -q origin "HEAD:refs/heads/$BRANCH" || rc=$?
+  fi
+  git worktree remove --force "$w" 2>/dev/null || rm -rf "$w"
+  return "$rc"
+}
+
+cmd_git() {
+  local c what=""
+  stage "Git" "Now that no dr-role application reads it, resets dr/ on $BRANCH to the roles the build starts from: $ACTIVE active, $PASSIVE passive, and no activation one-shot left by a git-driven failover. Then deletes the branches hack/dr.sh pushed for its pull requests, once $BRANCH has merged them."
+  if [ "$GIT_OK" = 0 ]; then note "could not fetch $BRANCH from origin: git stays as it is"; return 0; fi
+  help_at dr/README.md
+  for c in $GIT_RESET; do what+="${what:+, }dr/$c to $(want_role "$c")"; done
+  if [ -n "$GIT_RESET" ]; then
+    # shellcheck disable=SC2086 # one hub per word
+    act "git: reset $what, and push it to $BRANCH" push_reset $GIT_RESET
+    c=$(git branch --show-current)
+    if [ "$DRY" = 1 ]; then :
+    elif [ "$c" != "$BRANCH" ]; then note "your checkout is on ${c:-a detached HEAD}: git pull $BRANCH when you switch back to it"
+    elif [ -n "$(git status --porcelain --untracked-files=no)" ]; then note "your checkout of $BRANCH has changes, so it stays behind origin: git pull before the next build"
+    else act "git: bring your checkout of $BRANCH up to date" git merge -q --ff-only "origin/$BRANCH"; fi
+  fi
+  if [ -n "$RUN_BRANCHES" ]; then
+    # shellcheck disable=SC2086 # one branch per word
+    act "git: delete the merged hack/dr.sh branches on origin" git push -q origin --delete $RUN_BRANCHES
+    show <<<"$(fmt -w 72 <<<"$RUN_BRANCHES")"
+  fi
+  if [ -n "$LOCAL_BRANCHES" ]; then
+    # shellcheck disable=SC2086 # one branch per word
+    act "git: delete the merged hack/dr.sh branches in your checkout" git branch -q -D $LOCAL_BRANCHES
+  fi
+  if [ -z "$GIT_RESET" ] && [ -z "$RUN_BRANCHES" ] && [ -z "$LOCAL_BRANCHES" ]; then
+    ok "dr/ on $BRANCH already gives $ACTIVE the active role and $PASSIVE the passive one"
+  fi
+}
+
 summary() {
   local c
   stage "Summary" "What is left of the exercise on each cluster."
@@ -582,6 +677,7 @@ summary() {
       "$(if [ -n "$(sub_of "$c" openshift-gitops-operator)" ]; then echo installed; else echo -; fi)" \
       "$(if some "$c" klusterlets.operator.open-cluster-management.io klusterlet; then echo yes; else echo -; fi)"
   done | { printf 'Cluster\tACM\tOpenShift GitOps\tACM agent\n'; cat; } | table
+  if [ "$GIT_OK" = 1 ]; then note "dr/ on $BRANCH: $ACTIVE $(git_role "$ACTIVE"), $PASSIVE $(git_role "$PASSIVE")"; fi
   note "the S3 bucket still holds the old backups; the next build's first backup is newer, so restores use that"
   note "CRDs the operators installed stay (ACM's, Velero's, Argo CD's): harmless, and a new install adopts them"
   box rounded 10 "Teardown done in $(dur $((SECONDS - T0)))" "Next: hack/build.sh builds the exercise again (docs/build.md)." \
@@ -596,7 +692,9 @@ menu() {
     "" \
     "--full removes ACM, OpenShift GitOps and the demo whoever installed them, and detaches $MANAGED, so none of the three runs ACM or OpenShift GitOps afterwards." \
     "" \
-    "Other operators and workloads stay, and so do the S3 bucket and git. A dry run changes nothing: it shows what would go and what stays."
+    "Other operators and workloads stay, and so does the S3 bucket. In git, dr/ goes back to the roles the build starts from, and hack/dr.sh's merged branches go." \
+    "" \
+    "A dry run changes nothing: it shows what would go and what stays."
   local items=("Dry run: what the teardown would remove (read-only)" "Dry run with --full (read-only)"
     "Tear down what this repo installed" "Tear down with --full" "List the options" "Quit")
   echo
@@ -660,7 +758,7 @@ if [ "$DRY" = 1 ]; then
 fi
 if ! preflight; then DIED=1; exit 1; fi
 if [ "$DRY" = 0 ]; then
-  confirm "Remove what the table marks remove, detach or turn off, from $ACTIVE, $PASSIVE and $MANAGED?"
+  confirm "Remove what the table marks remove, detach, turn off or reset, on $ACTIVE, $PASSIVE, $MANAGED and in git?"
 fi
 cmd_roles
 cmd_demo
@@ -668,6 +766,7 @@ cmd_detach
 cmd_storage
 cmd_acm
 cmd_gitops
+cmd_git
 if [ "$DRY" = 1 ]; then
   verdict ok "DRY RUN: nothing changed. Run it without --dry-run to remove what the 'would' lines name."
 else
