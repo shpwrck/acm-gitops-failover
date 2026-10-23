@@ -34,9 +34,9 @@
 # Settings: $DR_ENV (default ~/acm-dr/dr.env; see hack/dr.env.example).
 # Logs: ~/acm-dr/runs/run-$RUN/
 # Output: with gum (https://github.com/charmbracelet/gum) on a terminal,
-# spinners, boxes and tables, and a bell when it is your turn. From the
-# outage on, the run's state stays pinned at the top while the output
-# scrolls under it (DR_PIN=0 turns that off). Without gum, or with
+# spinners, boxes and tables, and a bell when it is your turn. During a
+# run, its state stays pinned at the top while the output scrolls under
+# it (DR_PIN=0 turns that off). Without gum, or with
 # DR_PLAIN=1, plain text. console.log gets plain text either way.
 set -euo pipefail
 
@@ -117,7 +117,9 @@ run_header() {   # run_header <width>: the pinned lines of a run: where it stand
   printf ' %s%s%s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF"
   printf ' %s\n' "$(run_crumbs "$STAGE_N")"
   printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(fit $((w - 2)) "${PIN_STEP:-${STAGES[STAGE_N - 1]}}")" "$C_OFF"
+  if [ ! -f "$LOGDIR/probe.log" ]; then x="   the probes start when the run does, after the pre-flight"; fi
   for c in pull push; do
+    [ -f "$LOGDIR/probe.log" ] || break
     if [ "$c" = pull ]; then u=$LOGDIR/probe.log; else u=$LOGDIR/probe-push.log; [ -n "$PUSH_APP_URL" ] || continue; fi
     read -r n f <<<"$(probe_counts "$u")"
     if [ "$f" = 0 ]; then h=$C_OK; else h=$C_BAD$C_B; fi
@@ -128,6 +130,7 @@ run_header() {   # run_header <width>: the pinned lines of a run: where it stand
   h=${u:-(read failed)}
   for c in "${!HUB_URL[@]}"; do if [ -n "$u" ] && [ "${u%/}" = "${HUB_URL[$c]%/}" ]; then h=$c; fi; done
   x="$MANAGED reports to $h${t:+ since ${t:11:8}}"
+  if [ ! -f "$LOGDIR/hub-pointer.log" ]; then x="$MANAGED reports to $ACTIVE, as the settings file says"; fi
   u=$(tail -n 1 "$LOGDIR/revisions.log" 2>/dev/null | cut -d' ' -f2- || true)
   printf '   %s\n' "$(fit $((w - 3)) "$x${u:+ · serving $u}")"
   read -r t u <<<"$(tail -n 1 "$LOGDIR/events.log" 2>/dev/null || true)"
@@ -135,7 +138,7 @@ run_header() {   # run_header <width>: the pinned lines of a run: where it stand
   printf -v fill '%*s' "$w" ''
   printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
 }
-stage() {   # stage <n>: where the run stands. With gum, each stage after the first starts on a clear screen, and from the outage on the run's header stays pinned at the top
+stage() {   # stage <n>: where the run stands. With gum, each stage after the first starts on a clear screen (under the pinned header, when there is one)
   local i s w recap="" n
   n=$(wc -l 2>/dev/null <"$LOGDIR/events.log" || echo 0)
   if [ "$1" -gt 1 ] && [ "$n" -gt "$STAGE_EV" ]; then recap=$(sed -n "$((STAGE_EV + 1)),\$p" "$LOGDIR/events.log" | tail -n 3); fi
@@ -146,13 +149,9 @@ stage() {   # stage <n>: where the run stands. With gum, each stage after the fi
     explain "$(stage_text "$1")"
     return 0
   fi
-  if [ "$1" = 2 ]; then
-    for i in "$ACTIVE" "$PASSIVE"; do HUB_URL[$i]=$(server "$i" 2>/dev/null || true); done
-    pin_on 7 run_header
-  fi
   if [ "$1" = "${#STAGES[@]}" ]; then pin_off; fi   # the summary scrolls, so the scrollback keeps it
   if [ "$PIN" = 1 ]; then
-    pin_clear
+    if [ "$1" -gt 1 ]; then pin_clear; else pin_draw; fi
   else
     if [ "$1" -gt 1 ]; then fresh_screen; fi
     w=$(cols)
@@ -974,14 +973,26 @@ run_started() {   # a run started again after a stop carries on in the same fold
 }
 
 cmd_run() {
-  local stops="cut $ACTIVE's power and power it back on"
+  local stops="cut $ACTIVE's power and power it back on" c pinned
   IN_RUN=1 RUN_T0=$SECONDS
   if [ "$GIT" = 1 ]; then stops="cut $ACTIVE's power, merge three PRs, and power $ACTIVE back on"; fi
+  if [ "$UI" = gum ]; then
+    for c in "$ACTIVE" "$PASSIVE"; do HUB_URL[$c]=$(server "$c" 2>/dev/null || true); done
+    pin_on 7 run_header   # the run's state stays at the top until the summary
+  fi
   box double 13 "DR run $RUN ($(mode_name)): $ACTIVE dies, $PASSIVE takes over" \
     "The script stops for what only you can do: $stops." \
     "Logs: $LOGDIR"
   stage 1
-  cmd_check || die "pre-flight is red: fix it, then run again"
+  if ! cmd_check; then
+    pinned=$PIN
+    pin_off
+    if [ "$pinned" = 1 ] && [ ${#RED_LIST[@]} -gt 0 ]; then   # the RED lines may have scrolled off
+      label "The pre-flight's RED lines:"
+      for c in "${RED_LIST[@]}"; do mark "RED  " "${C_BAD}✗${C_OFF}" "$c"; done
+    fi
+    die "pre-flight is red: fix it, then run again"
+  fi
   confirm "Start run $RUN?"
   RUN_T0=$SECONDS
   run_started
