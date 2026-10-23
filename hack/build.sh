@@ -662,7 +662,7 @@ menu() {
   intro "Build the ACM hub DR exercise" \
     "Sets up two ACM hubs, one active and one passive, and a workload cluster they take turns managing. It installs ACM and OpenShift GitOps where they are missing, connects both hubs to the S3 bucket for backups, imports the workload cluster, deploys the two demo apps and hands each hub's role to git." \
     "" \
-    "It takes 40 to 60 minutes and asks for the S3 keys at the start. The pre-flight check changes nothing: it shows what the build would do."
+    "It takes 40 to 60 minutes and asks for the S3 keys at the start."
   items=("Pre-flight check only (read-only)" "Build" "List the options" "Quit")
   echo
   if [ "$UI" = gum ]; then
