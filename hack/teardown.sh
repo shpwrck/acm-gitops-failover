@@ -118,16 +118,18 @@ merged() { git merge-base --is-ancestor "$1" "origin/$BRANCH" 2>/dev/null; }   #
 
 # --- doing it --------------------------------------------------------------------
 
-act() {   # act <what> <command...>: do it, or with --dry-run say it would
-  local out rc=0
-  if [ "$DRY" = 1 ]; then mark "would" "${C_WARN}○${C_OFF}" "$1"; return 0; fi
+act() {   # act "<where>: <verb> <what>" <command...>: do it, then "deleted hub-x: <what>"; with --dry-run, "would delete hub-x: <what>"
+  local out rc=0 where=${1%%: *} v=${1#*: } what
+  what=${v#* } v=${v%% *}
+  if [ "$DRY" = 1 ]; then mark "would" "${C_WARN}○${C_OFF} would" "$v $where: $what"; return 0; fi
   out=$("${@:2}" 2>&1) || rc=$?
   if [ "$rc" != 0 ]; then
     show <<<"$out"
-    die "could not $1 (its output is above)"
+    die "could not $v $where: $what (its output is above)"
   fi
   if [ -n "$out" ]; then logln "$out"; fi
-  finished "$1"
+  case $v in delete | disable | update) v+="d" ;; clear) v+="ed" ;; esac   # set and reset read the same
+  finished "$v $where: $what"
 }
 del() {   # del <context> <kind> <name> [namespace]: delete it if it is there and mine; note it if it stays
   local c=$1 k=$2 n=$3 ns=${4:-} where
@@ -525,7 +527,7 @@ cmd_acm() {
           x=$(oc --context "$c" get multiclusterhubs.operator.open-cluster-management.io "${mch#* }" -n "${mch% *}" -o json |
             jq -c --arg a "$A_BACKUP" '{metadata: {annotations: {($a): null}}, spec: {overrides: {components:
               ((.spec.overrides.components // [] | map(select(.name != "cluster-backup"))) + [{name: "cluster-backup", enabled: false}])}}}')
-          act "$c: turn cluster-backup off again (the build turned it on)" \
+          act "$c: disable cluster-backup again (the build enabled it)" \
             oc --context "$c" patch multiclusterhubs.operator.open-cluster-management.io "${mch#* }" -n "${mch% *}" --type merge -p "$x"
           ns_gone "$c" "$NS"
         fi
@@ -650,12 +652,12 @@ cmd_git() {
   for c in $GIT_RESET; do what+="${what:+, }dr/$c to $(want_role "$c")"; done
   if [ -n "$GIT_RESET" ]; then
     # shellcheck disable=SC2086 # one hub per word
-    act "git: reset $what, and push it to $BRANCH" push_reset $GIT_RESET
+    act "$BRANCH: reset $what, and push it" push_reset $GIT_RESET
     c=$(git branch --show-current)
     if [ "$DRY" = 1 ]; then :
     elif [ "$c" != "$BRANCH" ]; then note "your checkout is on ${c:-a detached HEAD}: git pull $BRANCH when you switch back to it"
     elif [ -n "$(git status --porcelain --untracked-files=no)" ]; then note "your checkout of $BRANCH has changes, so it stays behind origin: git pull before the next build"
-    else act "git: bring your checkout of $BRANCH up to date" git merge -q --ff-only "origin/$BRANCH"; fi
+    else act "git: update your checkout of $BRANCH" git merge -q --ff-only "origin/$BRANCH"; fi
   fi
   if [ -n "$RUN_BRANCHES" ]; then
     # shellcheck disable=SC2086 # one branch per word
