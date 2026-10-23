@@ -609,17 +609,19 @@ Start with a dry run: it reads the clusters, prints the plan and every
 step a real run would take, and changes nothing.
 
 ```bash
-hack/teardown.sh --dry-run          # what the default removes, and what stays
-hack/teardown.sh --full --dry-run   # the same with --full
-hack/teardown.sh                    # a menu; --yes removes without asking
+hack/teardown.sh --dry-run           # what the default removes, and what stays
+hack/teardown.sh --reset --dry-run   # the same with --reset
+hack/teardown.sh --full --dry-run    # the same with --full
+hack/teardown.sh                     # a menu; --yes removes without asking
 ```
 
 | Mode | What goes |
 | --- | --- |
 | default | Everything that carries the label `app.kubernetes.io/part-of: acm-gitops-failover`, which every object in `manifests/` and `dr/` has (`hack/validate.sh` checks it), so a manual build is labeled the same way as a scripted one. ACM and OpenShift GitOps go where their Subscription carries the label, that is, where the build installed them. On an ACM that was there before, the two marked changes of [A hub that already runs ACM](#a-hub-that-already-runs-acm) are undone, and the rest of it stays. |
+| `--reset` | Only the exercise: the DR roles (stage 2), the demo apps (stage 3) and `dr/` in git (stage 8). ACM, OpenShift GitOps, the backup storage and the spoke's import stay, with the build's changes to them, so the next `hack/build.sh` reuses them and re-creates only the demo apps, the backups and the roles, in minutes. Use it to build again without reinstalling the operators. |
 | `--full` | ACM, OpenShift GitOps and the demo, whoever installed them, and the spoke is detached: afterwards none of the three clusters runs ACM or OpenShift GitOps. |
 
-Either way, other operators and workloads stay, and so do the S3 bucket
+In every mode, other operators and workloads stay, and so do the S3 bucket
 and its backups, the settings file, and the CRDs the operators installed
 (harmless, and a new install adopts them). In git, only `dr/` on the
 branch and the branches `hack/dr.sh` pushed change (stage 8). The log is in

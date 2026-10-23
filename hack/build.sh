@@ -722,7 +722,7 @@ set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
 STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " pre-flight"; fi) · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
-pin_on 4 steps_header   # the stages stay at the top, and the output stays in the window under them
+steps_pin   # the stages stay at the top, and the output stays in the window under them
 COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if ! preflight; then DIED=1; exit 1; fi

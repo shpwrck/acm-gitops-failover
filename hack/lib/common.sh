@@ -402,9 +402,14 @@ steps_header() {   # steps_header <width>: build.sh's and teardown.sh's pinned l
   printf -v fill '%*s' $((w - ${#rule} > 0 ? w - ${#rule} : 0)) ''
   printf ' %s%s%s\n' "$C_DIM" "$rule${fill// /─}" "$C_OFF"
   while IFS= read -r l; do printf ' %s\n' "$l"; n=$((n + 1)); done <<<"$(crumbs "$STAGE" $((w - 1)))"
-  while [ "$n" -lt 2 ]; do echo; n=$((n + 1)); done
+  while [ "$n" -lt $((PIN_H - 2)) ]; do echo; n=$((n + 1)); done
   printf -v fill '%*s' "$w" ''
   printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
+}
+steps_pin() {   # pin steps_header, as tall as the stages need at this width
+  local w=$(($(cols) - 1))
+  w=$((w > 80 ? 78 : w))
+  pin_on $(($(crumbs 1 $((w - 1)) | grep -c '') + 2)) steps_header
 }
 steps_end() {   # every stage ticked in the header
   STAGE=$((${#STAGES[@]} + 1))
