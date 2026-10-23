@@ -202,8 +202,10 @@ set_setting() {   # set_setting <name> <value>: in the settings file
 STAGES=(Pre-flight ACM "OpenShift GitOps" "Backup storage" "Import $MANAGED" "Demo apps" "Backup roles" "dr/ roles" Check)
 STAGE=0
 stage() {   # stage <title> <what and why>
-  STAGE=$((STAGE + 1))
+  STAGE=$((STAGE + 1)) PIN_STEP=""
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
+  pin_draw
+  if [ "$STAGE" = "${#STAGES[@]}" ]; then pin_off; fi   # the last stage scrolls, so the scrollback keeps it
   if [ "$UI" = gum ]; then
     printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$1" "$C_OFF"
   else
@@ -637,7 +639,7 @@ stage_roles() {
 
 stage_check() {
   stage Check "Runs hack/dr.sh check, the pre-flight every exercise starts with, against what was just built."
-  if bash "$REPO/hack/dr.sh" check; then
+  if DR_CLEAR=0 bash "$REPO/hack/dr.sh" check; then
     box rounded 10 "Build done in $(dur $((SECONDS - T0))): $ACTIVE active, $PASSIVE passive" \
       "Next: hack/dr.sh, then pick a run from the menu (docs/runbooks)." "Log: $LOGFILE"
   else
@@ -680,6 +682,7 @@ on_exit() {
   rm -rf "$TMP"
   if [ -n "$POLL_PID" ]; then kill "$POLL_PID" 2>/dev/null || true; fi
   spin_stop
+  pin_off
   if [ "$rc" = 0 ] || [ "$DIED" = 1 ]; then return 0; fi
   if [ "$rc" = 130 ]; then
     box thick 9 "STOP" "interrupted: run it again to carry on; every stage skips what is already in place" ${LOGFILE:+"" "Log: $LOGFILE"}
@@ -711,6 +714,10 @@ trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
+if [ "$CHECK" = 0 ]; then
+  STEPS_TITLE="Build · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
+  pin_on 5 steps_header   # the stages stay at the top until the last one
+fi
 
 if ! preflight; then DIED=1; exit 1; fi
 if [ "$CHECK" = 1 ]; then exit 0; fi

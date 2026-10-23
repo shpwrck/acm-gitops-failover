@@ -312,7 +312,9 @@ spin_cmd() {   # spin_cmd <title> <command...>: a slow command; its output goes 
   return "$rc"
 }
 
-start_screen() { if [ "$UI" = gum ]; then fresh_screen; fi; }   # with gum, a script starts on a clear screen
+start_screen() {   # with gum, a script starts on a clear screen (DR_CLEAR=0: not when another script runs it)
+  if [ "$UI" = gum ] && [ "${DR_CLEAR:-1}" != 0 ]; then fresh_screen; fi
+}
 fresh_screen() {   # scroll what the screen shows into the scrollback, then write from the top
   local rows
   rows=$(stty size 2>/dev/null </dev/tty) || rows=""
@@ -370,6 +372,36 @@ pin_off() {   # the whole screen scrolls again; the header stays on it as last d
   PIN=0
   trap - WINCH
   printf '\e7\e[r\e8'   # resetting the region homes the cursor, so it is saved around that
+}
+crumbs() {   # crumbs <n> [width]: the stages in STAGES, done, current and to come; wrapped at <width>
+  local i t len=0 s=""
+  for i in "${!STAGES[@]}"; do
+    t=${STAGES[i]}
+    if [ "$i" -gt 0 ]; then
+      if [ $((len + 5 + ${#t})) -gt "${2:-999}" ]; then s+=$'\n' len=0; else s+="${C_DIM} › ${C_OFF}" len=$((len + 3)); fi
+    fi
+    if [ "$i" -lt $(($1 - 1)) ]; then
+      s+="${C_OK}✓ $t${C_OFF}"
+    elif [ "$i" = $(($1 - 1)) ]; then
+      s+="${C_B}${C_ACC}● $t${C_OFF}"
+    else
+      s+="${C_DIM}○ $t${C_OFF}"
+    fi
+    len=$((len + 2 + ${#t}))
+  done
+  printf '%s' "$s"
+}
+STEPS_TITLE=""
+steps_header() {   # steps_header <width>: build.sh's and teardown.sh's pinned lines: what runs and for how long, the stages, the step
+  local w=$(($1 > 80 ? 78 : $1)) rule fill l n=0
+  rule="── $STEPS_TITLE · $(dur $((SECONDS - T0))) "
+  printf -v fill '%*s' $((w - ${#rule} > 0 ? w - ${#rule} : 0)) ''
+  printf ' %s%s%s\n' "$C_DIM" "$rule${fill// /─}" "$C_OFF"
+  while IFS= read -r l; do printf ' %s\n' "$l"; n=$((n + 1)); done <<<"$(crumbs "$STAGE" $((w - 1)))"
+  while [ "$n" -lt 2 ]; do echo; n=$((n + 1)); done
+  printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(fit $((w - 2)) "${PIN_STEP:-${STAGES[STAGE - 1]}}")" "$C_OFF"
+  printf -v fill '%*s' "$w" ''
+  printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
 }
 fit() {   # fit <width> <text>: the text, cut to <width> characters with an ellipsis
   if [ "${#2}" -le "$1" ]; then printf '%s' "$2"; else printf '%s…' "${2:0:$(($1 - 1))}"; fi

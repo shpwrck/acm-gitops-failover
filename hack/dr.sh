@@ -94,20 +94,6 @@ run_rule() {   # run_rule <width>: the run's title line, with the time since it 
   printf -v fill '%*s' $(($1 - ${#rule} > 0 ? $1 - ${#rule} : 0)) ''
   printf '%s' "$rule${fill// /─}"
 }
-run_crumbs() {   # run_crumbs <n>: the stages, done, current and to come
-  local i s=""
-  for i in "${!STAGES[@]}"; do
-    if [ "$i" -gt 0 ]; then s+="${C_DIM} › ${C_OFF}"; fi
-    if [ "$i" -lt $(($1 - 1)) ]; then
-      s+="${C_OK}✓ ${STAGES[i]}${C_OFF}"
-    elif [ "$i" = $(($1 - 1)) ]; then
-      s+="${C_B}${C_ACC}● ${STAGES[i]}${C_OFF}"
-    else
-      s+="${C_DIM}○ ${STAGES[i]}${C_OFF}"
-    fi
-  done
-  printf '%s' "$s"
-}
 declare -A HUB_URL
 probe_counts() {   # probe_counts <log>: "<samples> <not 200>"
   if [ -f "$1" ]; then awk '{n++} $2 != "200" {f++} END {printf "%d %d", n, f}' "$1"; else echo "0 0"; fi
@@ -115,7 +101,7 @@ probe_counts() {   # probe_counts <log>: "<samples> <not 200>"
 run_header() {   # run_header <width>: the pinned lines of a run: where it stands, its step, and what the probes see
   local w=$(($1 > 80 ? 78 : $1)) n f c h t u x="" fill
   printf ' %s%s%s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF"
-  printf ' %s\n' "$(run_crumbs "$STAGE_N")"
+  printf ' %s\n' "$(crumbs "$STAGE_N")"
   printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(fit $((w - 2)) "${PIN_STEP:-${STAGES[STAGE_N - 1]}}")" "$C_OFF"
   if [ ! -f "$LOGDIR/probe.log" ]; then x="   the probes start when the run does, after the pre-flight"; fi
   for c in pull push; do
@@ -156,7 +142,7 @@ stage() {   # stage <n>: where the run stands. With gum, each stage after the fi
     if [ "$1" -gt 1 ]; then fresh_screen; fi
     w=$(cols)
     w=$((w > 80 ? 78 : w - 2))
-    printf '\n %s%s%s\n %s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF" "$(run_crumbs "$1")"
+    printf '\n %s%s%s\n %s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF" "$(crumbs "$1")"
   fi
   if [ -n "$recap" ]; then   # the end of the last stage, so the clear screen keeps some context
     printf '\n   %s%s ended with:%s\n' "$C_DIM" "${STAGES[$1 - 2]}" "$C_OFF"
