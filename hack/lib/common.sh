@@ -78,7 +78,7 @@ mark() {   # mark <plain tag> <gum mark> <text>
   if [ "$UI" = gum ]; then printf '   %s %s\n' "$2" "$3"; else printf '   %s %s\n' "$1" "$3"; fi
 }
 BAD=0 RED_LIST=()
-ok() { mark "ok   " "${C_OK}✓${C_OFF}" "$*"; }
+ok() { SEC_OK=$((SEC_OK + 1)); mark "ok   " "${C_OK}✓${C_OFF}" "$*"; }
 HELP="" HELP_SHOWN=""
 help_at() { HELP=$1; }   # help_at <doc#anchor>: the section that explains the RED lines after it
 doc_url() {   # doc_url <path in the repo>: a web link into your copy of the repo, or the local file
@@ -92,7 +92,7 @@ link() {   # link <url>: the url, clickable where the terminal supports it
 }
 red() {   # a failed check, then (once per section) where the docs explain what could be wrong
   local u
-  BAD=1 RED_LIST+=("$*")
+  BAD=1 RED_LIST+=("$*") SEC_RED=$((SEC_RED + 1))
   mark "RED  " "${C_BAD}✗${C_OFF}" "$*"
   if [ -n "$HELP" ] && [ "$HELP" != "$HELP_SHOWN" ]; then
     HELP_SHOWN=$HELP
@@ -105,7 +105,7 @@ red() {   # a failed check, then (once per section) where the docs explain what 
     fi
   fi
 }
-note() { mark "note " "${C_WARN}•${C_OFF}" "$*"; }
+note() { SEC_NOTE=$((SEC_NOTE + 1)); mark "note " "${C_WARN}•${C_OFF}" "$*"; }
 label() { logln "   $*"; printf '   %s%s%s\n' "$C_B" "$*" "$C_OFF"; }
 explain() {   # explain <text>: what a step does and why, wrapped under its heading
   local w
@@ -166,9 +166,37 @@ table() {   # table: tab-separated rows on stdin, the first one the header
   fi
 }
 
+# Sections of checks: with COMPACT=1 and gum, a section whose checks are
+# all green shows as one line; one with a RED line or a note shows in
+# full. The log gets every line either way.
+SEC=0 SEC_T="" SEC_FILE="" SEC_OK=0 SEC_RED=0 SEC_NOTE=0 SEC_LAST=""
+sec_begin() {   # sec_begin <heading> <short name>: a section of checks, held back until sec_end
+  if [ "${COMPACT:-0}" != 1 ] || [ "$UI" != gum ]; then say "$1"; return 0; fi
+  SEC=1 SEC_T=$2 SEC_OK=0 SEC_RED=0 SEC_NOTE=0
+  SEC_FILE=$(mktemp)
+  exec 5>&1 1>"$SEC_FILE"
+  say "$1"
+}
+sec_end() {   # sec_end <what was found>: the section in full, or one line when it is all green
+  if [ "$SEC" != 1 ]; then return 0; fi
+  exec 1>&5 5>&-
+  SEC=0
+  if [ $((SEC_RED + SEC_NOTE)) -gt 0 ] || [ "$SEC_OK" = 0 ]; then
+    cat "$SEC_FILE"
+    SEC_LAST=full
+  else
+    if [ "$SEC_LAST" != line ]; then echo; fi   # a run of one-line sections starts after a blank line
+    SEC_LAST=line
+    printf '   %s✓%s %s%-17s%s %s\n' "$C_OK" "$C_OFF" "$C_B" "$SEC_T" "$C_OFF" "$(fit $(($(cols) - 24)) "$1")"
+  fi
+  rm -f "$SEC_FILE"
+}
+sec_flush() { if [ "$SEC" = 1 ]; then SEC_RED=1; sec_end; fi; }   # a stop inside a section shows all of it
+
 DIED=0
 die() {
   spin_stop
+  sec_flush
   pin_off
   DIED=1
   box thick 9 "STOP" "$*" ${LOGFILE:+"" "Log: $LOGFILE"}
@@ -325,7 +353,7 @@ pin_draw() {   # redraw the header; the cursor stays where the output is
     s+=$'\e['"$i"$';1H\e[2K'"$l"
   done <<<"$out"
   while [ "$i" -lt "$PIN_H" ]; do i=$((i + 1)); s+=$'\e['"$i"$';1H\e[2K'; done
-  printf '%s\e8' "$s"
+  if [ "$SEC" = 1 ]; then printf '%s\e8' "$s" >&5; else printf '%s\e8' "$s"; fi   # past a held-back section, to the screen
 }
 pin_resize() {   # a new terminal size: a new scrolling region, or no header if it no longer fits
   if [ "$PIN" != 1 ]; then return 0; fi
