@@ -1030,15 +1030,13 @@ cmd_run() {
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
 menu() {   # no command on a terminal: say what the exercise does, then pick what to do
-  local choice prev=$((RUN - 1)) items
+  local choice items
   intro "Run the ACM hub DR exercise" \
     "Tests losing the active ACM hub. You cut its power, and the passive hub takes over the workload cluster while probes record whether the two demo apps keep answering and how fast a new git revision reaches them. The hub you cut then rejoins as the new passive hub, so each run fails over the other way." \
     "" \
-    "Manual: the script runs the failover commands." \
-    "Git-driven: you merge 3 PRs in dr/ for the failover and the return."
-  items=("Run a manual failover" "Run a git-driven failover (PRs)" "Check the lab only (changes nothing)")
-  if [ -s "$HOME/acm-dr/runs/run-$prev/events.log" ]; then items+=("Show the summary of run $prev"); fi
-  items+=("Approve node certificates (after a power-on)" "Show all commands" "Quit")
+    "Run (Manual): the script runs the failover commands." \
+    "Run (Git): you merge 3 PRs in dr/ for the failover and the return."
+  items=(Check "Run (Manual)" "Run (Git)" Quit)
   echo
   if [ "$UI" = gum ]; then
     choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
@@ -1047,12 +1045,9 @@ menu() {   # no command on a terminal: say what the exercise does, then pick wha
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
-    "Run a manual failover") CMD=run GIT=0 ;;
-    "Run a git-driven failover"*) CMD=run GIT=1 ;;
-    "Check the lab only"*) CMD=check ;;
-    "Show the summary of run"*) CMD=probe ARGS=(summary "$prev") ;;
-    "Approve node certificates"*) CMD=nodes ;;
-    "Show all commands") usage; exit 0 ;;
+    Check) CMD=check ;;
+    "Run (Manual)") CMD=run GIT=0 ;;
+    "Run (Git)") CMD=run GIT=1 ;;
     *) exit 0 ;;
   esac
 }

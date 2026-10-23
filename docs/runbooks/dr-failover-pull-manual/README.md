@@ -50,11 +50,11 @@ each step with a line or two, so a run can be followed (or presented)
 without this document open. A RED pre-flight line links to the section
 of the docs that explains what could be wrong.
 
-Then one exercise is one command. On its own, `hack/dr.sh` shows which
-hub is active now, which one takes over in the next run, and a menu: a
-manual run, a git-driven run, the pre-flight check, the last run's
-summary, or approving certificates after a power-on. The same choices
-are also commands:
+Then one exercise is one command. On its own, `hack/dr.sh` says what the
+exercise does and offers a short menu: Check (the lab), Run (Manual),
+Run (Git), or Quit. The same choices are also commands, and so are the
+last run's summary (`hack/dr.sh probe summary`) and approving
+certificates after a power-on (`hack/dr.sh nodes`):
 
 ```bash
 hack/dr.sh              # the menu
