@@ -63,6 +63,9 @@ box() {   # box <border> <color> <title> [line...]: a framed message with gum, p
     for l in "$@"; do printf '%s\n' "$l" | fold -s -w 76 | sed 's/ *$//; s/^/   /'; done
   fi
 }
+intro() {   # intro <title> [line...]: what the script does, above its menu; all three scripts open this way
+  box rounded 13 "$@"
+}
 your_turn() {   # your_turn <what> [line...]: something only you can do; the bell calls you back
   box double 3 "YOUR TURN: $1" "${@:2}"
   if [ "$UI" = gum ]; then printf '\a'; fi

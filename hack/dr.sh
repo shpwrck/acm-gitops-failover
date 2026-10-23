@@ -1046,7 +1046,7 @@ cmd_run() {
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
 menu() {   # no command on a terminal: say what the exercise does, then pick what to do
   local choice prev=$((RUN - 1)) items
-  box rounded 13 "ACM hub disaster recovery exercise" \
+  intro "Run the ACM hub DR exercise" \
     "Tests losing the active ACM hub. You cut its power, and the passive hub takes over the workload cluster while probes record whether the two demo apps keep answering and how fast a new git revision reaches them. The hub you cut then rejoins as the new passive hub, so each run fails over the other way." \
     "" \
     "Manual: the script runs the failover commands." \
