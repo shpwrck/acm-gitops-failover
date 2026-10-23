@@ -68,8 +68,9 @@ your_turn() {   # your_turn <what> [line...]: something only you can do; the bel
   if [ "$UI" = gum ]; then printf '\a'; fi
 }
 say() {
-  HELP_SHOWN=""
+  HELP_SHOWN="" PIN_STEP=$*
   logln "" "== $*"
+  pin_draw
   if [ "$UI" = gum ]; then printf '\n %s▍%s%s%s\n' "$C_ACC" "$C_B" "$*" "$C_OFF"; else printf '\n== %s\n' "$*"; fi
 }
 mark() {   # mark <plain tag> <gum mark> <text>
@@ -168,6 +169,7 @@ table() {   # table: tab-separated rows on stdin, the first one the header
 DIED=0
 die() {
   spin_stop
+  pin_off
   DIED=1
   box thick 9 "STOP" "$*" ${LOGFILE:+"" "Log: $LOGFILE"}
   exit 1
@@ -209,6 +211,7 @@ spin_draw() {
   local e=$((SECONDS - SPIN_T0))
   SPIN_N=$(((SPIN_N + 1) % ${#FRAMES[@]}))
   printf '\r\e[K   %s%s%s %s %s%d:%02d%s' "$C_ACC" "${FRAMES[SPIN_N]}" "$C_OFF" "${SPIN:0:SPIN_W}" "$C_DIM" $((e / 60)) $((e % 60)) "$C_OFF"
+  if [ "$PIN" = 1 ] && [ "$SECONDS" != "$PIN_AT" ]; then pin_draw; fi   # the header's clock and counters, once a second
 }
 spin_stop() { if [ -n "$SPIN" ]; then printf '\r\e[K\e[?25h'; SPIN=""; fi; }
 nap() { sleep 0.1; }   # not read -t: bash 5.2 can crash when Ctrl-C lands in one
@@ -285,6 +288,59 @@ fresh_screen() {   # scroll what the screen shows into the scrollback, then writ
   if ! [[ $rows =~ ^[0-9]+$ ]] || [ "$rows" -lt 1 ]; then rows=50; fi
   printf '%*s' "$rows" '' | tr ' ' '\n'
   printf '\e[H'
+}
+
+# The pinned header: with gum, on a terminal of at least 72 columns and
+# <rows> + 16 lines, the top <rows> lines stay put and show what <draw>
+# prints, and the output scrolls under them. What scrolls off the top of
+# that part is gone from the screen (the log keeps it). DR_PIN=0 turns it off.
+PIN=0 PIN_H=0 PIN_DRAW="" PIN_AT=-1 PIN_ROWS=0 PIN_COLS=80 PIN_STEP=""
+term_rows() {   # the terminal's height; 0 when it does not say
+  local s
+  s=$(stty size 2>/dev/null </dev/tty) || s=""
+  s=${s%% *}
+  if [[ $s =~ ^[0-9]+$ ]]; then echo "$s"; else echo 0; fi
+}
+pin_fits() { PIN_ROWS=$(term_rows) PIN_COLS=$(cols); [ "$PIN_ROWS" -ge $((PIN_H + 16)) ] && [ "$PIN_COLS" -ge 72 ]; }
+pin_on() {   # pin_on <rows> <draw function>: pin the header, and start the output under it on an empty screen
+  if [ "$UI" != gum ] || [ "${DR_PIN:-1}" = 0 ] || [ "$PIN" = 1 ]; then return 0; fi
+  PIN_H=$1 PIN_DRAW=$2
+  pin_fits || return 0
+  PIN=1
+  fresh_screen
+  printf '\e[%d;%dr' $((PIN_H + 1)) "$PIN_ROWS"   # the scrolling region: everything under the header
+  pin_clear
+  trap pin_resize WINCH
+}
+pin_clear() {   # empty the part under the header, and write from its top
+  if [ "$PIN" = 1 ]; then printf '\e[%d;1H\e[J' $((PIN_H + 1)); pin_draw; fi
+}
+pin_draw() {   # redraw the header; the cursor stays where the output is
+  local out l i=0 s=$'\e7'
+  if [ "$PIN" != 1 ]; then return 0; fi
+  PIN_AT=$SECONDS
+  out=$("$PIN_DRAW" "$((PIN_COLS - 1))" 2>/dev/null) || true
+  while IFS= read -r l && [ "$i" -lt "$PIN_H" ]; do
+    i=$((i + 1))
+    s+=$'\e['"$i"$';1H\e[2K'"$l"
+  done <<<"$out"
+  while [ "$i" -lt "$PIN_H" ]; do i=$((i + 1)); s+=$'\e['"$i"$';1H\e[2K'; done
+  printf '%s\e8' "$s"
+}
+pin_resize() {   # a new terminal size: a new scrolling region, or no header if it no longer fits
+  if [ "$PIN" != 1 ]; then return 0; fi
+  if ! pin_fits; then pin_off; return 0; fi
+  printf '\e[%d;%dr\e[%d;1H' $((PIN_H + 1)) "$PIN_ROWS" "$PIN_ROWS"
+  pin_draw
+}
+pin_off() {   # the whole screen scrolls again; the header stays on it as last drawn
+  if [ "$PIN" != 1 ]; then return 0; fi
+  PIN=0
+  trap - WINCH
+  printf '\e7\e[r\e8'   # resetting the region homes the cursor, so it is saved around that
+}
+fit() {   # fit <width> <text>: the text, cut to <width> characters with an ellipsis
+  if [ "${#2}" -le "$1" ]; then printf '%s' "$2"; else printf '%s…' "${2:0:$(($1 - 1))}"; fi
 }
 
 # --- cluster checks ------------------------------------------------------------

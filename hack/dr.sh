@@ -34,8 +34,10 @@
 # Settings: $DR_ENV (default ~/acm-dr/dr.env; see hack/dr.env.example).
 # Logs: ~/acm-dr/runs/run-$RUN/
 # Output: with gum (https://github.com/charmbracelet/gum) on a terminal,
-# spinners, boxes and tables, and a bell when it is your turn. Without gum,
-# or with DR_PLAIN=1, plain text. console.log gets plain text either way.
+# spinners, boxes and tables, and a bell when it is your turn. From the
+# outage on, the run's state stays pinned at the top while the output
+# scrolls under it (DR_PIN=0 turns that off). Without gum, or with
+# DR_PLAIN=1, plain text. console.log gets plain text either way.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -81,22 +83,19 @@ event() {   # a milestone: on the screen, in the log and in events.log
   echo "$t $*" >>"$LOGDIR/events.log"
   logln "$t $*"
   if [ "$UI" = gum ]; then printf '   %s◆ %s%s %s\n' "$C_ACC" "${t:11:8}" "$C_OFF" "$*"; else echo "$t $*"; fi
+  pin_draw
 }
 
 STAGES=(Pre-flight Outage Deploy Failover Rejoin Summary)
-IN_RUN=0 RUN_T0=0 STAGE_EV=0
-stage() {   # stage <n>: where the run stands; with gum, each stage after the first starts on a clear screen
-  local i s="" rule w fill recap="" n
-  n=$(wc -l 2>/dev/null <"$LOGDIR/events.log" || echo 0)
-  if [ "$1" -gt 1 ] && [ "$n" -gt "$STAGE_EV" ]; then recap=$(sed -n "$((STAGE_EV + 1)),\$p" "$LOGDIR/events.log" | tail -n 3); fi
-  STAGE_EV=$n
-  logln "" "#### Stage $1/${#STAGES[@]}: ${STAGES[$1 - 1]}"
-  if [ "$UI" != gum ]; then
-    printf '\n#### Stage %d/%d: %s\n' "$1" "${#STAGES[@]}" "${STAGES[$1 - 1]}"
-    explain "$(stage_text "$1")"
-    return 0
-  fi
-  if [ "$1" -gt 1 ]; then fresh_screen; fi
+IN_RUN=0 RUN_T0=0 STAGE_EV=0 STAGE_N=1
+run_rule() {   # run_rule <width>: the run's title line, with the time since it started
+  local rule fill
+  rule="── Run $RUN · $(mode_name) · $ACTIVE dies, $PASSIVE takes over · $(dur $((SECONDS - RUN_T0))) "
+  printf -v fill '%*s' $(($1 - ${#rule} > 0 ? $1 - ${#rule} : 0)) ''
+  printf '%s' "$rule${fill// /─}"
+}
+run_crumbs() {   # run_crumbs <n>: the stages, done, current and to come
+  local i s=""
   for i in "${!STAGES[@]}"; do
     if [ "$i" -gt 0 ]; then s+="${C_DIM} › ${C_OFF}"; fi
     if [ "$i" -lt $(($1 - 1)) ]; then
@@ -107,11 +106,59 @@ stage() {   # stage <n>: where the run stands; with gum, each stage after the fi
       s+="${C_DIM}○ ${STAGES[i]}${C_OFF}"
     fi
   done
-  w=$(cols)
-  w=$((w > 80 ? 78 : w - 2))
-  rule="── Run $RUN · $(mode_name) · $ACTIVE dies, $PASSIVE takes over · $(dur $((SECONDS - RUN_T0))) "
-  printf -v fill '%*s' $((w - ${#rule} > 0 ? w - ${#rule} : 0)) ''
-  printf '\n %s%s%s\n %s\n' "$C_DIM" "$rule${fill// /─}" "$C_OFF" "$s"
+  printf '%s' "$s"
+}
+declare -A HUB_URL
+probe_counts() {   # probe_counts <log>: "<samples> <not 200>"
+  if [ -f "$1" ]; then awk '{n++} $2 != "200" {f++} END {printf "%d %d", n, f}' "$1"; else echo "0 0"; fi
+}
+run_header() {   # run_header <width>: the pinned lines of a run: where it stands, its step, and what the probes see
+  local w=$(($1 > 80 ? 78 : $1)) n f c h t u x="" fill
+  printf ' %s%s%s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF"
+  printf ' %s\n' "$(run_crumbs "$STAGE_N")"
+  printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(fit $((w - 2)) "${PIN_STEP:-${STAGES[STAGE_N - 1]}}")" "$C_OFF"
+  for c in pull push; do
+    if [ "$c" = pull ]; then u=$LOGDIR/probe.log; else u=$LOGDIR/probe-push.log; [ -n "$PUSH_APP_URL" ] || continue; fi
+    read -r n f <<<"$(probe_counts "$u")"
+    if [ "$f" = 0 ]; then h=$C_OK; else h=$C_BAD$C_B; fi
+    x+="   $c app ${n} samples, ${h}${f} not 200${C_OFF}"
+  done
+  printf '%s\n' "$x"
+  read -r t u <<<"$(awk '$2 != last {t = $1; last = $2} END {print t, last}' "$LOGDIR/hub-pointer.log" 2>/dev/null || true)"
+  h=${u:-(read failed)}
+  for c in "${!HUB_URL[@]}"; do if [ -n "$u" ] && [ "${u%/}" = "${HUB_URL[$c]%/}" ]; then h=$c; fi; done
+  x="$MANAGED reports to $h${t:+ since ${t:11:8}}"
+  u=$(tail -n 1 "$LOGDIR/revisions.log" 2>/dev/null | cut -d' ' -f2- || true)
+  printf '   %s\n' "$(fit $((w - 3)) "$x${u:+ · serving $u}")"
+  read -r t u <<<"$(tail -n 1 "$LOGDIR/events.log" 2>/dev/null || true)"
+  if [ -n "$t" ]; then printf '   %s◆ %s%s %s\n' "$C_ACC" "${t:11:8}" "$C_OFF" "$(fit $((w - 14)) "$u")"; else echo; fi
+  printf -v fill '%*s' "$w" ''
+  printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
+}
+stage() {   # stage <n>: where the run stands. With gum, each stage after the first starts on a clear screen, and from the outage on the run's header stays pinned at the top
+  local i s w recap="" n
+  n=$(wc -l 2>/dev/null <"$LOGDIR/events.log" || echo 0)
+  if [ "$1" -gt 1 ] && [ "$n" -gt "$STAGE_EV" ]; then recap=$(sed -n "$((STAGE_EV + 1)),\$p" "$LOGDIR/events.log" | tail -n 3); fi
+  STAGE_EV=$n STAGE_N=$1 PIN_STEP=""
+  logln "" "#### Stage $1/${#STAGES[@]}: ${STAGES[$1 - 1]}"
+  if [ "$UI" != gum ]; then
+    printf '\n#### Stage %d/%d: %s\n' "$1" "${#STAGES[@]}" "${STAGES[$1 - 1]}"
+    explain "$(stage_text "$1")"
+    return 0
+  fi
+  if [ "$1" = 2 ]; then
+    for i in "$ACTIVE" "$PASSIVE"; do HUB_URL[$i]=$(server "$i" 2>/dev/null || true); done
+    pin_on 7 run_header
+  fi
+  if [ "$1" = "${#STAGES[@]}" ]; then pin_off; fi   # the summary scrolls, so the scrollback keeps it
+  if [ "$PIN" = 1 ]; then
+    pin_clear
+  else
+    if [ "$1" -gt 1 ]; then fresh_screen; fi
+    w=$(cols)
+    w=$((w > 80 ? 78 : w - 2))
+    printf '\n %s%s%s\n %s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF" "$(run_crumbs "$1")"
+  fi
   if [ -n "$recap" ]; then   # the end of the last stage, so the clear screen keeps some context
     printf '\n   %s%s ended with:%s\n' "$C_DIM" "${STAGES[$1 - 2]}" "$C_OFF"
     while read -r i s; do printf '   %s◆ %s %s%s\n' "$C_DIM" "${i:11:8}" "$s" "$C_OFF"; done <<<"$recap"
@@ -363,7 +410,15 @@ cmd_nodes() {
 
 # --- probes (A) --------------------------------------------------------------
 
-probe_http() { while true; do echo "$(now) $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1")"; sleep 10; done; }
+probe_http() {   # every 10 s: time and HTTP status; a sample that is not 200 adds curl's exit code and timings (s), so a client-side DNS or connect stall shows as one
+  local t r rc
+  while true; do
+    t=$(now) rc=0
+    r=$(curl -s -o /dev/null -w '%{http_code} dns=%{time_namelookup} connect=%{time_connect} tls=%{time_appconnect} total=%{time_total}' --max-time 5 "$1") || rc=$?
+    if [ "${r%% *}" = 200 ]; then echo "$t 200"; else echo "$t $r curl-exit=$rc"; fi
+    sleep 10
+  done
+}
 probe_pointer() {
   while true; do
     echo "$(now) $(oc --context "$1" get secret bootstrap-hub-kubeconfig -n open-cluster-management-agent \
@@ -1002,6 +1057,7 @@ on_exit() {   # put the terminal back, and say why the script stopped if die did
   local rc=$?
   if [ -n "$POLL_PID" ]; then kill "$POLL_PID" 2>/dev/null || true; fi
   spin_stop
+  pin_off
   if [ "$rc" = 0 ]; then return 0; fi
   if [ "$DIED" = 0 ]; then
     if [ "$rc" = 130 ]; then
