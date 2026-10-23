@@ -169,7 +169,7 @@ stage_text() {   # stage_text <n>: what the stage does and why
   local a=$ACTIVE p=$PASSIVE
   case $1 in
     1) echo "Read-only checks that the lab is in the posture the settings file names, so the outage tests DR and not a broken lab. Nothing on the clusters changes here. A section that is all green shows as one line; one with a RED line or a note shows in full." ;;
-    2) echo "The probes start: every 10 s they record both apps' HTTP status, which hub $MANAGED reports to, and which revision each app serves, until the summary. Then an etcd backup of $a (a safety net for the lab, not part of DR), a wait for a moment between the :00/:30 backup slots, and your power cut. The script carries on when $a's API stops answering. The apps on $MANAGED should not notice." ;;
+    2) echo "The probes start: every 10 s until the summary they record both apps' HTTP status, which hub $MANAGED reports to, and what each app serves. Then an etcd backup of $a as a lab safety net, a wait for a cut time clear of the :00/:30 backup slots, and your power cut. The apps on $MANAGED should not notice." ;;
     3) echo "With no hub alive, the script commits a new REVISION of both apps to $BRANCH. The pull app is delivered by $MANAGED's own Argo CD straight from git, so it updates with no hub at all, within one Argo poll (up to about 6.5 min). The push app is delivered by a hub's Argo CD, so it stays on the old revision until $p is active: that wait is the push model's delivery RTO." ;;
     4)
       if [ "$GIT" = 1 ]; then
@@ -192,9 +192,18 @@ stage_text() {   # stage_text <n>: what the stage does and why
 # --- cluster checks ------------------------------------------------------------
 
 backup_running() { oc --context "$1" get "$VBACKUP" -n "$NS" -o jsonpath='{.items[*].status.phase}' 2>/dev/null | grep -qwE 'New|InProgress'; }
-recent_backups() {
-  oc --context "$1" get "$VBACKUP" -n "$NS" --sort-by=.status.startTimestamp \
-    -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -n 6 | show
+recent_backups() {   # recent_backups <context>: the newest backup in one line; the log (and plain output) gets the last six
+  local out n p t
+  out=$(oc --context "$1" get "$VBACKUP" -n "$NS" --sort-by=.status.startTimestamp \
+    -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,START:.status.startTimestamp' | tail -n 6)
+  to_log <<<"$out"
+  read -r n p t <<<"$(tail -n 1 <<<"$out")"
+  if [ "$UI" = gum ]; then finished "newest backup on $1: $p, started ${t:11:8} (${n%-*})"; fi
+}
+hub_name() {   # hub_name <API url>: the context name of that hub, or the url
+  local c
+  for c in "${!HUB_URL[@]}"; do if [ -n "$1" ] && [ "${1%/}" = "${HUB_URL[$c]%/}" ]; then echo "$c"; return 0; fi; done
+  echo "${1:-(not read yet)}"
 }
 
 revision() {   # the REVISION an app's route serves, or ? when it does not answer
@@ -465,7 +474,11 @@ probe_start() {
   spin_stop
   for f in "$LOGDIR"/probe*.log "$LOGDIR/hub-pointer.log" "$LOGDIR/revisions.log"; do
     if [ -s "$f" ]; then echo "$(basename "$f"): $(tail -n 1 "$f")"; else echo "$(basename "$f"): no sample yet"; fi
-  done | show
+  done | to_log
+  if [ "$UI" = gum ]; then
+    f=$(tail -n 1 "$LOGDIR/probe.log" 2>/dev/null | cut -d' ' -f2)
+    finished "probes running: pull app ${f:-?}$(if [ -n "$PUSH_APP_URL" ]; then echo ", push app $(tail -n 1 "$LOGDIR/probe-push.log" 2>/dev/null | cut -d' ' -f2)"; fi), $MANAGED reports to $(hub_name "$(tail -n 1 "$LOGDIR/hub-pointer.log" 2>/dev/null | cut -d' ' -f2)")"
+  fi
 }
 probe_stop() {
   local pid
@@ -580,16 +593,16 @@ slot_clear() {   # 5 to 26 min past a :00/:30 slot, and no backup in progress
 }
 
 cmd_outage() {
-  local a=$ACTIVE node
+  local a=$ACTIVE node n f
   alive "$a" || die "$a's API does not answer: is it already down?"
   say "B.0: lab safety net, an etcd backup of $a"
-  explain "A backup of $a's control plane, kept on its node. It is not part of DR: it is there in case a lab hub does not come back cleanly from a hard power-off."
+  explain "A copy of $a's control plane, kept on its node, in case a lab hub does not come back cleanly from a hard power-off. It is not part of DR."
   node=$(oc --context "$a" get nodes -l node-role.kubernetes.io/master -o jsonpath='{.items[0].metadata.name}')
   spin_cmd "etcd backup on $node" \
     oc --context "$a" debug "node/$node" -- chroot /host /usr/local/bin/cluster-backup.sh /home/core/assets/backup ||
     die "the etcd backup on $node failed: its output is above"
   event "B.0 etcd backup saved on $a ($node:/home/core/assets/backup)"
-  explain "Backups run at :00 and :30. A power cut in the middle of a backup set would leave a partial set in the bucket, so the script waits until 5 to 26 minutes past a slot, with no backup running."
+  explain "A cut in the middle of a backup would leave a partial set in the bucket, so the script waits until 5 to 26 minutes past a :00 or :30 slot, with no backup running."
   wait_until 1800 "a cut time clear of the :00/:30 backup slots, with no backup in progress" slot_clear "$a"
   recent_backups "$a"
 
@@ -601,11 +614,17 @@ cmd_outage() {
   wait_until 1800 "$a's API to stop answering" dead "$a"
   event "B.1 $a API dead (power cut by hand)"
   say "B.2: the workload does not care"
-  explain "$MANAGED runs its workloads by itself; a hub only manages it. The probes should keep answering 200 the whole time."
+  explain "$MANAGED runs its workloads by itself; a hub only manages it, so the probes should keep answering 200."
   spin_begin "letting the probes sample the outage"
   pause 20
   spin_stop
-  if [ -s "$LOGDIR/probe.log" ]; then tail -n 3 "$LOGDIR/probe.log" | show; else note "no availability probe running (hack/dr.sh probe start)"; fi
+  if [ -s "$LOGDIR/probe.log" ]; then
+    tail -n 3 "$LOGDIR"/probe*.log | to_log
+    read -r n f <<<"$(cat "$LOGDIR"/probe*.log | awk -v c="$(ev " B.1 .* API dead")" '$1 >= c {n++; if ($2 != "200") f++} END {printf "%d %d", n, f}')"
+    if [ "$f" = 0 ]; then ok "both apps answered 200 at all $n samples since the cut"; else note "$f of $n samples since the cut were not 200 (the summary lists them)"; fi
+  else
+    note "no availability probe running (hack/dr.sh probe start)"
+  fi
 }
 
 # --- deploy (C) --------------------------------------------------------------
