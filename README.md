@@ -79,7 +79,9 @@ workstation with `oc`, `git`, `jq` and curl 8 or newer.
    `manifests/` step by step and bootstraps `dr/`. `hack/build.sh` runs
    the same steps for you ([the scripted
    build](docs/build.md#the-scripted-build)); start with `hack/build.sh
-   --check`, which changes nothing.
+   --check`, which changes nothing on the clusters. Its first stage asks
+   which clusters, branch and bucket to use and saves them in
+   `~/acm-dr/`; after that, it shows them, to keep or change.
 3. **Run a failover** with one of the runbooks above, by hand or with
    `hack/dr.sh`.
 4. **Tear it down** with `hack/teardown.sh`, after a `--dry-run`

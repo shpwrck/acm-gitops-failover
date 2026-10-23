@@ -17,7 +17,8 @@ procedures are the [runbooks](runbooks/); the measured results are in
 The names are the kubeconfig contexts every command below and every
 runbook uses. If your clusters have other names, give them these names in
 a copy of your kubeconfig, so other tools that use your contexts are
-unaffected:
+unaffected. [`hack/build.sh`](#the-scripted-build) makes that copy in
+its Settings stage; by hand:
 
 ```bash
 mkdir -p ~/acm-dr && oc config view --flatten > ~/acm-dr/kubeconfig
@@ -106,24 +107,55 @@ in between.
 `hack/build.sh` runs the build steps below in order, from three clusters
 that pass the health check under [Clusters](#clusters), and ends with
 `hack/dr.sh check`, the pre-flight every exercise starts with. It reads
-the same settings file as `hack/dr.sh`: copy
+the same settings file as `hack/dr.sh`, `~/acm-dr/dr.env`, and on a
+terminal, both the build and `--check` start with a Settings stage that
+changes nothing on the clusters. With no settings file yet, it asks for
+your kubeconfig, the branch the clusters pull from, which of your
+contexts are the two hubs and the workload cluster, and the bucket,
+prefix, region, endpoint and CA file (if the store's certificate is not
+publicly trusted) of the backup storage. The hub that starts active is
+the one `dr/` makes active on that branch: hub-x in a fresh copy. Then
+it writes the settings file, and `~/acm-dr/kubeconfig`: a copy of your
+kubeconfig in which those three contexts are named hub-x, hub-y and
+spoke (see [Clusters](#clusters)); your own kubeconfig does not change.
+With a settings file, it shows what the file holds, to keep or change;
+each question then starts from the file's value. `--yes` uses the file
+as it is. To write the settings by hand instead, copy
 [`hack/dr.env.example`](../hack/dr.env.example) to `~/acm-dr/dr.env` and
 set the contexts, the branch and the S3 endpoint, bucket, prefix and
-region (and a CA file if the store's certificate is not publicly
-trusted). It asks for the S3 keys, or reads them from `S3_ACCESS_KEY`
-and `S3_SECRET_KEY` in the environment, and puts them only into the
-secret on each hub: not into a file, not into its log. What you type or
-paste at its prompts keeps only its printable characters: a pasted line
-break (which the prompt turns into a space) and any escape sequences the
-terminal slips in are dropped, and it prints the length of each key, and
-the access key's last four characters, so you can check what it took.
-The endpoint must be an `http(s)://` URL before it is saved.
-`DR_PLAIN=1 hack/build.sh` asks with plain prompts instead of gum's.
+region. The build asks for the S3 keys, or reads them from
+`S3_ACCESS_KEY` and `S3_SECRET_KEY` in the environment, and puts them
+only into the secret on each hub: not into a file, not into its log.
+What you type or paste at its prompts keeps only its printable
+characters: a pasted line break (which the prompt turns into a space)
+and any escape sequences the terminal slips in are dropped, and it
+prints the length of each key, and the access key's last four
+characters, so you can check what it took. The endpoint must be an
+`http(s)://` URL before it is saved. `DR_PLAIN=1 hack/build.sh` asks
+with plain prompts instead of gum's.
 
 ```bash
-hack/build.sh --check   # read-only: what it would install, reuse or refuse, and why
+hack/build.sh --check   # read-only on the clusters: what it would install, reuse or refuse, and why
 hack/build.sh           # a menu; --yes builds without asking
 ```
+
+With gum, the script starts on a clear screen and keeps the top of the
+screen in place: the stages (done, current and to come) and the time
+since it started. Each stage starts on an empty
+window under it, and a pre-flight section that is all green collapses
+to one line (its heading, a ✓ and what it found), so the output stays in
+the window; the log keeps everything,
+including what a later stage cleared from the screen. Before each stage
+after the ACM one, it waits for you to pick Continue, so you can read
+what the last stage did before the window clears; `--yes` runs straight
+through. `--check` runs
+only the settings and the pre-flight, so its header has those two
+stages; the plan at its end lists what the other eight would install or
+reuse. It logs to
+`~/acm-dr/logs/build-check-<time>.log`. The
+pinned header needs a terminal of at least 72 columns and 20 lines (a
+smaller one gets a note, and the output scrolls), and `DR_PIN=0` turns
+it off.
 
 It takes 40 to 60 minutes, most of it waiting for operators. Every RED
 line links to the section of this document that explains it, and the
@@ -547,7 +579,8 @@ overlay still lists that failover's activation one-shot next to
 [dr/README.md](../dr/README.md)). Before you build new clusters from that
 branch, delete the `restore-activate-*.yaml` file from the overlay and its
 entry from the overlay's `kustomization.yaml`, and push; `hack/teardown.sh`
-does this for you (its stage 8). Otherwise the new hub's `dr-role` applies
+does this for you (its stage 8), and `hack/teardown.sh --reset` does it
+without removing ACM or OpenShift GitOps. Otherwise the new hub's `dr-role` applies
 it next to the BackupSchedule, where the backup operator ignores it.
 
 ## Build-time gotchas
@@ -598,22 +631,34 @@ Start with a dry run: it reads the clusters, prints the plan and every
 step a real run would take, and changes nothing.
 
 ```bash
-hack/teardown.sh --dry-run          # what the default removes, and what stays
-hack/teardown.sh --full --dry-run   # the same with --full
-hack/teardown.sh                    # a menu; --yes removes without asking
+hack/teardown.sh --dry-run           # what the default removes, and what stays
+hack/teardown.sh --reset --dry-run   # the same with --reset
+hack/teardown.sh --full --dry-run    # the same with --full
+hack/teardown.sh                     # a menu; --yes removes without asking
 ```
+
+On its own, `hack/teardown.sh` offers Check (Reset) and Check (Teardown),
+the dry runs of `--reset` and `--full`, then Teardown (Reset) and
+Teardown (Full). The default mode is a command:
+`hack/teardown.sh --dry-run`, then `hack/teardown.sh --yes`.
 
 | Mode | What goes |
 | --- | --- |
 | default | Everything that carries the label `app.kubernetes.io/part-of: acm-gitops-failover`, which every object in `manifests/` and `dr/` has (`hack/validate.sh` checks it), so a manual build is labeled the same way as a scripted one. ACM and OpenShift GitOps go where their Subscription carries the label, that is, where the build installed them. On an ACM that was there before, the two marked changes of [A hub that already runs ACM](#a-hub-that-already-runs-acm) are undone, and the rest of it stays. |
+| `--reset` | Only the exercise: the DR roles (stage 2), the demo apps (stage 3) and `dr/` in git (stage 8). ACM, OpenShift GitOps, the backup storage and the spoke's import stay, with the build's changes to them, so the next `hack/build.sh` reuses them and re-creates only the demo apps, the backups and the roles, in minutes. Use it to build again without reinstalling the operators. |
 | `--full` | ACM, OpenShift GitOps and the demo, whoever installed them, and the spoke is detached: afterwards none of the three clusters runs ACM or OpenShift GitOps. |
 
-Either way, other operators and workloads stay, and so do the S3 bucket
+In every mode, other operators and workloads stay, and so do the S3 bucket
 and its backups, the settings file, and the CRDs the operators installed
 (harmless, and a new install adopts them). In git, only `dr/` on the
 branch and the branches `hack/dr.sh` pushed change (stage 8). The log is in
 `~/acm-dr/logs/teardown-<time>.log`. After a stop, run it again: each
-stage skips what is already gone. The stages, in order:
+stage skips what is already gone. The teardown keeps the same header at
+the top of the screen as the build (the stages and the time), and each
+stage starts on an empty window under it. Between stages it waits for
+Continue, as the build does (`--yes` skips the waits). A dry run does
+all of this too, and logs every 'would' line to
+`~/acm-dr/logs/teardown-dryrun-<time>.log`. The stages, in order:
 
 1. **Pre-flight** (read-only): every cluster must answer; then a table of
    what goes and what stays, and the checks under [What the teardown
