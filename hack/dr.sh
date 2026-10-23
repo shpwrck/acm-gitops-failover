@@ -125,7 +125,12 @@ run_header() {   # run_header <width>: the pinned lines of a run: where it stand
   printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
 }
 stage() {   # stage <n>: where the run stands. With gum, each stage after the first starts on a clear screen (under the pinned header, when there is one)
-  local i s w recap="" n
+  local i s w recap="" n t=$PAUSED p0
+  if [ "$1" -gt 2 ]; then   # stage 2 follows the run's own confirm
+    p0=$(now)
+    go_on "$(stage_name "$1" "${STAGES[$1 - 1]}")"
+    if [ "$PAUSED" -gt "$t" ]; then echo "$p0 $((PAUSED - t))" >>"$LOGDIR/pauses.log"; fi   # left out of the timings
+  fi
   n=$(wc -l 2>/dev/null <"$LOGDIR/events.log" || echo 0)
   if [ "$1" -gt 1 ] && [ "$n" -gt "$STAGE_EV" ]; then recap=$(sed -n "$((STAGE_EV + 1)),\$p" "$LOGDIR/events.log" | tail -n 3); fi
   STAGE_EV=$n STAGE_N=$1
@@ -477,10 +482,13 @@ probe_stop() {
 # the time of the last event matching <regex>, or nothing
 ev() { awk -v re="$1" '$0 ~ re {t = $1} END {print t}' "$LOGDIR/events.log" 2>/dev/null || true; }
 span() { span_t "$1" "$(ev "$2")" "$(ev "$3")"; }   # span <label> <from event> <to event>
-span_t() {   # span_t <label> <from time> <to time>: a timing row when both are known
+span_t() {   # span_t <label> <from time> <to time>: a timing row when both are known, less the time at Continue prompts
   if [ -n "$2" ] && [ -n "$3" ]; then
-    printf '%s\t%s\n' "$1" "$(dur $(($(date -u -d "$3" +%s) - $(date -u -d "$2" +%s))))"
+    printf '%s\t%s\n' "$1" "$(dur $(($(date -u -d "$3" +%s) - $(date -u -d "$2" +%s) - $(paused_in "$2" "$3"))))"
   fi
+}
+paused_in() {   # paused_in <from time> <to time>: seconds spent at Continue prompts in between
+  awk -v a="$1" -v b="$2" '$1 >= a && $1 < b {s += $2} END {print s + 0}' "$LOGDIR/pauses.log" 2>/dev/null || echo 0
 }
 first_served() {   # first_served <pull|push> <n>: when revisions.log first shows that app serving vN
   awk -v r="$1=v$2" '{for (i = 2; i <= NF; i++) if ($i == r) {print $1; exit}}' "$LOGDIR/revisions.log" 2>/dev/null || true
@@ -510,6 +518,7 @@ timings() {
   span "Demote PR: pushed to merged" " G'.1 demote branch" " G'.1 demote PR merged"
   span "Old hub back to its lease running out (G.1)" " G .* API answers" " G.1 .* Unknown"
   span "Whole run: start to rejoin done" " run [0-9]+ started" " rejoin done"
+  if [ -s "$LOGDIR/pauses.log" ]; then printf 'At the Continue prompts (left out of the times above)\t%s\n' "$(dur "$(awk '{s += $2} END {print s + 0}' "$LOGDIR/pauses.log")")"; fi
 }
 avail_rows() {   # avail_rows <name> <probe log> [cut time]: one table row, or two split at the cut
   awk -v n="$1" -v c="${3:-}" '
@@ -988,15 +997,16 @@ run_started() {   # a run started again after a stop carries on in the same fold
 }
 
 cmd_run() {
-  local stops="to cut $ACTIVE's power and to power it back on" c pinned
+  local stops c pinned
+  stops="to cut $(cl "$ACTIVE")'s power and to power it back on"
   IN_RUN=1 RUN_T0=$SECONDS
-  if [ "$GIT" = 1 ]; then stops="to cut $ACTIVE's power, to merge 3 PRs, and to power $ACTIVE back on"; fi
+  if [ "$GIT" = 1 ]; then stops="to cut $(cl "$ACTIVE")'s power, to merge 3 PRs, and to power $(cl "$ACTIVE") back on"; fi
   if [ "$UI" = gum ]; then
     for c in "$ACTIVE" "$PASSIVE"; do HUB_URL[$c]=$(server "$c" 2>/dev/null || true); done
     pin_on 6 run_header   # the run's state stays at the top until the summary
   fi
   box double 13 "Run $RUN · $(mode_name): $(cl "$ACTIVE") goes down, $(cl "$PASSIVE") takes over" \
-    "The script pauses when it needs you: $stops." \
+    "The script pauses when it needs you: $stops.$(if [ "$YES" = 0 ]; then echo " Between stages it waits for Continue."; fi)" \
     "Logs: ${LOGDIR/#$HOME/\~}"
   stage 1
   if ! COMPACT=1 cmd_check; then

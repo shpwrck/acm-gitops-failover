@@ -202,15 +202,14 @@ set_setting() {   # set_setting <name> <value>: in the settings file
 STAGES=(Pre-flight ACM "OpenShift GitOps" "Backup storage" "Import $MANAGED" "Demo apps" "Backup roles" "dr/ roles" Check)
 STAGE=0
 stage() {   # stage <title> <what and why>
-  local n=""
+  if [ "$STAGE" -ge 2 ]; then go_on "$(stage_name $((STAGE + 1)) "$1")"; fi   # after the pre-flight, the build's own confirm
   STAGE=$((STAGE + 1))
-  if [ "${#STAGES[@]}" -gt 1 ]; then n="Stage $STAGE/${#STAGES[@]}: "; fi   # --check has the one stage
-  logln "" "#### $n$1"
+  logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
-    printf '\n %s── %s%s%s\n' "$C_B$C_ACC" "$n" "$(paint "$1" "$C_B$C_ACC")" "$C_OFF"
+    printf '\n %s── %s%s\n' "$C_B$C_ACC" "$(paint "$(stage_name "$STAGE" "$1")" "$C_B$C_ACC")" "$C_OFF"
   else
-    printf '\n#### %s%s\n' "$n" "$(bare "$1")"
+    printf '\n#### %s\n' "$(bare "$(stage_name "$STAGE" "$1")")"
   fi
   explain "$2"
 }
@@ -528,7 +527,7 @@ stage_gitops() {
     fi
   done
   for c in "${CLUSTERS[@]}"; do
-    if ! try_until 1500 "$c: OpenShift GitOps and its Argo CD instance" gitops_installed "$c"; then
+    if ! try_until 1500 "$(cl "$c"): OpenShift GitOps and its Argo CD instance" gitops_installed "$c"; then
       x=$(held_plan "$c" openshift-gitops-operator)
       help_at docs/build.md#2-all-clusters-openshift-gitops
       if [ -n "$x" ]; then red "$(cl "$c"): $x. The build approves only a plan that installs OpenShift GitOps alone: approve this one yourself if those changes are wanted, then run it again"; fi

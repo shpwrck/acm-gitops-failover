@@ -130,7 +130,10 @@ screen in place: the nine stages (done, current and to come) and the
 time since it started. Each stage starts on an empty
 window under it, and a pre-flight section that is all green shows as one
 line, so the output stays in the window; the log keeps everything,
-including what a later stage cleared from the screen. `--check` runs
+including what a later stage cleared from the screen. Before each stage
+after the ACM one, it waits for you to pick Continue, so you can read
+what the last stage did before the window clears; `--yes` runs straight
+through. `--check` runs
 only the pre-flight, so its header has that one stage; the plan at its
 end lists what the other eight would install or reuse. It logs to
 `~/acm-dr/logs/build-check-<time>.log`. The
@@ -636,8 +639,9 @@ branch and the branches `hack/dr.sh` pushed change (stage 8). The log is in
 `~/acm-dr/logs/teardown-<time>.log`. After a stop, run it again: each
 stage skips what is already gone. The teardown keeps the same header at
 the top of the screen as the build (the stages and the time), and each
-stage starts on an empty window under it. A dry run does
-too, and logs every 'would' line to
+stage starts on an empty window under it. Between stages it waits for
+Continue, as the build does (`--yes` skips the waits). A dry run does
+all of this too, and logs every 'would' line to
 `~/acm-dr/logs/teardown-dryrun-<time>.log`. The stages, in order:
 
 1. **Pre-flight** (read-only): every cluster must answer; then a table of
