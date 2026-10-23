@@ -648,16 +648,16 @@ stage_check() {
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
 menu() {
   local choice items
-  box rounded 13 "Build the DR exercise on $ACTIVE, $PASSIVE and $MANAGED" \
-    "$ACTIVE becomes the active hub and $PASSIVE the passive one, as the settings file says; $MANAGED is the workload cluster. The build installs ACM on both hubs and OpenShift GitOps on all three (or reuses what is there), connects both hubs to the S3 bucket, imports $MANAGED, deploys the two demo apps, starts the backups and hands each hub's role to git." \
+  intro "Build the ACM hub DR exercise" \
+    "Sets up two ACM hubs, one active and one passive, and a workload cluster they take turns managing. It installs ACM and OpenShift GitOps where they are missing, connects both hubs to the S3 bucket for backups, imports the workload cluster, deploys the two demo apps and hands each hub's role to git." \
     "" \
-    "It takes 40 to 60 minutes, most of it waiting for operators, and asks for the S3 keys at the start. The pre-flight check changes nothing: it shows what the build would do."
+    "It takes 40 to 60 minutes and asks for the S3 keys at the start. The pre-flight check changes nothing: it shows what the build would do."
   items=("Pre-flight check only (read-only)" "Build" "List the options" "Quit")
   echo
   if [ "$UI" = gum ]; then
-    choice=$(gum choose --header "What do you want to do?" "${items[@]}" </dev/tty) || choice=Quit
+    choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
   else
-    PS3="What do you want to do? "
+    PS3="What would you like to do? "
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
@@ -689,6 +689,7 @@ on_exit() {
 }
 
 trap on_exit EXIT
+start_screen
 if [ "$ARGC" = 0 ]; then
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
 fi

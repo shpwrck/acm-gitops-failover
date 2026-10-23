@@ -687,21 +687,18 @@ summary() {
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
 menu() {
   local choice
-  box rounded 13 "Teardown: remove the DR exercise from $ACTIVE, $PASSIVE and $MANAGED" \
-    "The default removes what this repo put on the clusters, including ACM and OpenShift GitOps where hack/build.sh installed them. ACM or OpenShift GitOps that were there before stay, and the build's two changes to such an ACM are undone." \
+  intro "Tear down the ACM hub DR exercise" \
+    "Removes what hack/build.sh put on the clusters, including ACM and OpenShift GitOps where the build installed them. ACM or OpenShift GitOps that was there before stays. Other workloads and the S3 bucket always stay, and dr/ in git goes back to the roles the build starts from." \
     "" \
-    "--full removes ACM, OpenShift GitOps and the demo whoever installed them, and detaches $MANAGED, so none of the three runs ACM or OpenShift GitOps afterwards." \
-    "" \
-    "Other operators and workloads stay, and so does the S3 bucket. In git, dr/ goes back to the roles the build starts from, and hack/dr.sh's merged branches go." \
-    "" \
+    "With --full: also removes ACM, OpenShift GitOps and the demo whoever installed them, and detaches the workload cluster." \
     "A dry run changes nothing: it shows what would go and what stays."
   local items=("Dry run: what the teardown would remove (read-only)" "Dry run with --full (read-only)"
     "Tear down what this repo installed" "Tear down with --full" "List the options" "Quit")
   echo
   if [ "$UI" = gum ]; then
-    choice=$(gum choose --header "What do you want to do?" "${items[@]}" </dev/tty) || choice=Quit
+    choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
   else
-    PS3="What do you want to do? "
+    PS3="What would you like to do? "
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
@@ -733,6 +730,7 @@ on_exit() {
   fi
 }
 
+start_screen
 if [ "$ARGC" = 0 ]; then
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
 fi
