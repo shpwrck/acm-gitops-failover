@@ -239,6 +239,20 @@ confirm() {
   logln "$1 [y/N] $answer"
   [ "$answer" = y ] || [ "$answer" = Y ] || die "stopped at your request"
 }
+PAUSED=0   # seconds spent at go_on's prompt
+go_on() {   # go_on <next stage>: wait for Continue before the next stage clears the window (not with --yes, or without a terminal)
+  local t0=$SECONDS answer=""
+  if [ "${YES:-0}" = 1 ] || ! { : </dev/tty; } 2>/dev/null; then return 0; fi
+  logln "" "-- next: $1"
+  if [ "$UI" = gum ]; then
+    echo
+    gum choose --header "Next: $(paint "$1")" Continue </dev/tty >/dev/null 2>/dev/tty || die "stopped at your request, before $1"
+  else
+    read -r -p "Next: $(bare "$1"). Press Enter to continue " answer </dev/tty || true
+  fi
+  PAUSED=$((PAUSED + SECONDS - t0))
+  logln "   continued after $(dur $((SECONDS - t0)))"
+}
 
 # The spinner: one status line, redrawn ten times a second while the script
 # waits. Checks run in the background so it keeps turning.
@@ -430,6 +444,9 @@ steps_pin() {   # pin steps_header, as tall as the stages need at this width
   local w=$(($(cols) - 1))
   w=$((w > 80 ? 78 : w))
   pin_on $(($(crumbs 1 $((w - 1)) | grep -c '') + 2)) steps_header
+}
+stage_name() {   # stage_name <n> <title>: the title; "Stage <n>/<all>: <title>" when no header shows where the stage stands
+  if [ "$PIN" = 1 ] || [ "${#STAGES[@]}" -le 1 ]; then printf '%s' "$2"; else printf 'Stage %d/%d: %s' "$1" "${#STAGES[@]}" "$2"; fi
 }
 steps_end() {   # every stage ticked in the header
   STAGE=$((${#STAGES[@]} + 1))

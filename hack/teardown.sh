@@ -160,7 +160,7 @@ ns_gone() {   # ns_gone <context> <namespace> [seconds]: delete a namespace and 
   if none "$c" ns "$n"; then return 0; fi
   act "$(cl "$c"): delete namespace $n" oc --context "$c" delete ns "$n" --ignore-not-found --wait=false
   if [ "$DRY" = 1 ]; then return 0; fi
-  if ! try_until "$limit" "namespace $n to be gone from $c" none "$c" ns "$n"; then
+  if ! try_until "$limit" "namespace $n to be gone from $(cl "$c")" none "$c" ns "$n"; then
     oc --context "$c" get ns "$n" -o json 2>/dev/null |
       jq -r '.status.conditions[]? | select(.status == "True") | "\(.type): \(.message)"' | show
     help_at docs/build.md#a-namespace-that-does-not-go
@@ -174,13 +174,14 @@ ns_gone() {   # ns_gone <context> <namespace> [seconds]: delete a namespace and 
 STAGES=(Pre-flight "DR roles" "Demo apps" Detach "Backup storage" ACM "OpenShift GitOps" Git Summary)
 STAGE=0
 stage() {   # stage <title> <what and why>
+  if [ "$STAGE" -ge 2 ] || { [ "$STAGE" = 1 ] && [ "$DRY" = 1 ]; }; then go_on "$(stage_name $((STAGE + 1)) "$1")"; fi   # a real run confirms after the pre-flight
   STAGE=$((STAGE + 1))
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
-    printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$(paint "$1" "$C_B$C_ACC")" "$C_OFF"
+    printf '\n %s── %s%s\n' "$C_B$C_ACC" "$(paint "$(stage_name "$STAGE" "$1")" "$C_B$C_ACC")" "$C_OFF"
   else
-    printf '\n#### Stage %d/%d: %s\n' "$STAGE" "${#STAGES[@]}" "$(bare "$1")"
+    printf '\n#### %s\n' "$(bare "$(stage_name "$STAGE" "$1")")"
   fi
   explain "$2"
 }
@@ -415,7 +416,7 @@ cmd_demo() {
   fi
   if some "$MANAGED" "$APP" "hello-failover-$MANAGED" -n "$GNS"; then
     # the hub's work agent removes the pull app's copy when its ApplicationSet goes; delete it if that has not happened
-    if [ "$DRY" = 0 ] && ! try_until 120 "the pull app's copy on $MANAGED to go with its ApplicationSet" \
+    if [ "$DRY" = 0 ] && ! try_until 120 "the pull app's copy on $(cl "$MANAGED") to go with its ApplicationSet" \
       none "$MANAGED" "$APP" "hello-failover-$MANAGED" -n "$GNS"; then
       note "it is still there: deleting it directly"
     fi
@@ -454,7 +455,7 @@ cmd_detach() {
   t0=$SECONDS
   if some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet || some "$MANAGED" ns open-cluster-management-agent; then
     help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
-    if ! try_until 900 "the ACM agent to leave $MANAGED" not some "$MANAGED" ns open-cluster-management-agent; then
+    if ! try_until 900 "the ACM agent to leave $(cl "$MANAGED")" not some "$MANAGED" ns open-cluster-management-agent; then
       red "$(cl "$MANAGED") still has namespace open-cluster-management-agent after 15 min"
       die "the detach did not remove $(cl "$MANAGED")'s ACM agent: see the link above"
     fi
@@ -502,7 +503,7 @@ remove_own_agent() {   # remove_own_agent <context>: a hub's own agent (local-cl
   if some "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
     act "$(cl "$c"): delete klusterlet/klusterlet (the hub's own agent for local-cluster; its operator cleans up after it)" \
       oc --context "$c" delete klusterlets.operator.open-cluster-management.io klusterlet --ignore-not-found --wait=false
-    if [ "$DRY" = 0 ] && ! try_until 300 "$c's klusterlet to finish its cleanup" none "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
+    if [ "$DRY" = 0 ] && ! try_until 300 "$(cl "$c")'s klusterlet to finish its cleanup" none "$c" klusterlets.operator.open-cluster-management.io klusterlet; then
       if some "$c" deployments.apps klusterlet -n open-cluster-management-agent; then
         red "$(cl "$c"): the klusterlet is still there after 5 min, with its operator running"
         die "$(cl "$c")'s klusterlet does not finish its cleanup: see the link above"
@@ -580,7 +581,7 @@ cmd_acm() {
     if [ "${ACM_PLAN[$c]}" != remove ]; then continue; fi
     say "$(cl "$c"): after the MultiClusterHub$(if [ "$DRY" = 1 ]; then echo ", whatever of this it leaves behind"; fi)"
     help_at docs/build.md#a-multiclusterhub-that-does-not-go
-    if [ "$DRY" = 0 ] && ! try_until 1800 "$c's MultiClusterHub to finish uninstalling" not some "$c" multiclusterhubs.operator.open-cluster-management.io -A; then
+    if [ "$DRY" = 0 ] && ! try_until 1800 "$(cl "$c")'s MultiClusterHub to finish uninstalling" not some "$c" multiclusterhubs.operator.open-cluster-management.io -A; then
       oc --context "$c" get multiclusterhubs.operator.open-cluster-management.io -A -o json |
         jq -r '.items[].status | "phase \(.phase // "?")", (.conditions[]? | "\(.type) \(.status): \(.message // "")")' | show
       red "$(cl "$c"): the MultiClusterHub is still there after 30 min"
