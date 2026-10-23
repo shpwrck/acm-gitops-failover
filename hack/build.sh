@@ -204,8 +204,7 @@ STAGE=0
 stage() {   # stage <title> <what and why>
   STAGE=$((STAGE + 1)) PIN_STEP=""
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
-  pin_draw
-  if [ "$STAGE" = "${#STAGES[@]}" ]; then pin_off; fi   # the last stage scrolls, so the scrollback keeps it
+  if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
     printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$1" "$C_OFF"
   else
@@ -221,11 +220,11 @@ ACM_CSV="" PLAN_ROWS="" SPOKE_HAD=0 STORAGE_DONE=0
 row() { PLAN_ROWS+="$1"$'\t'"$2"$'\t'"$3"$'\n'; }
 
 preflight() {
-  local c s v x url origin rev
+  local c s v="" x url origin rev
   BAD=0
   stage "Pre-flight (read-only)" "Checks that the three clusters are healthy, that your copy of the repo is what the clusters will pull from, and what is installed already. It decides what the build installs and what it reuses, and refuses what would break: a hub that another hub manages, $MANAGED managed by some other hub, or two hubs on different ACM versions. Nothing changes in this stage."
 
-  say "Clusters"
+  sec_begin "Clusters" "Clusters"
   explain "All three must answer, with nodes Ready, no certificate requests waiting, and every cluster operator Available and not Degraded. A cluster that has just been installed or powered on takes 10 to 20 minutes to settle."
   help_at docs/build.md#clusters
   for c in "${CLUSTERS[@]}"; do
@@ -234,9 +233,10 @@ preflight() {
     x=$(oc --context "$c" get clusteroperators --no-headers 2>/dev/null | awk '$3 != "True" || $5 != "False" {print $1}' | paste -sd' ' - || true)
     if [ -z "$x" ]; then ok "$c cluster operators Available, none Degraded"; else red "$c cluster operators not settled: $x"; fi
   done
+  sec_end "APIs answer, nodes Ready, cluster operators settled"
   if [ "$BAD" = 1 ]; then HELP=""; verdict bad "BUILD RED: the clusters must be up and settled first"; return 1; fi
 
-  say "Your copy of the repo"
+  sec_begin "Your copy of the repo" "Repo"
   explain "The demo apps and the dr-role applications pull from the repoURL and targetRevision in the manifests, so they must name your copy and the branch the settings file names. dr/ in git must give $ACTIVE the active role and $PASSIVE the passive one, as the settings file does: each hub's dr-role application applies exactly what git says."
   help_at README.md#getting-started
   git fetch -q origin "$BRANCH" 2>/dev/null || true
@@ -261,8 +261,9 @@ preflight() {
   else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active (hack/teardown.sh resets dr/)"; fi
   x=$(git_role "$PASSIVE")
   if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive (hack/teardown.sh resets dr/)"; fi
+  sec_end "tracks $BRANCH on your origin; dr/ has $ACTIVE active, $PASSIVE passive"
 
-  say "What is installed"
+  sec_begin "What is installed" "Installed"
   explain "An ACM or OpenShift GitOps that is already there is reused, not installed again. Both hubs must end up on the same ACM version (a backup does not restore on an older one), so the build pins both to one version with Manual approval: the installed one if a hub has ACM, otherwise the newest in channel $ACM_CHANNEL."
   help_at docs/build.md#1-hubs-acm-with-the-backup-component
   for c in "${HUBS[@]}"; do
@@ -345,13 +346,15 @@ preflight() {
   if [ -n "${GITOPS_HAS[$ACTIVE]}" ] && [ -n "${GITOPS_HAS[$PASSIVE]}" ] && [ "${GITOPS_HAS[$ACTIVE]}" != "${GITOPS_HAS[$PASSIVE]}" ]; then
     note "the hubs run different OpenShift GitOps versions (${GITOPS_HAS[$ACTIVE]} and ${GITOPS_HAS[$PASSIVE]}); the restore hub should carry the same operators"
   fi
+  sec_end "nothing in the way; the plan below lists what is reused"
 
-  say "$MANAGED"
+  sec_begin "$MANAGED" "$MANAGED"
   explain "$MANAGED must be managed by $ACTIVE or by no hub at all, and the passive hub must not list it: one cluster, one hub."
   help_at docs/build.md#4-active-hub-import-the-spoke
   x=$(klusterlet_hub "$MANAGED")
   if [ -z "$x" ]; then
     ok "$MANAGED is not managed by any hub yet"
+    v="not managed by any hub yet"
     row "$MANAGED" "ACM import" "import into $ACTIVE"
   elif orphan_agent "$MANAGED"; then
     help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
@@ -359,6 +362,7 @@ preflight() {
   elif [ -n "${ACM_HAS[$ACTIVE]}" ] && mc_available "$ACTIVE" True; then
     SPOKE_HAD=1
     ok "$MANAGED is already managed by $ACTIVE: kept"
+    v="already managed by $ACTIVE: kept"
     row "$MANAGED" "ACM import" "already managed by $ACTIVE: kept"
   else
     help_at docs/build.md#a-cluster-that-is-managed-by-another-hub
@@ -378,8 +382,9 @@ preflight() {
   for c in "${CLUSTERS[@]}"; do
     if some "$c" crd routes.route.openshift.io; then red "$c has a stray routes.route.openshift.io CRD (gotcha 3)"; fi
   done
+  sec_end "$v; no other hub claims it"
 
-  say "Backup storage"
+  sec_begin "Backup storage" "Backup storage"
   explain "Both hubs write to and read from one S3 bucket. The endpoint and bucket come from the settings file; the keys are asked for when the build starts."
   help_at docs/build.md#3-hubs-backup-storage
   if [ -n "${ACM_HAS[$ACTIVE]}" ] && [ -n "${ACM_HAS[$PASSIVE]}" ] &&
@@ -387,16 +392,19 @@ preflight() {
     [ "$(oc --context "$PASSIVE" get backupstoragelocation -n "$NS" -o jsonpath='{.items[0].status.phase}' 2>/dev/null)" = Available ]; then
     STORAGE_DONE=1
     ok "both hubs already reach the bucket: kept"
+    v="both hubs already reach the bucket: kept"
     row "$ACTIVE, $PASSIVE" "backup storage" "already connected: kept"
   elif [ -n "$S3_URL" ] && ! url_ok "$S3_URL"; then
     red "S3_URL in $DR_ENV is '$S3_URL', not an http(s) URL: fix the line, or delete it to be asked again"
   else
     ok "bucket s3://$S3_BUCKET/$S3_PREFIX in $S3_REGION at ${S3_URL:-(asked for at the start)}"
+    v="s3://$S3_BUCKET/$S3_PREFIX at ${S3_URL:-AWS S3}"
     row "$ACTIVE, $PASSIVE" "backup storage" "connect to s3://$S3_BUCKET/$S3_PREFIX"
   fi
   row "$ACTIVE" "demo apps, backups" "pull and push apps on $MANAGED, BackupSchedule"
   row "$PASSIVE" "backups" "continuous passive restore"
   row "$ACTIVE, $PASSIVE" "dr/ roles" "each hub's dr-role application adopts its role"
+  sec_end "$v"
 
   HELP=""
   say "The plan"
@@ -639,7 +647,8 @@ stage_roles() {
 
 stage_check() {
   stage Check "Runs hack/dr.sh check, the pre-flight every exercise starts with, against what was just built."
-  if DR_CLEAR=0 bash "$REPO/hack/dr.sh" check; then
+  if DR_CLEAR=0 COMPACT=$PIN bash "$REPO/hack/dr.sh" check; then
+    steps_end "Build done in $(dur $((SECONDS - T0)))"
     box rounded 10 "Build done in $(dur $((SECONDS - T0))): $ACTIVE active, $PASSIVE passive" \
       "Next: hack/dr.sh, then pick a run from the menu (docs/runbooks)." "Log: $LOGFILE"
   else
@@ -703,24 +712,24 @@ if [ "$ACTIVE" = "$PASSIVE" ] || [ "$ACTIVE" = "$MANAGED" ] || [ "$PASSIVE" = "$
   echo "ACTIVE, PASSIVE and MANAGED must be three different contexts" >&2
   exit 2
 fi
-if [ "$CHECK" = 0 ]; then
-  mkdir -p "$HOME/acm-dr/logs"
-  LOGFILE=$HOME/acm-dr/logs/build-$(date -u +%Y%m%dT%H%M%SZ).log
-  # shellcheck disable=SC2094 # both append
-  exec 3>>"$LOGFILE" 2> >(tee -a "$LOGFILE" >&2)
-  logln "#### $(now) hack/build.sh"
-fi
+mkdir -p "$HOME/acm-dr/logs"
+LOGFILE=$HOME/acm-dr/logs/build$(if [ "$CHECK" = 1 ]; then echo -check; fi)-$(date -u +%Y%m%dT%H%M%SZ).log
+# shellcheck disable=SC2094 # both append
+exec 3>>"$LOGFILE" 2> >(tee -a "$LOGFILE" >&2)
+logln "#### $(now) hack/build.sh$(if [ "$CHECK" = 1 ]; then echo " --check"; fi)"
 trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
-if [ "$CHECK" = 0 ]; then
-  STEPS_TITLE="Build · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
-  pin_on 5 steps_header   # the stages stay at the top until the last one
-fi
+STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " pre-flight"; fi) · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
+pin_on 5 steps_header   # the stages stay at the top, and the output stays in the window under them
+COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if ! preflight; then DIED=1; exit 1; fi
-if [ "$CHECK" = 1 ]; then exit 0; fi
+if [ "$CHECK" = 1 ]; then
+  finished "pre-flight only: nothing changed. Log: ${LOGFILE/#$HOME/\~}"
+  exit 0
+fi
 confirm "Build it: install and configure what the plan lists on $ACTIVE, $PASSIVE and $MANAGED?"
 s3_inputs
 stage_acm

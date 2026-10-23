@@ -165,8 +165,7 @@ STAGE=0
 stage() {   # stage <title> <what and why>
   STAGE=$((STAGE + 1)) PIN_STEP=""
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
-  pin_draw
-  if [ "$STAGE" = "${#STAGES[@]}" ]; then pin_off; fi   # the last stage scrolls, so the scrollback keeps it
+  if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
     printf '\n %s── Stage %d/%d: %s%s\n' "$C_B$C_ACC" "$STAGE" "${#STAGES[@]}" "$1" "$C_OFF"
   else
@@ -222,11 +221,12 @@ preflight() {
   else
     echo "Without --full, only what carries this repo's label goes (every manifest in manifests/ and dr/ has it), plus ACM and OpenShift GitOps where hack/build.sh installed them. An ACM or OpenShift GitOps that was there before the build stays, and so does everything else on the clusters."
   fi) It refuses when removing ACM or OpenShift GitOps would take something that is not this repo's with it. Nothing changes in this stage."
-  say "Clusters"
+  sec_begin "Clusters" "Clusters"
   help_at docs/build.md#clusters
   for c in "${CLUSTERS[@]}"; do
     if alive "$c"; then ok "$c API answers"; else red "$c API does not answer"; blockers=1; fi
   done
+  sec_end "all three APIs answer"
   if [ "$blockers" = 1 ]; then verdict bad "TEARDOWN RED: every cluster must answer; power them on and run it again"; return 1; fi
 
   say "What is there"
@@ -302,7 +302,7 @@ preflight() {
   git_plan
   printf 'Cluster\tWhat\tPlan\tWhy\n%s' "$PLAN_ROWS" | table
 
-  say "Would removing ACM or OpenShift GitOps take anything else with it?"
+  sec_begin "Would removing ACM or OpenShift GitOps take anything else with it?" "Nothing else"
   explain "Removing ACM detaches every cluster it manages, and removing OpenShift GitOps deletes every Argo CD application on that cluster. So both must find nothing that is not this repo's."
   help_at docs/build.md#what-the-teardown-refuses
   for c in "${HUBS[@]}"; do
@@ -330,6 +330,7 @@ preflight() {
   if [ "$DETACH" = 0 ] && some "$MANAGED" klusterlets.operator.open-cluster-management.io klusterlet && [ "$FULL" = 1 ] && ! orphan_agent "$MANAGED"; then
     note "$MANAGED runs an ACM agent but neither hub lists it: its hub is elsewhere; detach it there"
   fi
+  sec_end "what goes takes nothing that is not this repo's with it"
   HELP=""
   if [ "$blockers" = 1 ]; then
     verdict bad "TEARDOWN RED: nothing was removed; fix the RED lines (each links to why) and run it again"
@@ -673,6 +674,7 @@ cmd_git() {
 summary() {
   local c
   stage "Summary" "What is left of the exercise on each cluster."
+  steps_end "Teardown done in $(dur $((SECONDS - T0)))"
   for c in "${CLUSTERS[@]}"; do
     printf '%s\t%s\t%s\t%s\n' "$c" \
       "$(if [ -n "$(sub_of "$c" advanced-cluster-management)" ]; then echo installed; else echo -; fi)" \
@@ -740,22 +742,19 @@ fi
 for c in "${CLUSTERS[@]}"; do
   grep -qx -- "$c" <<<"$(oc config get-contexts -o name)" || { echo "no kubeconfig context named '$c' (KUBECONFIG=${KUBECONFIG:-default})" >&2; exit 2; }
 done
-if [ "$DRY" = 0 ]; then
-  mkdir -p "$HOME/acm-dr/logs"
-  LOGFILE=$HOME/acm-dr/logs/teardown-$(date -u +%Y%m%dT%H%M%SZ).log
-  # shellcheck disable=SC2094 # both append
-  exec 3>>"$LOGFILE" 2> >(tee -a "$LOGFILE" >&2)
-  logln "#### $(now) hack/teardown.sh$(if [ "$FULL" = 1 ]; then echo " --full"; fi)"
-fi
+mkdir -p "$HOME/acm-dr/logs"
+LOGFILE=$HOME/acm-dr/logs/teardown$(if [ "$DRY" = 1 ]; then echo -dryrun; fi)-$(date -u +%Y%m%dT%H%M%SZ).log
+# shellcheck disable=SC2094 # both append
+exec 3>>"$LOGFILE" 2> >(tee -a "$LOGFILE" >&2)
+logln "#### $(now) hack/teardown.sh$(if [ "$FULL" = 1 ]; then echo " --full"; fi)$(if [ "$DRY" = 1 ]; then echo " --dry-run"; fi)"
 trap on_exit EXIT
 trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
-if [ "$DRY" = 0 ]; then   # a dry run is a report to read back, so it scrolls like one
-  STEPS_TITLE="Teardown$(if [ "$FULL" = 1 ]; then echo " --full"; fi) · $ACTIVE, $PASSIVE, $MANAGED"
-  pin_on 5 steps_header   # the stages stay at the top until the last one
-fi
+STEPS_TITLE="Teardown$(if [ "$FULL" = 1 ]; then echo " --full"; fi)$(if [ "$DRY" = 1 ]; then echo " dry run"; fi) · $ACTIVE, $PASSIVE, $MANAGED"
+pin_on 5 steps_header   # the stages stay at the top, and the output stays in the window under them
+COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if [ "$DRY" = 1 ]; then
   box rounded 13 "Dry run$(if [ "$FULL" = 1 ]; then echo " with --full"; fi): nothing changes" \
@@ -773,6 +772,8 @@ cmd_acm
 cmd_gitops
 cmd_git
 if [ "$DRY" = 1 ]; then
+  stage "Summary" "Nothing changed: this was a dry run. The log has every 'would' line: ${LOGFILE/#$HOME/\~}"
+  steps_end "Dry run done in $(dur $((SECONDS - T0))): nothing changed"
   verdict ok "DRY RUN: nothing changed. Run it without --dry-run to remove what the 'would' lines name."
 else
   summary
