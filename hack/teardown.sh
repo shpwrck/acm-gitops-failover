@@ -5,7 +5,8 @@
 #
 # Usage: hack/teardown.sh [--dry-run] [--reset | --full] [--yes]
 #
-# With no options, on a terminal, it shows a menu.
+# With no options, on a terminal, it shows a menu: a check (dry run) or a
+# teardown, with --reset or --full.
 #
 #   (default)  remove what this repo put on the clusters: everything that
 #              carries the label app.kubernetes.io/part-of=acm-gitops-failover
@@ -710,15 +711,15 @@ summary() {
 }
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
-menu() {
-  local choice
+menu() {   # no options on a terminal: what --reset and --full remove, then pick one; the default mode is a command (usage)
+  local choice items
   intro "Tear down the ACM hub DR exercise" \
-    "Removes what hack/build.sh put on the clusters, including ACM and OpenShift GitOps where the build installed them. ACM or OpenShift GitOps that was there before stays. Other workloads and the S3 bucket always stay, and dr/ in git goes back to the roles the build starts from." \
+    "--reset removes the exercise: the DR roles and the demo apps, and dr/ in git goes back to the roles the build starts from. ACM, OpenShift GitOps, the backup storage and the workload cluster's import stay, so the next build takes minutes." \
     "" \
-    "With --reset: only the exercise goes (the DR roles, the demo apps, dr/ in git). ACM, OpenShift GitOps, the backup storage and the workload cluster's import stay, so the next build takes minutes." \
-    "With --full: also removes ACM, OpenShift GitOps and the demo whoever installed them, and detaches the workload cluster."
-  local items=("Dry run: what the teardown would remove (read-only)" "Dry run with --reset (read-only)" "Dry run with --full (read-only)"
-    "Tear down what this repo installed" "Reset the exercise, keep the operators (--reset)" "Tear down with --full" "List the options" "Quit")
+    "--full removes all of that, plus the backup storage, ACM and OpenShift GitOps whoever installed them, and the workload cluster's import." \
+    "" \
+    "Other workloads and the S3 bucket stay either way."
+  items=("Check (Reset)" "Check (Teardown)" "Teardown (Reset)" "Teardown (Full)" Quit)
   echo
   if [ "$UI" = gum ]; then
     choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
@@ -727,13 +728,10 @@ menu() {
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
-    "Dry run: what"*) DRY=1 ;;
-    "Dry run with --reset"*) DRY=1 RESET=1 ;;
-    "Dry run with --full"*) DRY=1 FULL=1 ;;
-    "Tear down what"*) ;;
-    "Reset the exercise"*) RESET=1 ;;
-    "Tear down with --full") FULL=1 ;;
-    "List the options") usage; exit 0 ;;
+    "Check (Reset)") DRY=1 RESET=1 ;;
+    "Check (Teardown)") DRY=1 FULL=1 ;;
+    "Teardown (Reset)") RESET=1 ;;
+    "Teardown (Full)") FULL=1 ;;
     *) exit 0 ;;
   esac
 }
