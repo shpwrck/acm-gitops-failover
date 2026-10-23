@@ -256,11 +256,11 @@ preflight() {
   if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"
   elif [[ $x == "active with "* ]]; then
     help_at docs/build.md#7-git-driven-paths-only-bootstrap-dr
-    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. hack/teardown.sh resets dr/ on $BRANCH; or remove the file and its entry there by hand"
+    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. hack/teardown.sh --reset resets dr/ on $BRANCH and keeps ACM and OpenShift GitOps; or remove the file and its entry there by hand"
     help_at dr/README.md
-  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active (hack/teardown.sh resets dr/)"; fi
+  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active (hack/teardown.sh --reset resets dr/)"; fi
   x=$(git_role "$PASSIVE")
-  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive (hack/teardown.sh resets dr/)"; fi
+  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive (hack/teardown.sh --reset resets dr/)"; fi
   sec_end "tracks $BRANCH on your origin; dr/ has $ACTIVE active, $PASSIVE passive"
 
   sec_begin "What is installed" "Installed"
@@ -662,8 +662,8 @@ menu() {
   intro "Build the ACM hub DR exercise" \
     "Sets up two ACM hubs, one active and one passive, and a workload cluster they take turns managing. It installs ACM and OpenShift GitOps where they are missing, connects both hubs to the S3 bucket for backups, imports the workload cluster, deploys the two demo apps and hands each hub's role to git." \
     "" \
-    "It takes 40 to 60 minutes and asks for the S3 keys at the start. The pre-flight check changes nothing: it shows what the build would do."
-  items=("Pre-flight check only (read-only)" "Build" "List the options" "Quit")
+    "It takes 40 to 60 minutes and asks for the S3 keys at the start."
+  items=(Check Build Quit)
   echo
   if [ "$UI" = gum ]; then
     choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
@@ -672,9 +672,8 @@ menu() {
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
-    "Pre-flight check only"*) CHECK=1 ;;
+    Check) CHECK=1 ;;
     Build) ;;
-    "List the options") usage; exit 0 ;;
     *) exit 0 ;;
   esac
 }

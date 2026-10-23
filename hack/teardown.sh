@@ -716,8 +716,7 @@ menu() {
     "Removes what hack/build.sh put on the clusters, including ACM and OpenShift GitOps where the build installed them. ACM or OpenShift GitOps that was there before stays. Other workloads and the S3 bucket always stay, and dr/ in git goes back to the roles the build starts from." \
     "" \
     "With --reset: only the exercise goes (the DR roles, the demo apps, dr/ in git). ACM, OpenShift GitOps, the backup storage and the workload cluster's import stay, so the next build takes minutes." \
-    "With --full: also removes ACM, OpenShift GitOps and the demo whoever installed them, and detaches the workload cluster." \
-    "A dry run changes nothing: it shows what would go and what stays."
+    "With --full: also removes ACM, OpenShift GitOps and the demo whoever installed them, and detaches the workload cluster."
   local items=("Dry run: what the teardown would remove (read-only)" "Dry run with --reset (read-only)" "Dry run with --full (read-only)"
     "Tear down what this repo installed" "Reset the exercise, keep the operators (--reset)" "Tear down with --full" "List the options" "Quit")
   echo
@@ -802,7 +801,7 @@ cmd_git
 if [ "$DRY" = 1 ]; then
   stage "Summary" "Nothing changed: this was a dry run. The log has every 'would' line: ${LOGFILE/#$HOME/\~}"
   steps_end
-  verdict ok "DRY RUN: nothing changed. Run it without --dry-run to remove what the 'would' lines name."
+  verdict ok "DRY RUN: nothing changed. To do what the 'would' lines name: hack/teardown.sh$(mode_flag)"
 else
   summary
 fi
