@@ -10,18 +10,20 @@
 #              GitOps on all three clusters, backup storage, the import of
 #              the workload cluster, the demo apps, the backup roles and the
 #              git-driven dr-role applications; then hack/dr.sh check
-#   --check    read-only pre-flight: what the build would install, reuse or
-#              refuse, and why
-#   --yes      do not ask before installing
+#   --check    the pre-flight, read-only on the clusters: what the build
+#              would install, reuse or refuse, and why
+#   --yes      use the settings file as it is, and do not ask before installing
 #
 # It reuses an ACM or OpenShift GitOps that is already installed (docs/build.md
 # "A hub that already runs ACM"), and it can run again after a stop: every
 # stage skips what is already in place. hack/teardown.sh undoes it.
 # Settings: $DR_ENV (default ~/acm-dr/dr.env; see hack/dr.env.example). On a
-# first run, when there is none, the build asks which contexts are the hubs
-# and the workload cluster, the branch and the bucket, and writes it, with a
-# kubeconfig next to it in which those contexts are named hub-x, hub-y and
-# spoke. It writes APP_URL and PUSH_APP_URL there once the demo apps answer.
+# terminal, the build and the check start with a Settings stage. With no file
+# yet, it asks which contexts are the hubs and the workload cluster, the branch
+# and the bucket, and writes it, with a kubeconfig next to it in which those
+# contexts are named hub-x, hub-y and spoke; with a file, it shows it, to keep
+# or change. The build writes APP_URL and PUSH_APP_URL there once the demo
+# apps answer.
 # S3: S3_URL, S3_BUCKET, S3_PREFIX, S3_REGION and S3_CA_FILE from the settings
 # file (or asked for). The access key and secret key are asked for, or read
 # from S3_ACCESS_KEY and S3_SECRET_KEY in the environment; they go into a
@@ -61,26 +63,48 @@ ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with 
   printf '%s' "$v" | LC_ALL=C sed -E "s#${e}\[[0-9;:?<=>]*[ -/]*[@-~]##g; s#${e}[]P^_X][^${e}${b}]*(${b}|${e}\\\\)?##g; s#\[20[01]~##g" |
     LC_ALL=C tr -cd '[:graph:]'
 }
-pick() {   # pick <question> <choice...>: one of the choices, picked on the terminal
+pick() {   # pick <question> <preselected> <choice...>: one of the choices, picked on the terminal
   local c
-  if [ "$UI" = gum ]; then gum choose --header "$1" "${@:2}" </dev/tty || die "stopped at your request"; return 0; fi
+  if [ "$UI" = gum ]; then gum choose --header "$1" ${2:+--selected "$2"} "${@:3}" </dev/tty || die "stopped at your request"; return 0; fi
   PS3="$1 "
-  select c in "${@:2}"; do if [ -n "$c" ]; then echo "$c"; return 0; fi; done </dev/tty
+  select c in "${@:3}"; do if [ -n "$c" ]; then echo "$c"; return 0; fi; done </dev/tty
   die "stopped at your request"
 }
 url_ok() { [[ $1 =~ ^https?://[^/#[:space:]]+(/[^#[:space:]]*)?$ ]]; }   # url_ok <text>: an http(s) URL the settings file can hold
 set_setting() {   # set_setting <name> <value>: in the settings file
   if grep -q "^$1=" "$DR_ENV"; then sed -i "s#^$1=.*#$1=$2#" "$DR_ENV"; else echo "$1=$2" >>"$DR_ENV"; fi
 }
-first_run() {   # no settings file yet: ask for the clusters, the branch and the bucket, then write it and a kubeconfig for the exercise
-  local src ctxs a p m kc tmp branch bucket prefix region ca n=0
+load_settings() {   # the settings file, into the names the stages use
+  DR_ENV=$(readlink -f "$DR_ENV")
+  # shellcheck source=/dev/null
+  . "$DR_ENV"
+  : "${ACTIVE:?set ACTIVE in $DR_ENV}" "${PASSIVE:?set PASSIVE in $DR_ENV}"
+  MANAGED=${MANAGED:-spoke}
+  BRANCH=${BRANCH:-main}
+  S3_URL=${S3_URL-}
+  S3_BUCKET=${S3_BUCKET:-acm-backups}
+  S3_PREFIX=${S3_PREFIX:-acm}
+  S3_REGION=${S3_REGION:-us-east-1}
+  S3_CA_FILE=${S3_CA_FILE:-}
+  if [ -n "${KUBECONFIG:-}" ]; then export KUBECONFIG; fi
+  HUBS=("$ACTIVE" "$PASSIVE")
+  CLUSTERS=("$ACTIVE" "$PASSIVE" "$MANAGED")
+}
+settings_title() {   # the header's first line, once the settings are known
+  STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " check"; fi) · $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive, $(cl "$MANAGED") workload"
+}
+settings_show() {   # what the settings file holds
+  local at="at ${S3_URL:-AWS S3}" k=${KUBECONFIG:-$HOME/.kube/config}
+  if [ -z "$S3_URL" ] && ! grep -q '^S3_URL=' "$DR_ENV"; then at="endpoint not set yet"; fi
+  line "     kubeconfig  ${k//$HOME/\~}"
+  line "     hubs        $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive"
+  line "     workload    $(cl "$MANAGED")"
+  line "     branch      $BRANCH"
+  line "     storage     s3://$S3_BUCKET/$S3_PREFIX in $S3_REGION, $at${S3_CA_FILE:+, CA file $S3_CA_FILE}"
+}
+ask_settings() {   # ask_settings new|change: ask for the settings, from the file's values (change) or the usual ones (new); write them and the kubeconfig
+  local mode=$1 src ctxs a p m kc tmp branch bucket prefix region url ca n=0 act=hub-x pas=hub-y
   kc=$(dirname "$DR_ENV")/kubeconfig
-  start_screen
-  intro "First run: the settings" \
-    "There is no settings file at ${DR_ENV/#$HOME/\~} yet. Answer a few questions and the build writes it, together with ${kc/#$HOME/\~}: a copy of your kubeconfig in which the two hubs and the workload cluster are named hub-x, hub-y and spoke, the names the repo's manifests and dr/ use. Your own kubeconfig stays as it is." \
-    "" \
-    "The S3 endpoint and keys are asked for when the build starts."
-  echo
   src=${KUBECONFIG:-$HOME/.kube/config}
   while [ "$n" -lt 3 ]; do
     src=$(ask "Your kubeconfig" 0 "${src/#$HOME/\~}")
@@ -89,7 +113,7 @@ first_run() {   # no settings file yet: ask for the clusters, the branch and the
     n=$(grep -c . <<<"$ctxs" || true)
     if [ "$n" -lt 3 ]; then note "${src/#$HOME/\~} has $n contexts: the exercise needs three, two hubs and a workload cluster"; fi
   done
-  branch=$(git branch --show-current 2>/dev/null || echo main)
+  if [ "$mode" = change ]; then branch=$BRANCH; else branch=$(git branch --show-current 2>/dev/null || echo main); fi
   while :; do
     branch=$(ask "Branch the clusters pull from (the targetRevision in your copy)" 0 "$branch")
     git fetch -q origin "$branch" 2>/dev/null || true
@@ -97,78 +121,102 @@ first_run() {   # no settings file yet: ask for the clusters, the branch and the
     note "no branch $branch on origin: push it first, or name another"
   done
   # dr/ on the branch says which hub starts active: hub-x in a fresh copy, hub-y once a failover to it is committed there
-  local BRANCH=$branch act=hub-x pas=hub-y
+  local BRANCH=$branch
   if [[ $(git_role hub-y) == active* ]]; then act=hub-y pas=hub-x; fi
   # shellcheck disable=SC2086 # one context per word
-  a=$(pick "Which context is the hub that starts active ($act)?" $ctxs)
+  a=$(pick "Which context is the hub that starts active ($act)?" "$act" $ctxs)
   # shellcheck disable=SC2046 # one context per word
-  p=$(pick "Which context is the hub that starts passive ($pas)?" $(grep -vx -- "$a" <<<"$ctxs"))
+  p=$(pick "Which context is the hub that starts passive ($pas)?" "$pas" $(grep -vx -- "$a" <<<"$ctxs"))
   # shellcheck disable=SC2046 # one context per word
-  m=$(pick "Which context is the workload cluster (spoke)?" $(grep -vx -e "$a" -e "$p" <<<"$ctxs"))
-  if [ -e "$kc" ]; then confirm "Replace ${kc/#$HOME/\~}?"; fi
-  mkdir -p "$(dirname "$DR_ENV")"
-  tmp=$(mktemp)
-  chmod 600 "$tmp"   # it holds cluster credentials
-  KUBECONFIG=$src oc config view --flatten >"$tmp"
-  # through placeholder names, so that picking hub-y as hub-x (or the like) cannot collide
-  KUBECONFIG=$tmp oc config rename-context "$a" "dr-new-$act" >/dev/null
-  KUBECONFIG=$tmp oc config rename-context "$p" "dr-new-$pas" >/dev/null
-  KUBECONFIG=$tmp oc config rename-context "$m" dr-new-spoke >/dev/null
-  for n in hub-x hub-y spoke; do
-    KUBECONFIG=$tmp oc config delete-context "$n" >/dev/null 2>&1 || true   # one you did not pick, under a name the exercise needs
-    KUBECONFIG=$tmp oc config rename-context "dr-new-$n" "$n" >/dev/null
+  m=$(pick "Which context is the workload cluster (spoke)?" spoke $(grep -vx -e "$a" -e "$p" <<<"$ctxs"))
+  if [ "$(readlink -f "$src")" = "$(readlink -f "$kc")" ] && [ "$a" = "$act" ] && [ "$p" = "$pas" ] && [ "$m" = spoke ]; then
+    finished "${kc/#$HOME/\~}: as it was"
+  else
+    if [ "$mode" = new ] && [ -e "$kc" ]; then confirm "Replace ${kc/#$HOME/\~}?"; fi
+    mkdir -p "$(dirname "$DR_ENV")"
+    tmp=$(mktemp)
+    chmod 600 "$tmp"   # it holds cluster credentials
+    KUBECONFIG=$src oc config view --flatten >"$tmp"
+    # through placeholder names, so that picking hub-y as hub-x (or the like) cannot collide
+    KUBECONFIG=$tmp oc config rename-context "$a" "dr-new-$act" >/dev/null
+    KUBECONFIG=$tmp oc config rename-context "$p" "dr-new-$pas" >/dev/null
+    KUBECONFIG=$tmp oc config rename-context "$m" dr-new-spoke >/dev/null
+    for n in hub-x hub-y spoke; do
+      KUBECONFIG=$tmp oc config delete-context "$n" >/dev/null 2>&1 || true   # one you did not pick, under a name the exercise needs
+      KUBECONFIG=$tmp oc config rename-context "dr-new-$n" "$n" >/dev/null
+    done
+    KUBECONFIG=$tmp oc config use-context "$act" >/dev/null
+    mv "$tmp" "$kc"
+    finished "${kc/#$HOME/\~}: a copy of your kubeconfig, with three contexts renamed"
+    line "     $(cl "$act")  the active hub, your $a"
+    line "     $(cl "$pas")  the passive hub, your $p"
+    line "     $(cl spoke)  the workload cluster, your $m"
+  fi
+  bucket=$(ask "S3 bucket for the backups" 0 "${S3_BUCKET:-acm-backups}")
+  prefix=$(ask "Prefix in the bucket" 0 "${S3_PREFIX:-acm}")
+  region=$(ask "S3 region" 0 "${S3_REGION:-us-east-1}")
+  url=${S3_URL:-}
+  while :; do
+    url=$(ask "S3 endpoint URL (e.g. https://s3.example.com; empty for AWS S3)" 0 "$url")
+    url=${url%/}
+    if [ -z "$url" ] || url_ok "$url"; then break; fi
+    note "'$url' is not an http(s) URL: enter the endpoint only"
   done
-  KUBECONFIG=$tmp oc config use-context "$act" >/dev/null
-  mv "$tmp" "$kc"
-  finished "${kc/#$HOME/\~}: a copy of your kubeconfig, with three contexts renamed"
-  line "     $(cl "$act")  the active hub, your $a"
-  line "     $(cl "$pas")  the passive hub, your $p"
-  line "     $(cl spoke)  the workload cluster, your $m"
-  bucket=$(ask "S3 bucket for the backups" 0 acm-backups)
-  prefix=$(ask "Prefix in the bucket" 0 acm)
-  region=$(ask "S3 region" 0 us-east-1)
-  ca=$(ask "CA file (PEM) of the S3 endpoint; empty if its certificate is publicly trusted" 0 "")
-  while [ -n "$ca" ] && [ ! -f "${ca/#\~/$HOME}" ]; do
+  ca=${S3_CA_FILE:-}
+  while :; do
+    ca=$(ask "CA file (PEM) of the S3 endpoint; empty if its certificate is publicly trusted" 0 "$ca")
+    if [ -z "$ca" ] || [ -f "${ca/#\~/$HOME}" ]; then break; fi
     note "no file at $ca"
-    ca=$(ask "CA file (PEM) of the S3 endpoint; empty if its certificate is publicly trusted" 0 "")
   done
-  sed -e '/^# routes of the two demo apps/,/^$/d' "$REPO/hack/dr.env.example" >"$DR_ENV"   # the build writes the routes
+  if [ "$mode" = new ]; then
+    # the build writes the demo apps' routes once they answer
+    sed -e '/^# routes of the two demo apps/,/^$/d' -e 's/^# S3_URL=.*/S3_URL=/' "$REPO/hack/dr.env.example" >"$DR_ENV"
+    set_setting RUN 1
+  fi
   set_setting KUBECONFIG "${kc/#$HOME/\~}"
   set_setting ACTIVE "$act"
   set_setting PASSIVE "$pas"
   set_setting MANAGED spoke
   set_setting BRANCH "$branch"
-  set_setting RUN 1
+  set_setting S3_URL "$url"
   set_setting S3_BUCKET "$bucket"
   set_setting S3_PREFIX "$prefix"
   set_setting S3_REGION "$region"
   set_setting S3_CA_FILE "$ca"
-  finished "${DR_ENV/#$HOME/\~}: $(cl "$act") active, $(cl "$pas") passive, branch $branch, s3://$bucket/$prefix in $region"
-  DR_CLEAR=0   # the menu goes under these lines, not on a clear screen
+  finished "${DR_ENV/#$HOME/\~}, saved:"
 }
-if [ ! -f "$DR_ENV" ]; then
-  if [ -t 0 ] && [ -t 1 ]; then first_run; else echo "no settings file at $DR_ENV: run hack/build.sh on a terminal to create it (docs/build.md)" >&2; exit 2; fi
-fi
-DR_ENV=$(readlink -f "$DR_ENV")
-# shellcheck source=/dev/null
-. "$DR_ENV"
-: "${ACTIVE:?set ACTIVE in $DR_ENV}" "${PASSIVE:?set PASSIVE in $DR_ENV}"
-MANAGED=${MANAGED:-spoke}
-BRANCH=${BRANCH:-main}
-S3_URL=${S3_URL-}
-S3_BUCKET=${S3_BUCKET:-acm-backups}
-S3_PREFIX=${S3_PREFIX:-acm}
-S3_REGION=${S3_REGION:-us-east-1}
-S3_CA_FILE=${S3_CA_FILE:-}
-if [ -n "${KUBECONFIG:-}" ]; then export KUBECONFIG; fi
+stage_settings() {   # on a terminal, the first stage: write the settings file, or show it and keep or change it
+  if [ ! -f "$DR_ENV" ]; then
+    stage Settings "There is no settings file at ${DR_ENV/#$HOME/\~} yet. Answer a few questions and the build writes it, together with $(dirname "${DR_ENV/#$HOME/\~}")/kubeconfig: a copy of your kubeconfig in which the two hubs and the workload cluster are named hub-x, hub-y and spoke, the names the repo's manifests and dr/ use. Your own kubeconfig stays as it is. hack/dr.sh and hack/teardown.sh read the same file. Nothing changes on the clusters in this stage."
+    echo
+    ask_settings new
+  else
+    stage Settings "The settings file, ${DR_ENV/#$HOME/\~}, names the clusters, the branch they pull from and the backup storage; hack/dr.sh and hack/teardown.sh read it too. Keep it, or change it: the questions start from what it holds. Nothing changes on the clusters in this stage."
+    echo
+    settings_show
+    echo
+    if [ "$(pick "Use these settings?" "" Keep Change)" = Keep ]; then
+      logln "   kept"
+      return 0
+    fi
+    if [ "$PIN" = 1 ]; then pin_clear; stage_head Settings; fi   # the questions on an empty window
+    explain "Each question starts from what the settings file holds: Enter keeps it."
+    echo
+    ask_settings change
+  fi
+  load_settings
+  settings_title
+  pin_draw
+  settings_show
+  go_on "$(stage_name 2 Pre-flight)"
+}
+if [ -f "$DR_ENV" ]; then load_settings; fi
 
 PV=acm-gitops-failover
 SUB=subscriptions.operators.coreos.com
 CSV=clusterserviceversions.operators.coreos.com
 IPLAN=installplans.operators.coreos.com
 MCH=multiclusterhubs.operator.open-cluster-management.io
-HUBS=("$ACTIVE" "$PASSIVE")
-CLUSTERS=("$ACTIVE" "$PASSIVE" "$MANAGED")
 A_BACKUP=acm-gitops-failover/cluster-backup
 A_APPROVAL=acm-gitops-failover/install-plan-approval
 TMP=$(mktemp -d)
@@ -302,19 +350,21 @@ apply_import() { oc --context "$ACTIVE" apply -f "$1"; }
 
 # --- pre-flight ---------------------------------------------------------------------
 
-STAGES=(Pre-flight ACM "OpenShift GitOps" "Backup storage" "Import $MANAGED" "Demo apps" "Backup roles" "dr/ roles" Check)
-STAGE=0
+STAGES=() STAGE=0 PRE=1   # PRE: the pre-flight's stage number
 stage() {   # stage <title> <what and why>
-  if [ "$STAGE" -ge 2 ]; then go_on "$(stage_name $((STAGE + 1)) "$1")"; fi   # after the pre-flight, the build's own confirm
+  if [ "$STAGE" -gt "$PRE" ]; then go_on "$(stage_name $((STAGE + 1)) "$1")"; fi   # after the settings, its own; after the pre-flight, the build's confirm
   STAGE=$((STAGE + 1))
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
+  stage_head "$1"
+  explain "$2"
+}
+stage_head() {   # stage_head <title>: the current stage's heading
   if [ "$UI" = gum ]; then
     printf '\n %s── %s%s\n' "$C_B$C_ACC" "$(paint "$(stage_name "$STAGE" "$1")" "$C_B$C_ACC")" "$C_OFF"
   else
     printf '\n#### %s\n' "$(bare "$(stage_name "$STAGE" "$1")")"
   fi
-  explain "$2"
 }
 
 declare -A ACM_NS ACM_HAS GITOPS_HAS GITOPS_PIN
@@ -792,14 +842,12 @@ on_exit() {
 trap on_exit EXIT
 start_screen
 if [ "$ARGC" = 0 ]; then
-  if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
+  if [ -t 0 ] && [ -t 1 ]; then menu; else usage; DIED=1; exit 2; fi
 fi
-for c in "${CLUSTERS[@]}"; do
-  grep -qx -- "$c" <<<"$(oc config get-contexts -o name)" || { echo "no kubeconfig context named '$c' (KUBECONFIG=${KUBECONFIG:-default})" >&2; exit 2; }
-done
-if [ "$ACTIVE" = "$PASSIVE" ] || [ "$ACTIVE" = "$MANAGED" ] || [ "$PASSIVE" = "$MANAGED" ]; then
-  echo "ACTIVE, PASSIVE and MANAGED must be three different contexts" >&2
-  exit 2
+ASK=0   # on a terminal, the settings are the first stage
+if [ "$YES" = 0 ] && [ -t 0 ] && [ -t 1 ]; then ASK=1; fi
+if [ ! -f "$DR_ENV" ] && [ "$ASK" = 0 ]; then
+  die "no settings file at $DR_ENV: run hack/build.sh on a terminal, without --yes, and it asks for them (docs/build.md)"
 fi
 mkdir -p "$HOME/acm-dr/logs"
 LOGFILE=$HOME/acm-dr/logs/build$(if [ "$CHECK" = 1 ]; then echo -check; fi)-$(date -u +%Y%m%dT%H%M%SZ).log
@@ -810,14 +858,24 @@ trap 'exit 130' INT TERM
 set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
-if [ "$CHECK" = 1 ]; then STAGES=(Pre-flight); fi   # --check runs only the pre-flight: its plan says what the other stages would do
-STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " check"; fi) · $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive, $(cl "$MANAGED") workload"
+# --check runs only the pre-flight: its plan says what the other stages would do
+if [ "$CHECK" = 1 ]; then STAGES=(Pre-flight); else STAGES=(Pre-flight ACM "OpenShift GitOps" "Backup storage" "Import ${MANAGED:-spoke}" "Demo apps" "Backup roles" "dr/ roles" Check); fi
+if [ "$ASK" = 1 ]; then STAGES=(Settings "${STAGES[@]}") PRE=2; fi
+if [ -f "$DR_ENV" ]; then settings_title; else STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " check"; fi) · new settings"; fi
 steps_pin   # the stages stay at the top, and the output stays in the window under them
+
+if [ "$ASK" = 1 ]; then stage_settings; fi
+for c in "${CLUSTERS[@]}"; do
+  grep -qx -- "$c" <<<"$(oc config get-contexts -o name)" || die "no kubeconfig context named '$c' (KUBECONFIG=${KUBECONFIG:-default})"
+done
+if [ "$ACTIVE" = "$PASSIVE" ] || [ "$ACTIVE" = "$MANAGED" ] || [ "$PASSIVE" = "$MANAGED" ]; then
+  die "ACTIVE, PASSIVE and MANAGED must be three different contexts ($DR_ENV)"
+fi
 
 if ! preflight; then DIED=1; exit 1; fi
 if [ "$CHECK" = 1 ]; then
   steps_end
-  finished "pre-flight only: nothing changed. Log: ${LOGFILE/#$HOME/\~}"
+  finished "pre-flight only: nothing changed on the clusters. Log: ${LOGFILE/#$HOME/\~}"
   exit 0
 fi
 confirm "Build it: install and configure what the plan lists on $(cl "$ACTIVE"), $(cl "$PASSIVE") and $(cl "$MANAGED")?"
