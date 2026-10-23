@@ -34,9 +34,9 @@ hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr
 With [gum](https://github.com/charmbracelet/gum) installed, the script
 shows a stage tracker, a spinner with the elapsed time while it waits,
 a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
-timing table at the end. Each stage starts on a clear screen. From the
-outage on, the top of the screen stays put: the stage tracker and the
-time since the run started, the current step, both probes' samples and
+timing table at the end. Each stage starts on a clear screen. During a
+run the top of the screen stays put: the stage tracker and the time
+since the run started, the current step, both probes' samples and
 failures, which hub `$MANAGED` reports to and which revisions are
 served, and the last milestone. The output scrolls under it. What
 scrolls off is gone from the screen but kept in `console.log`; the
