@@ -46,8 +46,10 @@ served, and the last milestone. The output scrolls under it. What
 scrolls off is gone from the screen but kept in `console.log`; the
 summary at the end scrolls as usual, so the scrollback keeps it. The
 pinned header needs a terminal of at least 72 columns and 22 lines, and
-`DR_PIN=0` turns it off. Without gum, or with `DR_PLAIN=1`, the script
-prints the same steps as plain text.
+`DR_PIN=0` turns it off. With gum, a pre-flight section that is all
+green, in a run or in `hack/dr.sh check`, collapses to one line: its
+heading, a ✓ and what it found. Without gum, or with `DR_PLAIN=1`, the
+script prints the same steps as plain text.
 
 Each stage opens with a paragraph on what it is about to do and why, and
 each step with a line or two, so a run can be followed (or presented)

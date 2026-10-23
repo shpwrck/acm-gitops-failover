@@ -159,7 +159,7 @@ stage() {   # stage <n>: where the run stands. With gum, each stage after the fi
 stage_text() {   # stage_text <n>: what the stage does and why
   local a=$ACTIVE p=$PASSIVE
   case $1 in
-    1) echo "Read-only checks that the lab is in the posture the settings file names, so the outage tests DR and not a broken lab. Nothing on the clusters changes here. A section that is all green shows as one line; one with a RED line or a note shows in full." ;;
+    1) echo "Read-only checks that the lab is in the posture the settings file names, so the outage tests DR and not a broken lab. Nothing on the clusters changes here. A section that is all green collapses to its heading, a ✓ and what it found; one with a RED line or a note shows in full." ;;
     2) echo "The probes start: every 10 s until the summary they record both apps' HTTP status, which hub $(cl "$MANAGED") reports to, and what each app serves. Then an etcd backup of $(cl "$a") as a lab safety net, a wait for a cut time clear of the :00/:30 backup slots, and your power cut. The apps on $(cl "$MANAGED") should not notice." ;;
     3) echo "With no hub alive, the script commits a new REVISION of both apps to $BRANCH. The pull app is delivered by $(cl "$MANAGED")'s own Argo CD straight from git, so it updates with no hub at all, within one Argo poll (up to about 6.5 min). The push app is delivered by a hub's Argo CD, so it stays on the old revision until $(cl "$p") is active: that wait is the push model's delivery RTO." ;;
     4)
@@ -289,7 +289,7 @@ expect() {   # expect <ok text> <red text> <command...>: one pre-flight line
 cmd_check() {
   local a=${1:-$ACTIVE} p=${2:-$PASSIVE} c out newest rp="" rq=""
   BAD=0
-  sec_begin "Clusters" "Clusters"
+  sec_begin "Clusters"
   explain "All three clusters must be up and settled: an API that answers, nodes Ready and no certificate requests waiting (a cluster that was powered off for a while usually has some)."
   help_at docs/build.md#clusters
   for c in "$a" "$p" "$MANAGED"; do
@@ -302,7 +302,7 @@ cmd_check() {
   done
   sec_end "APIs answer, nodes Ready, no pending certificates"
 
-  sec_begin "Posture: $(cl "$a") active, $(cl "$p") passive (0.1)" "Posture"
+  sec_begin "Posture: $(cl "$a") active, $(cl "$p") passive (0.1)"
   explain "Exactly one hub may be active. $(cl "$a") must be taking backups and managing $(cl "$MANAGED"); $(cl "$p") must be restoring those backups continuously, with no backup schedule of its own and no claim on $(cl "$MANAGED")."
   help_at docs/runbooks/dr-failover-pull-manual/README.md#01-posture-sanity
   expect "$(cl "$a") schedule-acm Enabled" "$(cl "$a") schedule-acm is '$(phase "$a" "$BSCHED" schedule-acm)'" schedule_enabled "$a"
@@ -318,7 +318,7 @@ cmd_check() {
   fi
   sec_end "$(cl "$a") backing up, $(cl "$p") restoring, $(cl "$MANAGED") on $(cl "$a") only"
 
-  sec_begin "MSA token chain (0.2)" "Import token"
+  sec_begin "MSA token chain (0.2)"
   explain "The new hub re-imports $(cl "$MANAGED") with the auto-import token it restores from the backups. The token must be valid and rotating, or the failover stalls in Pending Import."
   help_at docs/runbooks/dr-failover-pull-manual/README.md#02-msa-token-chain--the-load-bearing-check
   expect "auto-import-account on $(cl "$a"): $(msa_token "$a")" \
@@ -326,7 +326,7 @@ cmd_check() {
   out=$(msa_token "$a")
   sec_end "valid until ${out:5:10} ${out:16:5}"
 
-  sec_begin "Backups (0.3)" "Backups"
+  sec_begin "Backups (0.3)"
   explain "A failover restores the newest backup set, so one must have completed recently (sets run at :00 and :30)."
   help_at docs/runbooks/dr-failover-pull-manual/README.md#03-a-backup-newer-than-every-fix
   out=$(oc --context "$a" get "$VBACKUP" -n "$NS" -o json 2>/dev/null | jq -r '
@@ -345,7 +345,7 @@ cmd_check() {
   fi
   sec_end "newest set Completed, started ${out:21:8}"
 
-  sec_begin "Passive hub readiness (0.4)" "Passive hub"
+  sec_begin "Passive hub readiness (0.4)"
   explain "Things that would only break at activation: the addon namespace, a stray Route CRD, $(cl "$p")'s Argo CD, and both hubs' access to the backup bucket."
   help_at docs/runbooks/dr-failover-pull-manual/README.md#04-remaining-static-checks
   expect "$(cl "$p") has namespace open-cluster-management-global-set" "$(cl "$p") lacks namespace open-cluster-management-global-set" \
@@ -361,7 +361,7 @@ cmd_check() {
   sec_end "$(cl "$p") ready to activate; both hubs reach the bucket"
 
   if has_dr_role "$a" || has_dr_role "$p"; then
-    sec_begin "Git-driven roles (Automated Pull Path P.2 and pre-flight)" "Git-driven roles"
+    sec_begin "Git-driven roles (Automated Pull Path P.2 and pre-flight)"
     explain "Each hub's own Argo CD (the dr-role app) applies its role from dr/ in git. Both must be in sync with automation on, and dr-role must never be in a backup, or a restore would hand the other hub the wrong role."
     help_at docs/runbooks/dr-failover-pull-gitops/README.md#p1-bootstrap-each-hubs-dr-role-application
     for c in "$a" "$p"; do
@@ -384,7 +384,7 @@ cmd_check() {
     sec_end "dr-role synced and automated on both hubs, kept out of backups"
   fi
 
-  sec_begin "Workload" "Demo apps"
+  sec_begin "Workload"
   explain "The two demo apps on $(cl "$MANAGED"): the pull app, delivered by $(cl "$MANAGED")'s own Argo CD, and the push app, delivered by $(cl "$a")'s Argo CD. Both must answer and be in sync before the outage, or the probes prove nothing."
   help_at docs/build.md#5-active-hub-gitops-wiring-and-the-demo-apps
   rp=$(revision "$APP_URL")
@@ -1009,7 +1009,7 @@ cmd_run() {
     "The script pauses when it needs you: $stops.$(if [ "$YES" = 0 ]; then echo " Between stages it waits for Continue."; fi)" \
     "Logs: ${LOGDIR/#$HOME/\~}"
   stage 1
-  if ! COMPACT=1 cmd_check; then
+  if ! cmd_check; then
     pinned=$PIN
     pin_off
     if [ "$pinned" = 1 ] && [ ${#RED_LIST[@]} -gt 0 ]; then   # the RED lines may have scrolled off

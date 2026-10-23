@@ -128,8 +128,9 @@ hack/build.sh           # a menu; --yes builds without asking
 With gum, the script starts on a clear screen and keeps the top of the
 screen in place: the nine stages (done, current and to come) and the
 time since it started. Each stage starts on an empty
-window under it, and a pre-flight section that is all green shows as one
-line, so the output stays in the window; the log keeps everything,
+window under it, and a pre-flight section that is all green collapses
+to one line (its heading, a ✓ and what it found), so the output stays in
+the window; the log keeps everything,
 including what a later stage cleared from the screen. Before each stage
 after the ACM one, it waits for you to pick Continue, so you can read
 what the last stage did before the window clears; `--yes` runs straight

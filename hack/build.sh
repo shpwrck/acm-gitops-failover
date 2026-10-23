@@ -225,7 +225,7 @@ preflight() {
   BAD=0
   stage "Pre-flight (read-only)" "Checks that the three clusters are healthy, that your copy of the repo is what the clusters will pull from, and what is installed already. It decides what the build installs and what it reuses, and refuses what would break: a hub that another hub manages, $(cl "$MANAGED") managed by some other hub, or two hubs on different ACM versions. Nothing changes in this stage."
 
-  sec_begin "Clusters" "Clusters"
+  sec_begin "Clusters"
   explain "All three must answer, with nodes Ready, no certificate requests waiting, and every cluster operator Available and not Degraded. A cluster that has just been installed or powered on takes 10 to 20 minutes to settle."
   help_at docs/build.md#clusters
   for c in "${CLUSTERS[@]}"; do
@@ -237,7 +237,7 @@ preflight() {
   sec_end "APIs answer, nodes Ready, cluster operators settled"
   if [ "$BAD" = 1 ]; then HELP=""; verdict bad "BUILD RED: the clusters must be up and settled first"; return 1; fi
 
-  sec_begin "Your copy of the repo" "Repo"
+  sec_begin "Your copy of the repo"
   explain "The demo apps and the dr-role applications pull from the repoURL and targetRevision in the manifests, so they must name your copy and the branch the settings file names. dr/ in git must give $(cl "$ACTIVE") the active role and $(cl "$PASSIVE") the passive one, as the settings file does: each hub's dr-role application applies exactly what git says."
   help_at README.md#getting-started
   git fetch -q origin "$BRANCH" 2>/dev/null || true
@@ -264,7 +264,7 @@ preflight() {
   if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $(cl "$PASSIVE") passive (hack/teardown.sh --reset resets dr/)"; fi
   sec_end "tracks $BRANCH on your origin; dr/ has $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive"
 
-  sec_begin "What is installed" "Installed"
+  sec_begin "What is installed"
   explain "An ACM or OpenShift GitOps that is already there is reused, not installed again. Both hubs must end up on the same ACM version (a backup does not restore on an older one), so the build pins both to one version with Manual approval: the installed one if a hub has ACM, otherwise the newest in channel $ACM_CHANNEL."
   help_at docs/build.md#1-hubs-acm-with-the-backup-component
   for c in "${HUBS[@]}"; do
@@ -349,7 +349,7 @@ preflight() {
   fi
   sec_end "nothing in the way; the plan below lists what is reused"
 
-  sec_begin "$(cl "$MANAGED")" "$(cl "$MANAGED")"
+  sec_begin "$(cl "$MANAGED")"
   explain "$(cl "$MANAGED") must be managed by $(cl "$ACTIVE") or by no hub at all, and the passive hub must not list it: one cluster, one hub."
   help_at docs/build.md#4-active-hub-import-the-spoke
   x=$(klusterlet_hub "$MANAGED")
@@ -385,7 +385,7 @@ preflight() {
   done
   sec_end "$v; no other hub claims it"
 
-  sec_begin "Backup storage" "Backup storage"
+  sec_begin "Backup storage"
   explain "Both hubs write to and read from one S3 bucket. The endpoint and bucket come from the settings file; the keys are asked for when the build starts."
   help_at docs/build.md#3-hubs-backup-storage
   if [ -n "${ACM_HAS[$ACTIVE]}" ] && [ -n "${ACM_HAS[$PASSIVE]}" ] &&
@@ -648,7 +648,7 @@ stage_roles() {
 
 stage_check() {
   stage Check "Runs hack/dr.sh check, the pre-flight every exercise starts with, against what was just built."
-  if DR_CLEAR=0 COMPACT=$PIN bash "$REPO/hack/dr.sh" check; then
+  if DR_CLEAR=0 bash "$REPO/hack/dr.sh" check; then
     steps_end
     box rounded 10 "Build done in $(dur $((SECONDS - T0))): $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive" \
       "Next: hack/dr.sh, then pick a run from the menu (docs/runbooks)." "Log: $LOGFILE"
@@ -724,7 +724,6 @@ T0=$SECONDS
 if [ "$CHECK" = 1 ]; then STAGES=(Pre-flight); fi   # --check runs only the pre-flight: its plan says what the other stages would do
 STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " check"; fi) · $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive, $(cl "$MANAGED") workload"
 steps_pin   # the stages stay at the top, and the output stays in the window under them
-COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if ! preflight; then DIED=1; exit 1; fi
 if [ "$CHECK" = 1 ]; then
