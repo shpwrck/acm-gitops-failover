@@ -185,19 +185,19 @@ table() {   # table: tab-separated rows on stdin, the first one the header
   fi
 }
 
-# Sections of checks: with COMPACT=1 and gum, a section whose checks are
-# all green shows as one line; one with a RED line or a note shows in
-# full. The log gets every line either way.
-SEC=0 SEC_T="" SEC_FILE="" SEC_OK=0 SEC_RED=0 SEC_NOTE=0 SEC_LAST=""
-sec_begin() {   # sec_begin <heading> <short name>: a section of checks, held back until sec_end
-  if [ "${COMPACT:-0}" != 1 ] || [ "$UI" != gum ]; then say "$1"; return 0; fi
-  SEC=1 SEC_T=$2 SEC_OK=0 SEC_RED=0 SEC_NOTE=0
+# Sections of checks: with gum, a section whose checks are all green
+# collapses to its heading, a ✓ and what it found; one with a RED line or
+# a note shows in full. The log gets every line either way.
+SEC=0 SEC_H="" SEC_FILE="" SEC_OK=0 SEC_RED=0 SEC_NOTE=0 SEC_LAST=""
+sec_begin() {   # sec_begin <heading>: a section of checks, held back until sec_end
+  if [ "$UI" != gum ]; then say "$1"; return 0; fi
+  SEC=1 SEC_H=$1 SEC_OK=0 SEC_RED=0 SEC_NOTE=0
   SEC_FILE=$(mktemp)
   exec 5>&1 1>"$SEC_FILE"
   say "$1"
 }
 sec_end() {   # sec_end <what was found>: the section in full, or one line when it is all green
-  local t
+  local h w
   if [ "$SEC" != 1 ]; then return 0; fi
   exec 1>&5 5>&-
   SEC=0
@@ -207,8 +207,11 @@ sec_end() {   # sec_end <what was found>: the section in full, or one line when 
   else
     if [ "$SEC_LAST" != line ]; then echo; fi   # a run of one-line sections starts after a blank line
     SEC_LAST=line
-    t=$(bare "$SEC_T")
-    printf '   %s✓%s %s%s%s%*s %s\n' "$C_OK" "$C_OFF" "$C_B" "$(paint "$SEC_T" "$C_B")" "$C_OFF" $((17 - ${#t})) "" "$(fit $(($(cols) - 24)) "$1")"
+    h=$(bare "$SEC_H")
+    w=$(($(cols) - ${#h} - 8))
+    printf ' %s▍%s%s%s %s✓%s' "$C_ACC" "$C_B" "$(paint "$SEC_H" "$C_ACC$C_B")" "$C_OFF" "$C_OK" "$C_OFF"
+    if [ -n "${1:-}" ] && [ "$w" -ge 12 ]; then printf ' %s%s%s' "$C_DIM" "$(fit "$w" "$1" "$C_DIM")" "$C_OFF"; fi
+    echo
   fi
   rm -f "$SEC_FILE"
 }

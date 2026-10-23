@@ -235,7 +235,7 @@ preflight() {
   else
     echo "Without --full, only what carries this repo's label goes (every manifest in manifests/ and dr/ has it), plus ACM and OpenShift GitOps where hack/build.sh installed them. An ACM or OpenShift GitOps that was there before the build stays, and so does everything else on the clusters."
   fi) It refuses when removing ACM or OpenShift GitOps would take something that is not this repo's with it. Nothing changes in this stage."
-  sec_begin "Clusters" "Clusters"
+  sec_begin "Clusters"
   help_at docs/build.md#clusters
   for c in "${CLUSTERS[@]}"; do
     if alive "$c"; then ok "$(cl "$c") API answers"; else red "$(cl "$c") API does not answer"; blockers=1; fi
@@ -324,7 +324,7 @@ preflight() {
   printf 'Cluster\tWhat\tPlan\tWhy\n%s' "$PLAN_ROWS" | table
 
   if [ "$RESET" = 1 ]; then HELP=""; return 0; fi   # ACM and OpenShift GitOps stay
-  sec_begin "Would removing ACM or OpenShift GitOps take anything else with it?" "Nothing else"
+  sec_begin "Would removing ACM or OpenShift GitOps take anything else with it?"
   explain "Removing ACM detaches every cluster it manages, and removing OpenShift GitOps deletes every Argo CD application on that cluster. So both must find nothing that is not this repo's."
   help_at docs/build.md#what-the-teardown-refuses
   for c in "${HUBS[@]}"; do
@@ -778,7 +778,6 @@ trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
 STEPS_TITLE="Teardown$(mode_flag)$(if [ "$DRY" = 1 ]; then echo " dry run"; fi) · $(cl "$ACTIVE"), $(cl "$PASSIVE"), $(cl "$MANAGED")"
 steps_pin   # the stages stay at the top, and the output stays in the window under them
-COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if [ "$DRY" = 1 ]; then
   box rounded 13 "Dry run$(if [ -n "$(mode_flag)" ]; then echo " with$(mode_flag)"; fi): nothing changes" \
