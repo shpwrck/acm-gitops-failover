@@ -105,17 +105,6 @@ argocd_ready() { [ "$(oc --context "$1" get argocds.argoproj.io openshift-gitops
 app_done() {   # app_done <context> <application>: synced once, Synced and Healthy
   [ "$(oc --context "$1" get "$APP" "$2" -n "$GNS" -o jsonpath='{.status.operationState.phase} {.status.sync.status} {.status.health.status}' 2>/dev/null)" = "Succeeded Synced Healthy" ]
 }
-git_role() {   # git_role <hub>: active, passive or something else, as dr/<hub> lists it on origin/$BRANCH
-  local k
-  k=$(git show "origin/$BRANCH:dr/$1/kustomization.yaml" 2>/dev/null | sed -n 's/^  - //p' | paste -sd' ' -)
-  case $k in
-    ../roles/active) echo active ;;
-    ../roles/passive) echo passive ;;
-    "../roles/active restore-activate-"*) echo "active with ${k#../roles/active }" ;;   # promoted by a git-driven failover
-    "") echo missing ;;
-    *) echo "'$k'" ;;
-  esac
-}
 manifest_value() { awk -v k="$2:" '$1 == k {print $2; exit}' "$1"; }   # manifest_value <file> <key>: its first value
 
 # --- doing it --------------------------------------------------------------------
@@ -246,11 +235,11 @@ preflight() {
   if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"
   elif [[ $x == "active with "* ]]; then
     help_at docs/build.md#7-git-driven-paths-only-bootstrap-dr
-    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. Remove the file and its entry on $BRANCH"
+    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. hack/teardown.sh resets dr/ on $BRANCH; or remove the file and its entry there by hand"
     help_at dr/README.md
-  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active"; fi
+  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active (hack/teardown.sh resets dr/)"; fi
   x=$(git_role "$PASSIVE")
-  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive"; fi
+  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive (hack/teardown.sh resets dr/)"; fi
 
   say "What is installed"
   explain "An ACM or OpenShift GitOps that is already there is reused, not installed again. Both hubs must end up on the same ACM version (a backup does not restore on an older one), so the build pins both to one version with Manual approval: the installed one if a hub has ACM, otherwise the newest in channel $ACM_CHANNEL."

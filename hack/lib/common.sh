@@ -368,3 +368,14 @@ orphan_agent() {   # orphan_agent <context>: the cluster's own agent with no hub
 }
 
 repo_url() { git remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##'; }
+git_role() {   # git_role <hub>: active, passive or something else, as dr/<hub> lists it on origin/$BRANCH
+  local k
+  k=$(git show "origin/$BRANCH:dr/$1/kustomization.yaml" 2>/dev/null | sed -n 's/^  - //p' | paste -sd' ' -)
+  case $k in
+    ../roles/active) echo active ;;
+    ../roles/passive) echo passive ;;
+    "../roles/active restore-activate-"*) echo "active with ${k#../roles/active }" ;;   # promoted by a git-driven failover
+    "") echo missing ;;
+    *) echo "'$k'" ;;
+  esac
+}
