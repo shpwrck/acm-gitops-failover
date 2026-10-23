@@ -17,8 +17,11 @@
 # It reuses an ACM or OpenShift GitOps that is already installed (docs/build.md
 # "A hub that already runs ACM"), and it can run again after a stop: every
 # stage skips what is already in place. hack/teardown.sh undoes it.
-# Settings: $DR_ENV (default ~/acm-dr/dr.env; see hack/dr.env.example). The
-# build writes APP_URL and PUSH_APP_URL there once the demo apps answer.
+# Settings: $DR_ENV (default ~/acm-dr/dr.env; see hack/dr.env.example). On a
+# first run, when there is none, the build asks which contexts are the hubs
+# and the workload cluster, the branch and the bucket, and writes it, with a
+# kubeconfig next to it in which those contexts are named hub-x, hub-y and
+# spoke. It writes APP_URL and PUSH_APP_URL there once the demo apps answer.
 # S3: S3_URL, S3_BUCKET, S3_PREFIX, S3_REGION and S3_CA_FILE from the settings
 # file (or asked for). The access key and secret key are asked for, or read
 # from S3_ACCESS_KEY and S3_SECRET_KEY in the environment; they go into a
@@ -29,19 +32,6 @@ set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SELF=$REPO/hack/build.sh
 DR_ENV=${DR_ENV:-$HOME/acm-dr/dr.env}
-[ -f "$DR_ENV" ] || { echo "no settings file at $DR_ENV: copy hack/dr.env.example there and edit it" >&2; exit 2; }
-DR_ENV=$(readlink -f "$DR_ENV")
-# shellcheck source=/dev/null
-. "$DR_ENV"
-: "${ACTIVE:?set ACTIVE in $DR_ENV}" "${PASSIVE:?set PASSIVE in $DR_ENV}"
-MANAGED=${MANAGED:-spoke}
-BRANCH=${BRANCH:-main}
-S3_URL=${S3_URL-}
-S3_BUCKET=${S3_BUCKET:-acm-backups}
-S3_PREFIX=${S3_PREFIX:-acm}
-S3_REGION=${S3_REGION:-us-east-1}
-S3_CA_FILE=${S3_CA_FILE:-}
-if [ -n "${KUBECONFIG:-}" ]; then export KUBECONFIG; fi
 cd "$REPO"
 
 CHECK=0 YES=0 ARGC=$#
@@ -55,6 +45,122 @@ done
 
 # shellcheck source=hack/lib/common.sh
 . "$REPO/hack/lib/common.sh"
+
+# --- settings ----------------------------------------------------------------------
+
+ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with only its printable characters
+  local v="" e=$'\e' b=$'\a'
+  if [ "$UI" = gum ]; then
+    # no placeholder: its first letter, under the cursor, reads as typed text
+    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --header "$1" </dev/tty); else v=$(gum input --placeholder "" --value "${3:-}" --header "$1" </dev/tty); fi
+  else
+    if [ "$2" = 1 ]; then read -rsp "$1: " v </dev/tty; echo >/dev/tty; else read -rp "$1${3:+ [$3]}: " v </dev/tty; v=${v:-${3:-}}; fi
+  fi
+  # a pasted line break comes back as a space, and a terminal can slip in escape sequences:
+  # none of them belong in a URL or a key
+  printf '%s' "$v" | LC_ALL=C sed -E "s#${e}\[[0-9;:?<=>]*[ -/]*[@-~]##g; s#${e}[]P^_X][^${e}${b}]*(${b}|${e}\\\\)?##g; s#\[20[01]~##g" |
+    LC_ALL=C tr -cd '[:graph:]'
+}
+pick() {   # pick <question> <choice...>: one of the choices, picked on the terminal
+  local c
+  if [ "$UI" = gum ]; then gum choose --header "$1" "${@:2}" </dev/tty || die "stopped at your request"; return 0; fi
+  PS3="$1 "
+  select c in "${@:2}"; do if [ -n "$c" ]; then echo "$c"; return 0; fi; done </dev/tty
+  die "stopped at your request"
+}
+url_ok() { [[ $1 =~ ^https?://[^/#[:space:]]+(/[^#[:space:]]*)?$ ]]; }   # url_ok <text>: an http(s) URL the settings file can hold
+set_setting() {   # set_setting <name> <value>: in the settings file
+  if grep -q "^$1=" "$DR_ENV"; then sed -i "s#^$1=.*#$1=$2#" "$DR_ENV"; else echo "$1=$2" >>"$DR_ENV"; fi
+}
+first_run() {   # no settings file yet: ask for the clusters, the branch and the bucket, then write it and a kubeconfig for the exercise
+  local src ctxs a p m kc tmp branch bucket prefix region ca n=0
+  kc=$(dirname "$DR_ENV")/kubeconfig
+  start_screen
+  intro "First run: the settings" \
+    "There is no settings file at ${DR_ENV/#$HOME/\~} yet. Answer a few questions and the build writes it, together with ${kc/#$HOME/\~}: a copy of your kubeconfig in which the two hubs and the workload cluster are named hub-x, hub-y and spoke, the names the repo's manifests and dr/ use. Your own kubeconfig stays as it is." \
+    "" \
+    "The S3 endpoint and keys are asked for when the build starts."
+  echo
+  src=${KUBECONFIG:-$HOME/.kube/config}
+  while [ "$n" -lt 3 ]; do
+    src=$(ask "Your kubeconfig" 0 "${src/#$HOME/\~}")
+    src=${src/#\~/$HOME}
+    ctxs=$(KUBECONFIG=$src oc config get-contexts -o name 2>/dev/null) || ctxs=""
+    n=$(grep -c . <<<"$ctxs" || true)
+    if [ "$n" -lt 3 ]; then note "${src/#$HOME/\~} has $n contexts: the exercise needs three, two hubs and a workload cluster"; fi
+  done
+  branch=$(git branch --show-current 2>/dev/null || echo main)
+  while :; do
+    branch=$(ask "Branch the clusters pull from (the targetRevision in your copy)" 0 "$branch")
+    git fetch -q origin "$branch" 2>/dev/null || true
+    if git rev-parse -q --verify "origin/$branch" >/dev/null; then break; fi
+    note "no branch $branch on origin: push it first, or name another"
+  done
+  # dr/ on the branch says which hub starts active: hub-x in a fresh copy, hub-y once a failover to it is committed there
+  local BRANCH=$branch act=hub-x pas=hub-y
+  if [[ $(git_role hub-y) == active* ]]; then act=hub-y pas=hub-x; fi
+  # shellcheck disable=SC2086 # one context per word
+  a=$(pick "Which context is the hub that starts active ($act)?" $ctxs)
+  # shellcheck disable=SC2046 # one context per word
+  p=$(pick "Which context is the hub that starts passive ($pas)?" $(grep -vx -- "$a" <<<"$ctxs"))
+  # shellcheck disable=SC2046 # one context per word
+  m=$(pick "Which context is the workload cluster (spoke)?" $(grep -vx -e "$a" -e "$p" <<<"$ctxs"))
+  if [ -e "$kc" ]; then confirm "Replace ${kc/#$HOME/\~}?"; fi
+  mkdir -p "$(dirname "$DR_ENV")"
+  tmp=$(mktemp)
+  chmod 600 "$tmp"   # it holds cluster credentials
+  KUBECONFIG=$src oc config view --flatten >"$tmp"
+  # through placeholder names, so that picking hub-y as hub-x (or the like) cannot collide
+  KUBECONFIG=$tmp oc config rename-context "$a" "dr-new-$act" >/dev/null
+  KUBECONFIG=$tmp oc config rename-context "$p" "dr-new-$pas" >/dev/null
+  KUBECONFIG=$tmp oc config rename-context "$m" dr-new-spoke >/dev/null
+  for n in hub-x hub-y spoke; do
+    KUBECONFIG=$tmp oc config delete-context "$n" >/dev/null 2>&1 || true   # one you did not pick, under a name the exercise needs
+    KUBECONFIG=$tmp oc config rename-context "dr-new-$n" "$n" >/dev/null
+  done
+  KUBECONFIG=$tmp oc config use-context "$act" >/dev/null
+  mv "$tmp" "$kc"
+  finished "${kc/#$HOME/\~}: a copy of your kubeconfig, with three contexts renamed"
+  line "     $(cl "$act")  the active hub, your $a"
+  line "     $(cl "$pas")  the passive hub, your $p"
+  line "     $(cl spoke)  the workload cluster, your $m"
+  bucket=$(ask "S3 bucket for the backups" 0 acm-backups)
+  prefix=$(ask "Prefix in the bucket" 0 acm)
+  region=$(ask "S3 region" 0 us-east-1)
+  ca=$(ask "CA file (PEM) of the S3 endpoint; empty if its certificate is publicly trusted" 0 "")
+  while [ -n "$ca" ] && [ ! -f "${ca/#\~/$HOME}" ]; do
+    note "no file at $ca"
+    ca=$(ask "CA file (PEM) of the S3 endpoint; empty if its certificate is publicly trusted" 0 "")
+  done
+  sed -e '/^# routes of the two demo apps/,/^$/d' "$REPO/hack/dr.env.example" >"$DR_ENV"   # the build writes the routes
+  set_setting KUBECONFIG "${kc/#$HOME/\~}"
+  set_setting ACTIVE "$act"
+  set_setting PASSIVE "$pas"
+  set_setting MANAGED spoke
+  set_setting BRANCH "$branch"
+  set_setting RUN 1
+  set_setting S3_BUCKET "$bucket"
+  set_setting S3_PREFIX "$prefix"
+  set_setting S3_REGION "$region"
+  set_setting S3_CA_FILE "$ca"
+  finished "${DR_ENV/#$HOME/\~}: $(cl "$act") active, $(cl "$pas") passive, branch $branch, s3://$bucket/$prefix in $region"
+  DR_CLEAR=0   # the menu goes under these lines, not on a clear screen
+}
+if [ ! -f "$DR_ENV" ]; then
+  if [ -t 0 ] && [ -t 1 ]; then first_run; else echo "no settings file at $DR_ENV: run hack/build.sh on a terminal to create it (docs/build.md)" >&2; exit 2; fi
+fi
+DR_ENV=$(readlink -f "$DR_ENV")
+# shellcheck source=/dev/null
+. "$DR_ENV"
+: "${ACTIVE:?set ACTIVE in $DR_ENV}" "${PASSIVE:?set PASSIVE in $DR_ENV}"
+MANAGED=${MANAGED:-spoke}
+BRANCH=${BRANCH:-main}
+S3_URL=${S3_URL-}
+S3_BUCKET=${S3_BUCKET:-acm-backups}
+S3_PREFIX=${S3_PREFIX:-acm}
+S3_REGION=${S3_REGION:-us-east-1}
+S3_CA_FILE=${S3_CA_FILE:-}
+if [ -n "${KUBECONFIG:-}" ]; then export KUBECONFIG; fi
 
 PV=acm-gitops-failover
 SUB=subscriptions.operators.coreos.com
@@ -193,9 +299,6 @@ import_secret() {   # import_secret: the auto-import secret, straight from the m
     oc --context "$ACTIVE" create secret generic auto-import-secret -n "$MANAGED" --from-file=kubeconfig=/dev/stdin
 }
 apply_import() { oc --context "$ACTIVE" apply -f "$1"; }
-set_setting() {   # set_setting <name> <value>: in the settings file
-  if grep -q "^$1=" "$DR_ENV"; then sed -i "s#^$1=.*#$1=$2#" "$DR_ENV"; else echo "$1=$2" >>"$DR_ENV"; fi
-}
 
 # --- pre-flight ---------------------------------------------------------------------
 
@@ -425,20 +528,6 @@ expect() {   # expect <ok text> <red text> <command...>: one pre-flight line
 # --- S3 ------------------------------------------------------------------------------
 
 S3_ACCESS_KEY=${S3_ACCESS_KEY:-} S3_SECRET_KEY=${S3_SECRET_KEY:-}
-ask() {   # ask <prompt> <secret 0|1>: a line from the terminal, with only its printable characters
-  local v="" e=$'\e' b=$'\a'
-  if [ "$UI" = gum ]; then
-    # no placeholder: its first letter, under the cursor, reads as typed text
-    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --header "$1" </dev/tty); else v=$(gum input --placeholder "" --header "$1" </dev/tty); fi
-  else
-    if [ "$2" = 1 ]; then read -rsp "$1: " v </dev/tty; echo >/dev/tty; else read -rp "$1: " v </dev/tty; fi
-  fi
-  # a pasted line break comes back as a space, and a terminal can slip in escape sequences:
-  # none of them belong in a URL or a key
-  printf '%s' "$v" | LC_ALL=C sed -E "s#${e}\[[0-9;:?<=>]*[ -/]*[@-~]##g; s#${e}[]P^_X][^${e}${b}]*(${b}|${e}\\\\)?##g; s#\[20[01]~##g" |
-    LC_ALL=C tr -cd '[:graph:]'
-}
-url_ok() { [[ $1 =~ ^https?://[^/#[:space:]]+(/[^#[:space:]]*)?$ ]]; }   # url_ok <text>: an http(s) URL the settings file can hold
 s3_inputs() {
   if [ "$STORAGE_DONE" = 1 ]; then return 0; fi
   say "S3 access"
