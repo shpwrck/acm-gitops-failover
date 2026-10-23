@@ -558,7 +558,8 @@ overlay still lists that failover's activation one-shot next to
 [dr/README.md](../dr/README.md)). Before you build new clusters from that
 branch, delete the `restore-activate-*.yaml` file from the overlay and its
 entry from the overlay's `kustomization.yaml`, and push; `hack/teardown.sh`
-does this for you (its stage 8). Otherwise the new hub's `dr-role` applies
+does this for you (its stage 8), and `hack/teardown.sh --reset` does it
+without removing ACM or OpenShift GitOps. Otherwise the new hub's `dr-role` applies
 it next to the BackupSchedule, where the backup operator ignores it.
 
 ## Build-time gotchas

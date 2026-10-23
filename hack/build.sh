@@ -256,11 +256,11 @@ preflight() {
   if [ "$x" = active ]; then ok "dr/$ACTIVE is active on origin/$BRANCH"
   elif [[ $x == "active with "* ]]; then
     help_at docs/build.md#7-git-driven-paths-only-bootstrap-dr
-    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. hack/teardown.sh resets dr/ on $BRANCH; or remove the file and its entry there by hand"
+    red "dr/$ACTIVE still lists ${x#active with }, the last failover's activation one-shot: $ACTIVE's new dr-role would apply it next to the BackupSchedule. hack/teardown.sh --reset resets dr/ on $BRANCH and keeps ACM and OpenShift GitOps; or remove the file and its entry there by hand"
     help_at dr/README.md
-  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active (hack/teardown.sh resets dr/)"; fi
+  else red "dr/$ACTIVE is $x on origin/$BRANCH, but the settings file makes $ACTIVE active (hack/teardown.sh --reset resets dr/)"; fi
   x=$(git_role "$PASSIVE")
-  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive (hack/teardown.sh resets dr/)"; fi
+  if [ "$x" = passive ]; then ok "dr/$PASSIVE is passive on origin/$BRANCH"; else red "dr/$PASSIVE is $x on origin/$BRANCH, but the settings file makes $PASSIVE passive (hack/teardown.sh --reset resets dr/)"; fi
   sec_end "tracks $BRANCH on your origin; dr/ has $ACTIVE active, $PASSIVE passive"
 
   sec_begin "What is installed" "Installed"
