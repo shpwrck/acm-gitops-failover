@@ -84,7 +84,8 @@ workstation with `oc`, `git`, `jq` and curl 8 or newer.
    `hack/dr.sh`.
 4. **Tear it down** with `hack/teardown.sh`, after a `--dry-run`
    ([Tearing it down](docs/build.md#tearing-it-down)). It removes only
-   what this repo put on the clusters, unless you pass `--full`.
+   what this repo put on the clusters, unless you pass `--full`, and
+   resets `dr/` in git to the roles the next build starts from.
 
 | Value | Where it is set | Default here |
 | --- | --- | --- |
