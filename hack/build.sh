@@ -127,37 +127,56 @@ pinned() {   # pinned <manifest> <channel> <csv> <out>: a copy of the Subscripti
     -e "s/^  installPlanApproval: Automatic\$/  installPlanApproval: Manual\n  startingCSV: $3/" "$1" >"$4"
   grep -q "^  startingCSV: $3\$" "$4" || die "could not pin $1 to $3"
 }
-approve_for() {   # approve_for <context> <namespace> <csv>: approve the InstallPlan that installs <csv>, if one waits
+own_plan() {   # own_plan <context> <package> <CSV name prefix> [csv]: the InstallPlan its Subscription waits on, if all of it is that
+  # operator's (and holds <csv>, when given). One Subscription on Manual approval makes OLM hold every plan in its namespace,
+  # and a plan can carry other operators' changes too: such a plan is never this build's to approve.
+  local s ip
+  s=$(sub_of "$1" "$2")
+  if [ -z "$s" ]; then return 0; fi
+  ip=$(sub_get "$1" "$s" '{.status.installPlanRef.name}')
+  if [ -z "$ip" ]; then return 0; fi
+  oc --context "$1" get "$IPLAN" "$ip" -n "${s% *}" -o json 2>/dev/null | jq -r --arg p "$3." --arg v "${4:-}" \
+    'select(.spec.approved == false and (.spec.clusterServiceVersionNames | length > 0 and all(startswith($p)) and ($v == "" or any(. == $v))))
+      | "\(.metadata.namespace) \(.metadata.name)"' || true
+}
+approve_own() {   # approve_own <context> <package> <CSV name prefix> [csv]: approve own_plan, if one waits
   local ip
-  ip=$(oc --context "$1" get "$IPLAN" -n "$2" -o json 2>/dev/null | jq -r --arg v "$3" \
-    'first(.items[] | select(.spec.approved == false and (.spec.clusterServiceVersionNames | index($v)))) | .metadata.name // empty' || true)
+  ip=$(own_plan "$@")
   if [ -n "$ip" ]; then
-    oc --context "$1" patch "$IPLAN" "$ip" -n "$2" --type merge -p '{"spec":{"approved":true}}' >/dev/null &&
-      logln "   $1: approved InstallPlan $ip ($3)"
+    oc --context "$1" patch "$IPLAN" "${ip#* }" -n "${ip% *}" --type merge -p '{"spec":{"approved":true}}' >/dev/null &&
+      logln "   $1: approved InstallPlan ${ip#* } (${4:-the first install of $2})"
   fi
 }
-approve_first() {   # approve_first <context> <namespace> <CSV name prefix>: approve its first InstallPlan, never an upgrade
-  local ip
-  if any_csv "$1" "$2" "$3"; then return 0; fi
-  ip=$(oc --context "$1" get "$IPLAN" -n "$2" -o json 2>/dev/null | jq -r --arg p "$3." \
-    'first(.items[] | select(.spec.approved == false and any(.spec.clusterServiceVersionNames[]; startswith($p)))) | .metadata.name // empty' || true)
-  if [ -n "$ip" ]; then
-    oc --context "$1" patch "$IPLAN" "$ip" -n "$2" --type merge -p '{"spec":{"approved":true}}' >/dev/null &&
-      logln "   $1: approved InstallPlan $ip (first install of $3)"
-  fi
+approve_first() {   # approve_first <context> <namespace> <package> <CSV name prefix>: approve its first InstallPlan, never an upgrade
+  if any_csv "$1" "$2" "$4"; then return 0; fi
+  approve_own "$1" "$3" "$4"
 }
 acm_installed() {   # acm_installed <hub>: approve the pinned ACM InstallPlan until the CSV Succeeds
-  approve_for "$1" "${ACM_NS[$1]}" "$ACM_CSV"
+  approve_own "$1" advanced-cluster-management advanced-cluster-management "$ACM_CSV"
   csv_ok "$1" "${ACM_NS[$1]}" "$ACM_CSV"
 }
 mch_running() {   # mch_running <hub>: approve the engine's and OADP's first InstallPlans until the hub is Running
-  approve_first "$1" multicluster-engine multicluster-engine
-  approve_first "$1" "$NS" oadp-operator
+  approve_first "$1" multicluster-engine multicluster-engine multicluster-engine
+  approve_first "$1" "$NS" redhat-oadp-operator oadp-operator
   [ "$(mch_phase "$1")" = Running ]
 }
 gitops_installed() {   # gitops_installed <context>: the operator Succeeded and its Argo CD instance is Available
-  if [ -n "${GITOPS_PIN[$1]:-}" ]; then approve_for "$1" openshift-operators "${GITOPS_PIN[$1]}"; fi
+  # a pinned install waits for approval by design; any other waits when a neighbour in openshift-operators is on Manual
+  if [ -n "${GITOPS_PIN[$1]:-}" ]; then approve_own "$1" openshift-gitops-operator openshift-gitops-operator "${GITOPS_PIN[$1]}"
+  else approve_first "$1" openshift-operators openshift-gitops-operator openshift-gitops-operator; fi
   any_csv "$1" openshift-operators openshift-gitops-operator && argocd_ready "$1"
+}
+held_plan() {   # held_plan <context> <package>: why its Subscription still waits, when a plan it cannot approve holds it
+  local s ip
+  s=$(sub_of "$1" "$2")
+  ip=$(if [ -n "$s" ]; then sub_get "$1" "$s" '{.status.installPlanRef.name}'; fi)
+  if [ -z "$ip" ]; then return 0; fi
+  oc --context "$1" get "$IPLAN" "$ip" -n "${s% *}" -o json 2>/dev/null |
+    jq -r 'select(.spec.approved == false) | "InstallPlan \(.metadata.name) in \(.metadata.namespace) waits for approval and installs \(.spec.clusterServiceVersionNames | join(", "))"' || true
+}
+manual_neighbours() {   # manual_neighbours <context> <namespace> <package>: the other Subscriptions there on Manual approval
+  oc --context "$1" get "$SUB" -n "$2" -o json 2>/dev/null |
+    jq -r --arg p "$3" '[.items[] | select(.spec.name != $p and .spec.installPlanApproval == "Manual") | .metadata.name] | join(", ")' || true
 }
 bsl_available() { [ "$(oc --context "$1" get backupstoragelocation -n "$NS" -o jsonpath='{.items[0].status.phase}' 2>/dev/null)" = Available ]; }
 manual_approval() {   # manual_approval <context> "<namespace> <name>": mark the old approval for the teardown, then set Manual
@@ -315,6 +334,12 @@ preflight() {
     fi
   done
   if [ -z "${GITOPS_HAS[$MANAGED]}" ]; then row "$MANAGED" "OpenShift GitOps" "install from channel $GITOPS_CHANNEL"; fi
+  for c in "${CLUSTERS[@]}"; do
+    x=$(if [ -z "${GITOPS_HAS[$c]}" ]; then manual_neighbours "$c" openshift-operators openshift-gitops-operator; fi)
+    if [ -n "$x" ]; then
+      note "$c: $x in openshift-operators is on Manual approval, so OLM holds OpenShift GitOps' InstallPlan there too; the build approves it if it installs OpenShift GitOps alone"
+    fi
+  done
   if [ -n "${GITOPS_HAS[$ACTIVE]}" ] && [ -n "${GITOPS_HAS[$PASSIVE]}" ] && [ "${GITOPS_HAS[$ACTIVE]}" != "${GITOPS_HAS[$PASSIVE]}" ]; then
     note "the hubs run different OpenShift GitOps versions (${GITOPS_HAS[$ACTIVE]} and ${GITOPS_HAS[$PASSIVE]}); the restore hub should carry the same operators"
   fi
@@ -361,6 +386,8 @@ preflight() {
     STORAGE_DONE=1
     ok "both hubs already reach the bucket: kept"
     row "$ACTIVE, $PASSIVE" "backup storage" "already connected: kept"
+  elif [ -n "$S3_URL" ] && ! url_ok "$S3_URL"; then
+    red "S3_URL in $DR_ENV is '$S3_URL', not an http(s) URL: fix the line, or delete it to be asked again"
   else
     ok "bucket s3://$S3_BUCKET/$S3_PREFIX in $S3_REGION at ${S3_URL:-(asked for at the start)}"
     row "$ACTIVE, $PASSIVE" "backup storage" "connect to s3://$S3_BUCKET/$S3_PREFIX"
@@ -387,26 +414,39 @@ expect() {   # expect <ok text> <red text> <command...>: one pre-flight line
 # --- S3 ------------------------------------------------------------------------------
 
 S3_ACCESS_KEY=${S3_ACCESS_KEY:-} S3_SECRET_KEY=${S3_SECRET_KEY:-}
-ask() {   # ask <prompt> <secret 0|1>: a line from the terminal
-  local v=""
+ask() {   # ask <prompt> <secret 0|1>: a line from the terminal, with only its printable characters
+  local v="" e=$'\e' b=$'\a'
   if [ "$UI" = gum ]; then
-    if [ "$2" = 1 ]; then v=$(gum input --password --header "$1" </dev/tty); else v=$(gum input --header "$1" </dev/tty); fi
+    # no placeholder: its first letter, under the cursor, reads as typed text
+    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --header "$1" </dev/tty); else v=$(gum input --placeholder "" --header "$1" </dev/tty); fi
   else
     if [ "$2" = 1 ]; then read -rsp "$1: " v </dev/tty; echo >/dev/tty; else read -rp "$1: " v </dev/tty; fi
   fi
-  printf '%s' "$v"
+  # a pasted line break comes back as a space, and a terminal can slip in escape sequences:
+  # none of them belong in a URL or a key
+  printf '%s' "$v" | LC_ALL=C sed -E "s#${e}\[[0-9;:?<=>]*[ -/]*[@-~]##g; s#${e}[]P^_X][^${e}${b}]*(${b}|${e}\\\\)?##g; s#\[20[01]~##g" |
+    LC_ALL=C tr -cd '[:graph:]'
 }
+url_ok() { [[ $1 =~ ^https?://[^/#[:space:]]+(/[^#[:space:]]*)?$ ]]; }   # url_ok <text>: an http(s) URL the settings file can hold
 s3_inputs() {
   if [ "$STORAGE_DONE" = 1 ]; then return 0; fi
   say "S3 access"
   explain "The keys go into a secret on each hub and nowhere else: not into a file, not into the log."
   if [ -z "$S3_URL" ] && ! grep -q '^S3_URL=' "$DR_ENV"; then
     S3_URL=$(ask "S3 endpoint URL (e.g. https://s3.example.com; empty for AWS S3)" 0)
+    S3_URL=${S3_URL%/}
+    if [ -n "$S3_URL" ] && ! url_ok "$S3_URL"; then die "'$S3_URL' is not an http(s) URL: run it again and enter the endpoint only"; fi
     set_setting S3_URL "$S3_URL"
-    finished "S3_URL saved in $DR_ENV"
+    finished "S3_URL=${S3_URL:-(AWS S3)} saved in $DR_ENV"
   fi
-  if [ -z "$S3_ACCESS_KEY" ]; then S3_ACCESS_KEY=$(ask "S3 access key" 0); fi
-  if [ -z "$S3_SECRET_KEY" ]; then S3_SECRET_KEY=$(ask "S3 secret key" 1); fi
+  if [ -z "$S3_ACCESS_KEY" ]; then
+    S3_ACCESS_KEY=$(ask "S3 access key" 0)
+    finished "S3 access key: ${#S3_ACCESS_KEY} characters, ending in ${S3_ACCESS_KEY: -4}"
+  fi
+  if [ -z "$S3_SECRET_KEY" ]; then
+    S3_SECRET_KEY=$(ask "S3 secret key" 1)
+    finished "S3 secret key: ${#S3_SECRET_KEY} characters"
+  fi
   if [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then die "the S3 keys are empty"; fi
   if [ -z "$S3_URL" ]; then
     note "AWS S3: the bucket check is left to the BackupStorageLocation"
@@ -464,7 +504,7 @@ stage_acm() {
 }
 
 stage_gitops() {
-  local c
+  local c x
   stage "OpenShift GitOps" "Installs the OpenShift GitOps operator where it is missing: on both hubs, whose Argo CD instances deliver the push app and apply each hub's DR role, and on $MANAGED, whose own Argo CD syncs the pull app straight from git. A hub that gets it next to a hub that already runs it is pinned to the same version. Each install ends when the default Argo CD instance in openshift-gitops is Available."
   for c in "${CLUSTERS[@]}"; do
     if [ -n "${GITOPS_HAS[$c]}" ]; then continue; fi
@@ -476,7 +516,12 @@ stage_gitops() {
     fi
   done
   for c in "${CLUSTERS[@]}"; do
-    wait_until 1500 "$c: OpenShift GitOps and its Argo CD instance" gitops_installed "$c"
+    if ! try_until 1500 "$c: OpenShift GitOps and its Argo CD instance" gitops_installed "$c"; then
+      x=$(held_plan "$c" openshift-gitops-operator)
+      help_at docs/build.md#2-all-clusters-openshift-gitops
+      if [ -n "$x" ]; then red "$c: $x. The build approves only a plan that installs OpenShift GitOps alone: approve this one yourself if those changes are wanted, then run it again"; fi
+      die "$c: OpenShift GitOps is not installed after 25 min"
+    fi
   done
 }
 

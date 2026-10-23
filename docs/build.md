@@ -112,7 +112,13 @@ set the contexts, the branch and the S3 endpoint, bucket, prefix and
 region (and a CA file if the store's certificate is not publicly
 trusted). It asks for the S3 keys, or reads them from `S3_ACCESS_KEY`
 and `S3_SECRET_KEY` in the environment, and puts them only into the
-secret on each hub: not into a file, not into its log.
+secret on each hub: not into a file, not into its log. What you type or
+paste at its prompts keeps only its printable characters: a pasted line
+break (which the prompt turns into a space) and any escape sequences the
+terminal slips in are dropped, and it prints the length of each key, and
+the access key's last four characters, so you can check what it took.
+The endpoint must be an `http(s)://` URL before it is saved.
+`DR_PLAIN=1 hack/build.sh` asks with plain prompts instead of gum's.
 
 ```bash
 hack/build.sh --check   # read-only: what it would install, reuse or refuse, and why
@@ -346,6 +352,27 @@ there would mark the existing Subscription as this repo's, and the
 there before the build (and its Subscription may have another name,
 which gives OLM two Subscriptions for one package).
 
+If another Subscription in `openshift-operators` is on Manual approval,
+OLM holds the new GitOps
+InstallPlan for approval too, although the GitOps Subscription is
+Automatic: the Subscription shows `InstallPlanPending` with reason
+`RequiresApproval`, and no GitOps CSV appears. On a cluster that uses
+OpenShift's own Gateway API (in the lab, hub-x, for RHOAI) the ingress
+operator installs Service Mesh 3 there and keeps its Subscription on
+Manual, putting it back within seconds if you change it. Approve the plan the
+Subscription names, after checking that it installs GitOps alone. Never
+approve an older pending plan in that namespace instead: it can carry
+other operators' changes (on hub-x, one would roll Service Mesh back).
+`hack/build.sh` approves such a plan when it holds only GitOps, and stops
+and names it otherwise:
+
+```bash
+IP=$(oc --context hub-x get subscription.operators.coreos.com openshift-gitops-operator -n openshift-operators \
+  -o jsonpath='{.status.installPlanRef.name}')
+oc --context hub-x get installplan "$IP" -n openshift-operators -o jsonpath='{.spec.clusterServiceVersionNames}{"\n"}'   # GitOps only
+oc --context hub-x patch installplan "$IP" -n openshift-operators --type merge -p '{"spec":{"approved":true}}'
+```
+
 If one hub already runs GitOps, check its version first. Channel `latest`
 installs the newest z-stream on a new cluster, so pin the other hub to the
 existing hub's CSV, the same way as ACM in step 1. The spoke can take
@@ -364,9 +391,10 @@ sed "s/^  installPlanApproval: Automatic\$/  installPlanApproval: Manual\n  star
 grep -A1 '^  installPlanApproval' /tmp/60-gitops-operator-pinned.yaml   # Manual, then the startingCSV
 oc --context hub-y apply -f /tmp/60-gitops-operator-pinned.yaml
 IP=""; until [ -n "$IP" ]; do sleep 10
-  IP=$(oc --context hub-y get installplan -n openshift-operators -o json | jq -r --arg csv "$GV" \
-    '.items[] | select(.spec.approved==false and (.spec.clusterServiceVersionNames | index($csv))) | .metadata.name')
+  IP=$(oc --context hub-y get subscription.operators.coreos.com openshift-gitops-operator -n openshift-operators \
+    -o jsonpath='{.status.installPlanRef.name}')
 done
+oc --context hub-y get installplan "$IP" -n openshift-operators -o jsonpath='{.spec.clusterServiceVersionNames}{"\n"}'   # only $GV
 oc --context hub-y patch installplan "$IP" -n openshift-operators --type merge -p '{"spec":{"approved":true}}'
 until [ "$(oc --context hub-y get csv "$GV" -n openshift-operators -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ]; do sleep 15; done
 for c in hub-x hub-y spoke; do
