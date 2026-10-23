@@ -112,7 +112,13 @@ set the contexts, the branch and the S3 endpoint, bucket, prefix and
 region (and a CA file if the store's certificate is not publicly
 trusted). It asks for the S3 keys, or reads them from `S3_ACCESS_KEY`
 and `S3_SECRET_KEY` in the environment, and puts them only into the
-secret on each hub: not into a file, not into its log.
+secret on each hub: not into a file, not into its log. What you type or
+paste at its prompts keeps only its printable characters: a pasted line
+break (which the prompt turns into a space) and any escape sequences the
+terminal slips in are dropped, and it prints the length of each key, and
+the access key's last four characters, so you can check what it took.
+The endpoint must be an `http(s)://` URL before it is saved.
+`DR_PLAIN=1 hack/build.sh` asks with plain prompts instead of gum's.
 
 ```bash
 hack/build.sh --check   # read-only: what it would install, reuse or refuse, and why

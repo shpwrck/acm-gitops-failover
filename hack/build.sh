@@ -361,6 +361,8 @@ preflight() {
     STORAGE_DONE=1
     ok "both hubs already reach the bucket: kept"
     row "$ACTIVE, $PASSIVE" "backup storage" "already connected: kept"
+  elif [ -n "$S3_URL" ] && ! url_ok "$S3_URL"; then
+    red "S3_URL in $DR_ENV is '$S3_URL', not an http(s) URL: fix the line, or delete it to be asked again"
   else
     ok "bucket s3://$S3_BUCKET/$S3_PREFIX in $S3_REGION at ${S3_URL:-(asked for at the start)}"
     row "$ACTIVE, $PASSIVE" "backup storage" "connect to s3://$S3_BUCKET/$S3_PREFIX"
@@ -387,26 +389,39 @@ expect() {   # expect <ok text> <red text> <command...>: one pre-flight line
 # --- S3 ------------------------------------------------------------------------------
 
 S3_ACCESS_KEY=${S3_ACCESS_KEY:-} S3_SECRET_KEY=${S3_SECRET_KEY:-}
-ask() {   # ask <prompt> <secret 0|1>: a line from the terminal
-  local v=""
+ask() {   # ask <prompt> <secret 0|1>: a line from the terminal, with only its printable characters
+  local v="" e=$'\e' b=$'\a'
   if [ "$UI" = gum ]; then
-    if [ "$2" = 1 ]; then v=$(gum input --password --header "$1" </dev/tty); else v=$(gum input --header "$1" </dev/tty); fi
+    # no placeholder: its first letter, under the cursor, reads as typed text
+    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --header "$1" </dev/tty); else v=$(gum input --placeholder "" --header "$1" </dev/tty); fi
   else
     if [ "$2" = 1 ]; then read -rsp "$1: " v </dev/tty; echo >/dev/tty; else read -rp "$1: " v </dev/tty; fi
   fi
-  printf '%s' "$v"
+  # a pasted line break comes back as a space, and a terminal can slip in escape sequences:
+  # none of them belong in a URL or a key
+  printf '%s' "$v" | LC_ALL=C sed -E "s#${e}\[[0-9;:?<=>]*[ -/]*[@-~]##g; s#${e}[]P^_X][^${e}${b}]*(${b}|${e}\\\\)?##g; s#\[20[01]~##g" |
+    LC_ALL=C tr -cd '[:graph:]'
 }
+url_ok() { [[ $1 =~ ^https?://[^/#[:space:]]+(/[^#[:space:]]*)?$ ]]; }   # url_ok <text>: an http(s) URL the settings file can hold
 s3_inputs() {
   if [ "$STORAGE_DONE" = 1 ]; then return 0; fi
   say "S3 access"
   explain "The keys go into a secret on each hub and nowhere else: not into a file, not into the log."
   if [ -z "$S3_URL" ] && ! grep -q '^S3_URL=' "$DR_ENV"; then
     S3_URL=$(ask "S3 endpoint URL (e.g. https://s3.example.com; empty for AWS S3)" 0)
+    S3_URL=${S3_URL%/}
+    if [ -n "$S3_URL" ] && ! url_ok "$S3_URL"; then die "'$S3_URL' is not an http(s) URL: run it again and enter the endpoint only"; fi
     set_setting S3_URL "$S3_URL"
-    finished "S3_URL saved in $DR_ENV"
+    finished "S3_URL=${S3_URL:-(AWS S3)} saved in $DR_ENV"
   fi
-  if [ -z "$S3_ACCESS_KEY" ]; then S3_ACCESS_KEY=$(ask "S3 access key" 0); fi
-  if [ -z "$S3_SECRET_KEY" ]; then S3_SECRET_KEY=$(ask "S3 secret key" 1); fi
+  if [ -z "$S3_ACCESS_KEY" ]; then
+    S3_ACCESS_KEY=$(ask "S3 access key" 0)
+    finished "S3 access key: ${#S3_ACCESS_KEY} characters, ending in ${S3_ACCESS_KEY: -4}"
+  fi
+  if [ -z "$S3_SECRET_KEY" ]; then
+    S3_SECRET_KEY=$(ask "S3 secret key" 1)
+    finished "S3 secret key: ${#S3_SECRET_KEY} characters"
+  fi
   if [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then die "the S3 keys are empty"; fi
   if [ -z "$S3_URL" ]; then
     note "AWS S3: the bucket check is left to the BackupStorageLocation"
