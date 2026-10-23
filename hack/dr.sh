@@ -43,7 +43,7 @@ set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SELF=$REPO/hack/dr.sh
 DR_ENV=${DR_ENV:-$HOME/acm-dr/dr.env}
-[ -f "$DR_ENV" ] || { echo "no settings file at $DR_ENV: copy hack/dr.env.example there and edit it" >&2; exit 2; }
+[ -f "$DR_ENV" ] || { echo "no settings file at $DR_ENV: hack/build.sh writes it on its first run (docs/build.md)" >&2; exit 2; }
 DR_ENV=$(readlink -f "$DR_ENV")
 # shellcheck source=/dev/null
 . "$DR_ENV"

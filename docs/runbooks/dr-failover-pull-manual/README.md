@@ -22,11 +22,19 @@ document's step numbers, so this document stays the explanation of what
 it does. It never powers a cluster off or on: it tells you when to cut
 or restore power, then waits until the API is dead or answers again.
 
-Set it up once, in the repo checkout on the branch the clusters track:
+It reads the settings file `~/acm-dr/dr.env`, which
+[`hack/build.sh`](../../build.md#the-scripted-build) writes, so a lab
+the build made is ready. For a lab built by hand, write it once, in the
+repo checkout on the branch the clusters track:
 
 ```bash
 mkdir -p ~/acm-dr && cp hack/dr.env.example ~/acm-dr/dr.env
 ${EDITOR:-vi} ~/acm-dr/dr.env   # KUBECONFIG, ACTIVE, PASSIVE, the two app URLs, BRANCH
+```
+
+Then:
+
+```bash
 sudo dnf install -y gum         # optional (brew install gum elsewhere): boxes, spinners and tables
 hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr/ is bootstrapped)
 ```
