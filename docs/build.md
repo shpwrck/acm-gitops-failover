@@ -616,6 +616,11 @@ hack/teardown.sh --full --dry-run    # the same with --full
 hack/teardown.sh                     # a menu; --yes removes without asking
 ```
 
+On its own, `hack/teardown.sh` offers Check (Reset) and Check (Teardown),
+the dry runs of `--reset` and `--full`, then Teardown (Reset) and
+Teardown (Full). The default mode is a command:
+`hack/teardown.sh --dry-run`, then `hack/teardown.sh --yes`.
+
 | Mode | What goes |
 | --- | --- |
 | default | Everything that carries the label `app.kubernetes.io/part-of: acm-gitops-failover`, which every object in `manifests/` and `dr/` has (`hack/validate.sh` checks it), so a manual build is labeled the same way as a scripted one. ACM and OpenShift GitOps go where their Subscription carries the label, that is, where the build installed them. On an ACM that was there before, the two marked changes of [A hub that already runs ACM](#a-hub-that-already-runs-acm) are undone, and the rest of it stays. |
