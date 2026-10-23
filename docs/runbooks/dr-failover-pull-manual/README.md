@@ -36,12 +36,12 @@ shows a stage tracker, a spinner with the elapsed time while it waits,
 a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
 timing table at the end. Each stage starts on a clear screen. During a
 run the top of the screen stays put: the stage tracker and the time
-since the run started, the current step, both probes' samples and
+since the run started, both probes' samples and
 failures, which hub `$MANAGED` reports to and which revisions are
 served, and the last milestone. The output scrolls under it. What
 scrolls off is gone from the screen but kept in `console.log`; the
 summary at the end scrolls as usual, so the scrollback keeps it. The
-pinned header needs a terminal of at least 72 columns and 23 lines, and
+pinned header needs a terminal of at least 72 columns and 22 lines, and
 `DR_PIN=0` turns it off. Without gum, or with `DR_PLAIN=1`, the script
 prints the same steps as plain text.
 

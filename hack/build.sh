@@ -202,7 +202,7 @@ set_setting() {   # set_setting <name> <value>: in the settings file
 STAGES=(Pre-flight ACM "OpenShift GitOps" "Backup storage" "Import $MANAGED" "Demo apps" "Backup roles" "dr/ roles" Check)
 STAGE=0
 stage() {   # stage <title> <what and why>
-  STAGE=$((STAGE + 1)) PIN_STEP=""
+  STAGE=$((STAGE + 1))
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
@@ -648,7 +648,7 @@ stage_roles() {
 stage_check() {
   stage Check "Runs hack/dr.sh check, the pre-flight every exercise starts with, against what was just built."
   if DR_CLEAR=0 COMPACT=$PIN bash "$REPO/hack/dr.sh" check; then
-    steps_end "Build done in $(dur $((SECONDS - T0)))"
+    steps_end
     box rounded 10 "Build done in $(dur $((SECONDS - T0))): $ACTIVE active, $PASSIVE passive" \
       "Next: hack/dr.sh, then pick a run from the menu (docs/runbooks)." "Log: $LOGFILE"
   else
@@ -722,7 +722,7 @@ set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
 STEPS_TITLE="Build$(if [ "$CHECK" = 1 ]; then echo " pre-flight"; fi) · $ACTIVE active, $PASSIVE passive, $MANAGED workload"
-pin_on 5 steps_header   # the stages stay at the top, and the output stays in the window under them
+pin_on 4 steps_header   # the stages stay at the top, and the output stays in the window under them
 COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if ! preflight; then DIED=1; exit 1; fi

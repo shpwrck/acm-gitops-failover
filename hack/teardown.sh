@@ -165,7 +165,7 @@ ns_gone() {   # ns_gone <context> <namespace> [seconds]: delete a namespace and 
 STAGES=(Pre-flight "DR roles" "Demo apps" Detach "Backup storage" ACM "OpenShift GitOps" Git Summary)
 STAGE=0
 stage() {   # stage <title> <what and why>
-  STAGE=$((STAGE + 1)) PIN_STEP=""
+  STAGE=$((STAGE + 1))
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
   if [ "$UI" = gum ]; then
@@ -676,7 +676,7 @@ cmd_git() {
 summary() {
   local c
   stage "Summary" "What is left of the exercise on each cluster."
-  steps_end "Teardown done in $(dur $((SECONDS - T0)))"
+  steps_end
   for c in "${CLUSTERS[@]}"; do
     printf '%s\t%s\t%s\t%s\n' "$c" \
       "$(if [ -n "$(sub_of "$c" advanced-cluster-management)" ]; then echo installed; else echo -; fi)" \
@@ -755,7 +755,7 @@ set -E
 trap 'on_err "$BASH_COMMAND"' ERR
 T0=$SECONDS
 STEPS_TITLE="Teardown$(if [ "$FULL" = 1 ]; then echo " --full"; fi)$(if [ "$DRY" = 1 ]; then echo " dry run"; fi) · $ACTIVE, $PASSIVE, $MANAGED"
-pin_on 5 steps_header   # the stages stay at the top, and the output stays in the window under them
+pin_on 4 steps_header   # the stages stay at the top, and the output stays in the window under them
 COMPACT=$PIN            # an all-green pre-flight section shows as one line
 
 if [ "$DRY" = 1 ]; then
@@ -775,7 +775,7 @@ cmd_gitops
 cmd_git
 if [ "$DRY" = 1 ]; then
   stage "Summary" "Nothing changed: this was a dry run. The log has every 'would' line: ${LOGFILE/#$HOME/\~}"
-  steps_end "Dry run done in $(dur $((SECONDS - T0))): nothing changed"
+  steps_end
   verdict ok "DRY RUN: nothing changed. Run it without --dry-run to remove what the 'would' lines name."
 else
   summary
