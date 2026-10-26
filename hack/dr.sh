@@ -464,9 +464,26 @@ spawn() {   # spawn <log> <internal command> [arg]: a probe in its own session, 
 }
 probes_running() { [ -s "$LOGDIR/probe.pids" ] && kill -0 "$(head -n 1 "$LOGDIR/probe.pids")" 2>/dev/null; }
 
+stale_probes() {   # stop the probes another run left running: one that stopped and was never carried on
+  local f pid n
+  for f in "$HOME"/acm-dr/runs/run-*/probe.pids; do
+    if [ ! -f "$f" ] || [ "$f" = "$LOGDIR/probe.pids" ]; then continue; fi
+    n=0
+    while read -r pid; do   # only a dr.sh probe: after a reboot the number may be another process's
+      if ps -o args= -p "$pid" 2>/dev/null | grep -q 'dr\.sh _probe-'; then
+        kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+        n=$((n + 1))
+      fi
+    done <"$f"
+    rm -f "$f"
+    if [ "$n" = 1 ]; then note "stopped a probe that $(basename "$(dirname "$f")") left running"
+    elif [ "$n" -gt 1 ]; then note "stopped $n probes that $(basename "$(dirname "$f")") left running"; fi
+  done
+}
 probe_start() {
   local f
   if probes_running; then note "probes already running for run $RUN"; return 0; fi
+  stale_probes
   rm -f "$LOGDIR/probe.pids"
   spawn probe.log _probe-http "$APP_URL"
   if [ -n "$PUSH_APP_URL" ]; then spawn probe-push.log _probe-http "$PUSH_APP_URL"; fi
@@ -1003,6 +1020,16 @@ cmd_rejoin() {
 
 # --- run ---------------------------------------------------------------------
 
+RUN_MOVED=""
+run_number() {   # a run number whose folder holds a finished run (a settings file written afresh, say) moves on to the next free one
+  local n
+  if ! grep -q ' rejoin done:' "$LOGDIR/events.log" 2>/dev/null; then return 0; fi
+  n=$(find "$HOME/acm-dr/runs" -maxdepth 1 -name 'run-*' -printf '%f\n' | sed -n 's/^run-\([0-9][0-9]*\)$/\1/p' | sort -n | tail -n 1)
+  RUN_MOVED="Run $RUN finished earlier (${LOGDIR/#$HOME/\~}), so this is run $((n + 1)), the next free number. The settings file says so now."
+  RUN=$((n + 1)) LOGDIR=$HOME/acm-dr/runs/run-$((n + 1))
+  mkdir -p "$LOGDIR"
+  if grep -q '^RUN=' "$DR_ENV"; then sed -i "s/^RUN=.*/RUN=$RUN/" "$DR_ENV"; else echo "RUN=$RUN" >>"$DR_ENV"; fi
+}
 run_started() {   # a run started again after a stop carries on in the same folder
   local k
   k=$(grep -c -E ' run [0-9]+ started' "$LOGDIR/events.log" 2>/dev/null || true)
@@ -1030,6 +1057,7 @@ run_step() {   # run_step <n> <text> [step...]: a stage of the overview under it
 run_overview() {   # what the run will do, before anything starts; returns 1 for Back to the menu
   local a=$ACTIVE p=$PASSIVE m=$MANAGED act prom rj you choice
   if [ "$LAST" != top ]; then start_screen; fi   # a page of its own, after the menu
+  run_number
   if [ "$GIT" = 1 ]; then
     act="You merge PR-A to dr/$p, and $(cl "$p")'s own Argo CD swaps its standby restore for an activation restore: $(cl "$a")'s newest backup again, this time with $(cl "$m")'s import token."
     prom="You merge PR-B, and $(cl "$p") starts writing its own backups. Only now, so a failed activation never overwrites $(cl "$a")'s last good backup."
@@ -1041,7 +1069,7 @@ run_overview() {   # what the run will do, before anything starts; returns 1 for
     rj="You power $(cl "$a") back on; the script makes it the passive hub."
     you="cut $(cl "$a")'s power, confirm the activation, and power $(cl "$a") back on"
   fi
-  box double 13 "Run $RUN · $(mode_name): $(cl "$a") goes down, $(cl "$p") takes over" \
+  box double 13 "Run $RUN · $(mode_name): $(cl "$a") goes down, $(cl "$p") takes over" ${RUN_MOVED:+"$RUN_MOVED"} \
     "$(cl "$a") is the active ACM hub, $(cl "$p") the passive one. $(cl "$m")'s own Argo CD syncs a pull app from git; the active hub's Argo CD pushes a push app. Probes record whether both keep answering, and when each gets a new revision."
   blank
   run_step 1 "Read-only checks. Nothing changes before \"Start run $RUN?\"."
@@ -1186,6 +1214,7 @@ case $CMD in
   _probe-pointer) echo $$ >>"$PROBE_PIDS"; probe_pointer "${ARGS[0]}" ;;
   _probe-revision) echo $$ >>"$PROBE_PIDS"; probe_revision ;;
   check | nodes | probe | outage | deploy | failover | rejoin | run)
+    if [ "$CMD" = run ]; then run_number; fi   # a run from the menu: its page did this already
     if [ "$CMD" != check ] && [ "$CMD" != probe ]; then
       # both append, so the plain copy and any stray error output share console.log
       # shellcheck disable=SC2094
