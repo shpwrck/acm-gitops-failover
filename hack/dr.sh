@@ -6,12 +6,13 @@
 #
 # Usage: hack/dr.sh [command] [--git] [--yes]
 #
-# With no command, on a terminal, it shows the lab's posture and a menu:
-# a manual or a git-driven run, a pre-flight check, the last run's summary.
+# With no command, on a terminal, it says what the exercise does and offers
+# a menu: Check, Run (Manual), Run (Git), Quit.
 #
 #   run        one whole exercise: check, probes, outage, deploy, failover,
-#              rejoin, summary. It stops for what only you can do: cut the
-#              active hub's power, merge the PRs (--git), power it back on
+#              rejoin, summary. It opens with a page on what the run will do,
+#              then stops for what only you can do: cut the active hub's
+#              power, merge the PRs (--git), power it back on
 #   check      read-only pre-flight of the posture the settings file names
 #   nodes [CONTEXT...]
 #              approve pending certificate requests until the nodes are Ready
@@ -1007,18 +1008,60 @@ run_started() {   # a run started again after a stop carries on in the same fold
   if [ "${k:-0}" -gt 0 ]; then event "run $RUN started (attempt $((k + 1)))"; else event "run $RUN started"; fi
 }
 
+run_step() {   # run_step <n> <text>: one line of the overview, under the stage's name in the progress header
+  local w l first=1
+  w=$(cols)
+  w=$((w > 84 ? 76 : w - 8))
+  logln "   $1 ${STAGES[$1 - 1]}: $2"
+  kind text
+  while IFS= read -r l; do
+    if [ "$first" = 1 ]; then printf '   %s%-12s%s%s\n' "$C_B" "${STAGES[$1 - 1]}" "$C_OFF" "$(paint "$l")"; first=0
+    else printf '   %12s%s\n' "" "$(paint "$l")"; fi
+  done < <(printf '%s\n' "$2" | fold -s -w $((w - 12)) | sed 's/ *$//')
+}
+run_overview() {   # what the run will do, before anything starts; returns 1 for Back to the menu
+  local a=$ACTIVE p=$PASSIVE m=$MANAGED fo rj you choice
+  if [ "$LAST" != top ]; then start_screen; fi   # a page of its own, after the menu
+  if [ "$GIT" = 1 ]; then
+    fo="You merge two PRs to dr/$p: PR-A makes $(cl "$p") restore $(cl "$a")'s newest backup and take over $(cl "$m"), then PR-B starts $(cl "$p")'s backups. The push app then gets the new revision."
+    rj="You merge the demote PR to dr/$a, then power $(cl "$a") back on. It comes back as the passive hub."
+    you="cut $(cl "$a")'s power, merge 3 PRs, and power $(cl "$a") back on"
+  else
+    fo="The script makes $(cl "$p") the active hub: $(cl "$p") restores $(cl "$a")'s newest backup and takes over $(cl "$m"). The push app then gets the new revision."
+    rj="You power $(cl "$a") back on, and the script makes it the passive hub."
+    you="cut $(cl "$a")'s power, then power it back on"
+  fi
+  box double 13 "Run $RUN · $(mode_name): $(cl "$a") goes down, $(cl "$p") takes over" \
+    "$(cl "$a") is the active ACM hub and $(cl "$p") the passive one. This run cuts $(cl "$a")'s power, $(cl "$p") takes over $(cl "$m"), and $(cl "$a") then rejoins as the passive hub. Probes check that $(cl "$m")'s two demo apps keep answering, and time how long a new git revision takes to reach them."
+  blank
+  run_step 1 "Read-only checks that the lab is ready. Nothing changes."
+  run_step 2 "The probes start. You cut $(cl "$a")'s power; $(cl "$m")'s apps should not notice."
+  run_step 3 "With no hub up, the script commits a new revision of both apps to $BRANCH. The pull app gets it from git with no hub; the push app waits for one."
+  run_step 4 "$fo"
+  run_step 5 "$rj"
+  run_step 6 "The probes stop. The script shows whether the apps kept answering, and how long each step took."
+  blank
+  explain "Your part: $you. The script stops and says YOUR TURN each time it needs you$(if [ "$YES" = 0 ]; then echo ", and between stages it waits for Continue. After the pre-flight it asks \"Start run $RUN?\" before anything changes"; fi)."
+  blank
+  explain "At the end $(cl "$p") is active and $(cl "$a") passive, so the next run fails over the other way. Past runs took 12 to 33 minutes, plus your pauses. Logs: ${LOGDIR/#$HOME/\~}"
+  if [ "$YES" = 1 ] || ! { : </dev/tty; } 2>/dev/null; then return 0; fi
+  blank
+  if [ "$UI" = gum ]; then
+    choice=$(gum choose --header "Next: Pre-flight (read-only)" Continue "Back to the menu" </dev/tty 2>/dev/tty) || exit 0
+  else
+    PS3="Next: Pre-flight (read-only). "
+    select choice in Continue "Back to the menu"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
+  fi
+  [ "$choice" = Continue ]
+}
+
 cmd_run() {
-  local stops c pinned
-  stops="to cut $(cl "$ACTIVE")'s power and to power it back on"
+  local c pinned
   IN_RUN=1 RUN_T0=$SECONDS
-  if [ "$GIT" = 1 ]; then stops="to cut $(cl "$ACTIVE")'s power, to merge 3 PRs, and to power $(cl "$ACTIVE") back on"; fi
   if [ "$UI" = gum ]; then
     for c in "$ACTIVE" "$PASSIVE"; do HUB_URL[$c]=$(server "$c" 2>/dev/null || true); done
     pin_on 6 run_header   # the run's state stays at the top until the summary
   fi
-  box double 13 "Run $RUN · $(mode_name): $(cl "$ACTIVE") goes down, $(cl "$PASSIVE") takes over" \
-    "The script pauses when it needs you: $stops.$(if [ "$YES" = 0 ]; then echo " Between stages it waits for Continue."; fi)" \
-    "Logs: ${LOGDIR/#$HOME/\~}"
   stage 1
   if ! cmd_check; then
     pinned=$PIN
@@ -1113,6 +1156,7 @@ case $CMD in _probe-*) ;; *) start_screen ;; esac
 if [ -z "$CMD" ]; then
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
 fi
+while [ "$CMD" = run ] && ! run_overview; do start_screen; menu; done   # a run starts with what it will do
 case $CMD in
   _probe-http) echo $$ >>"$PROBE_PIDS"; probe_http "${ARGS[0]}" ;;
   _probe-pointer) echo $$ >>"$PROBE_PIDS"; probe_pointer "${ARGS[0]}" ;;

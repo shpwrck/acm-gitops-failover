@@ -76,7 +76,10 @@ hack/dr.sh run          # the manual paths: this runbook and the Manual Push Pat
 hack/dr.sh run --git    # the git-driven paths: you review and merge each PR it opens
 ```
 
-`run` stops only for what you have to do yourself: cut `$ACTIVE`'s
+`run` opens with a page on what the run will do: each stage in a line
+or two, what it needs from you, how the lab ends up, and where the logs
+go. Continue starts the pre-flight; Back to the menu changes nothing.
+After that, it stops only for what you have to do yourself: cut `$ACTIVE`'s
 power (B.1), merge the PRs on a `--git` run (D'.2, F', G'.1), and power
 the hub back on (G.0). For each PR it pushes the branch and prints a
 link to GitHub's new-PR page with the title and body filled in (with
