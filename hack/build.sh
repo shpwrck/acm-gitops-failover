@@ -375,8 +375,14 @@ GITOPS_CHANNEL=$(manifest_value manifests/60-gitops-operator.yaml channel)
 ACM_CSV="" PLAN_ROWS="" SPOKE_HAD=0 STORAGE_DONE=0
 row() { PLAN_ROWS+="$1"$'\t'"$2"$'\t'"$3"$'\n'; }
 
+co_unsettled() {   # co_unsettled < "oc get clusteroperators --no-headers": the operators not Available or Degraded, then (a line) those Progressing
+  awk '$4 == "True" {r = r rs $1; rs = ", "}
+    $3 != "True" {b = b bs $1 " not Available"; bs = ", "; next}
+    $5 != "False" {b = b bs $1 " Degraded"; bs = ", "}
+    END {print b; print r}'
+}
 preflight() {
-  local c s v="" x url origin rev
+  local c s v="" x t url origin rev
   BAD=0
   stage "Pre-flight (read-only)" "Checks that the three clusters are healthy, that your copy of the repo is what the clusters will pull from, and what is installed already. It decides what the build installs and what it reuses, and refuses what would break: a hub that another hub manages, $(cl "$MANAGED") managed by some other hub, or two hubs on different ACM versions. Nothing changes in this stage."
 
@@ -386,8 +392,18 @@ preflight() {
   for c in "${CLUSTERS[@]}"; do
     if alive "$c"; then ok "$(cl "$c") API answers"; else red "$(cl "$c") API does not answer"; continue; fi
     expect "$(cl "$c") nodes Ready, no pending certificate requests" "$(cl "$c") has nodes not Ready or pending certificate requests (hack/dr.sh nodes $(cl "$c"))" settled "$c"
-    x=$(oc --context "$c" get clusteroperators --no-headers 2>/dev/null | awk '$3 != "True" || $5 != "False" {print $1}' | paste -sd' ' - || true)
-    if [ -z "$x" ]; then ok "$(cl "$c") cluster operators Available, none Degraded"; else red "$(cl "$c") cluster operators not settled: $x"; fi
+    t=$(oc --context "$c" get clusteroperators --no-headers 2>/dev/null || true)
+    x=$(co_unsettled <<<"$t")
+    if [ -z "${x%%$'\n'*}" ]; then
+      ok "$(cl "$c") cluster operators Available, none Degraded"
+    else
+      logln "$(awk '$3 != "True" || $4 != "False" || $5 != "False"' <<<"$t")"
+      if [ -n "${x#*$'\n'}" ]; then
+        red "$(cl "$c") cluster operators not settled: ${x%%$'\n'*}. Rolling out: ${x#*$'\n'}; wait for them (10 to 20 minutes after a power-on), then run it again"
+      else
+        red "$(cl "$c") cluster operators not settled: ${x%%$'\n'*}"
+      fi
+    fi
   done
   sec_end "APIs answer, nodes Ready, cluster operators settled"
   if [ "$BAD" = 1 ]; then HELP=""; verdict bad "BUILD RED: the clusters must be up and settled first"; return 1; fi
