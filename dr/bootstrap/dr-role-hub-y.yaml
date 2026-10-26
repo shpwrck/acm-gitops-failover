@@ -14,7 +14,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/redhat-na-ssa/acm-gitops-failover
+    repoURL: https://github.com/redhat-na-ssa/acm-failover-demo
     targetRevision: main
     path: dr/hub-y
   destination:
