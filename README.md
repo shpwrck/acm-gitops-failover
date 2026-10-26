@@ -113,7 +113,7 @@ Ctrl-C) leaves. With options, it runs once and exits, for scripting.
 
 | Value | Where it is set | Default here |
 | --- | --- | --- |
-| Git repository URL | `repoURL` in `manifests/62-appset-pull.yaml`, `manifests/63-appset-push.yaml`, `dr/bootstrap/dr-role-hub-*.yaml` (CI fails if they disagree; the `hack/build.sh` pre-flight checks they name your clone's `origin`) | `https://github.com/redhat-na-ssa/acm-gitops-failover` |
+| Git repository URL | `repoURL` in `manifests/62-appset-pull.yaml`, `manifests/63-appset-push.yaml`, `dr/bootstrap/dr-role-hub-*.yaml` (CI fails if they disagree; the `hack/build.sh` pre-flight checks they name your clone's `origin`) | `https://github.com/redhat-na-ssa/acm-failover-demo` |
 | Git revision the clusters track | `targetRevision` in the same four files | `main` |
 | S3 endpoint, bucket, prefix, region | `manifests/50-dpa.yaml` (a copy, per build step 3), or the Settings stage of `hack/build.sh`, which saves them in `~/acm-dr/dr.env` | `https://s3.example.com`, `acm-backups`, `acm`, `us-east-1` |
 | Workload cluster name | `manifests/40-import-spoke.yaml` and the `name: spoke` selector in `manifests/61-gitops-integration.yaml` | `spoke` |
