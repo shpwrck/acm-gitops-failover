@@ -178,11 +178,13 @@ stage() {   # stage <title> <what and why>
   STAGE=$((STAGE + 1))
   logln "" "#### Stage $STAGE/${#STAGES[@]}: $1"
   if [ "$STAGE" -gt 1 ]; then pin_clear; else pin_draw; fi   # under the header, each stage starts on an empty window
+  blank
   if [ "$UI" = gum ]; then
-    printf '\n %s── %s%s\n' "$C_B$C_ACC" "$(paint "$(stage_name "$STAGE" "$1")" "$C_B$C_ACC")" "$C_OFF"
+    printf ' %s── %s%s\n' "$C_B$C_ACC" "$(paint "$(stage_name "$STAGE" "$1")" "$C_B$C_ACC")" "$C_OFF"
   else
-    printf '\n#### %s\n' "$(bare "$(stage_name "$STAGE" "$1")")"
+    printf '#### %s\n' "$(bare "$(stage_name "$STAGE" "$1")")"
   fi
+  LAST=heading
   explain "$2"
 }
 
