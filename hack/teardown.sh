@@ -723,7 +723,7 @@ menu() {   # no options on a terminal: what --reset and --full remove, then pick
   items=("Check (Reset)" "Check (Teardown)" "Teardown (Reset)" "Teardown (Full)" Quit)
   echo
   if [ "$UI" = gum ]; then
-    choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
+    choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty 2>/dev/tty) || choice=Quit
   else
     PS3="What would you like to do? "
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty

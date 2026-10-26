@@ -53,8 +53,10 @@ done
 ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with only its printable characters
   local v="" e=$'\e' b=$'\a'
   if [ "$UI" = gum ]; then
-    # no placeholder: its first letter, under the cursor, reads as typed text
-    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --header "$1" </dev/tty); else v=$(gum input --placeholder "" --value "${3:-}" --header "$1" </dev/tty); fi
+    # no placeholder: its first letter, under the cursor, reads as typed text. gum draws on
+    # stderr, which goes to the log too: straight to the terminal instead, so it redraws
+    # cleanly and what you type stays out of the log
+    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --header "$1" </dev/tty 2>/dev/tty); else v=$(gum input --placeholder "" --value "${3:-}" --header "$1" </dev/tty 2>/dev/tty); fi
   else
     if [ "$2" = 1 ]; then read -rsp "$1: " v </dev/tty; echo >/dev/tty; else read -rp "$1${3:+ [$3]}: " v </dev/tty; v=${v:-${3:-}}; fi
   fi
@@ -65,7 +67,7 @@ ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with 
 }
 pick() {   # pick <question> <preselected> <choice...>: one of the choices, picked on the terminal
   local c
-  if [ "$UI" = gum ]; then gum choose --header "$1" ${2:+--selected "$2"} "${@:3}" </dev/tty || die "stopped at your request"; return 0; fi
+  if [ "$UI" = gum ]; then gum choose --header "$1" ${2:+--selected "$2"} "${@:3}" </dev/tty 2>/dev/tty || die "stopped at your request"; return 0; fi
   PS3="$1 "
   select c in "${@:3}"; do if [ -n "$c" ]; then echo "$c"; return 0; fi; done </dev/tty
   die "stopped at your request"
@@ -806,7 +808,7 @@ menu() {
   items=(Check Build Quit)
   echo
   if [ "$UI" = gum ]; then
-    choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty) || choice=Quit
+    choice=$(gum choose --header "What would you like to do?" "${items[@]}" </dev/tty 2>/dev/tty) || choice=Quit
   else
     PS3="What would you like to do? "
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
