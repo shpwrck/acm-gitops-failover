@@ -249,17 +249,25 @@ die() {
   box thick 9 "STOP" "$*" ${LOGFILE:+"" "Log: $LOGFILE"}
   exit 1
 }
+gum_stop() {   # gum_stop <gum's exit status> [when]: Ctrl-C at a question interrupts the script; Esc or No stops it at your request
+  case $1 in
+    0) ;;
+    130) exit 130 ;;
+    *) die "stopped at your request${2:+, $2}" ;;
+  esac
+}
 confirm() {
   [ "$YES" = 1 ] && return 0
-  local answer=""
+  local answer="" rc=0
   if [ "$UI" = gum ]; then
     blank
-    if gum confirm --default=false "$(paint "$1")" </dev/tty >/dev/tty 2>/dev/tty; then
+    gum confirm --default=false "$(paint "$1")" </dev/tty >/dev/tty 2>/dev/tty || rc=$?
+    if [ "$rc" = 0 ]; then
       finished "$1 yes"
       return 0
     fi
     logln "$1 no"
-    die "stopped at your request"
+    gum_stop "$rc"
   fi
   read -r -p "$(bare "$1") [y/N] " answer </dev/tty || true
   logln "$1 [y/N] $answer"
@@ -272,13 +280,35 @@ go_on() {   # go_on <next stage>: wait for Continue before the next stage clears
   logln "" "-- next: $1"
   if [ "$UI" = gum ]; then
     blank
-    gum choose --header "Next: $(paint "$1")" Continue </dev/tty >/dev/null 2>/dev/tty || die "stopped at your request, before $1"
+    gum choose --header "Next: $(paint "$1")" Continue </dev/tty >/dev/null 2>/dev/tty || gum_stop "$?" "before $1"
   else
     read -r -p "Next: $(bare "$1"). Press Enter to continue " answer </dev/tty || true
   fi
   PAUSED=$((PAUSED + SECONDS - t0))
   logln "   continued after $(dur $((SECONDS - t0)))"
 }
+
+# The menu: with no options on a terminal, each script opens on its menu. A pick
+# runs as a new process of the script (DR_MENU=1), with its own settings, log
+# and screen. When it ends, done or stopped, "Back to the menu" starts the
+# script afresh, so the settings are read again. Only Quit leaves, or Ctrl-C.
+menu_run() {   # menu_run [option...]: the script with those options, then the menu again
+  local rc=0 int=0
+  trap 'int=1' INT   # Ctrl-C reaches both; however the pick ends, it leaves the menu too
+  DR_MENU=1 bash "$SELF" "$@" || rc=$?
+  trap - INT
+  if [ "$rc" = 130 ] || [ "$int" = 1 ]; then DIED=1; exit 130; fi
+  echo
+  rc=0
+  if [ "$UI" = gum ]; then
+    gum choose --header "" "Back to the menu" </dev/tty >/dev/null 2>/dev/tty || rc=$?
+  else
+    read -r -p "Press Enter for the menu " </dev/tty || rc=130
+  fi
+  if [ "$rc" = 130 ]; then DIED=1; exit 130; fi
+  menu_again
+}
+menu_again() { exec env -u DR_MENU bash "$SELF"; }   # the menu from the start: a clear screen, the settings read again
 
 # The spinner: one status line, redrawn ten times a second while the script
 # waits. Checks run in the background so it keeps turning.

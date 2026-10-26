@@ -66,7 +66,10 @@ of the docs that explains what could be wrong.
 
 Then one exercise is one command. On its own, `hack/dr.sh` says what the
 exercise does and offers a short menu: Check (the lab), Run (Manual),
-Run (Git), or Quit. The same choices are also commands, and so are the
+Run (Git), or Quit. Each pick, done or stopped, ends with Back to the
+menu, which shows the menu again with the settings read afresh; only
+Quit (or Ctrl-C) leaves. The same choices are also commands, which run
+once and exit, and so are the
 last run's summary (`hack/dr.sh probe summary`) and approving
 certificates after a power-on (`hack/dr.sh nodes`):
 

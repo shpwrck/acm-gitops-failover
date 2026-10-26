@@ -6,7 +6,8 @@
 # Usage: hack/teardown.sh [--dry-run] [--reset | --full] [--yes]
 #
 # With no options, on a terminal, it shows a menu: a check (dry run) or a
-# teardown, with --reset or --full.
+# teardown, with --reset or --full. Each pick comes back to the menu when it
+# ends; only Quit (or Ctrl-C) leaves.
 #
 #   (default)  remove what this repo put on the clusters: everything that
 #              carries the label app.kubernetes.io/part-of=acm-gitops-failover
@@ -731,10 +732,10 @@ menu() {   # no options on a terminal: what --reset and --full remove, then pick
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
-    "Check (Reset)") DRY=1 RESET=1 ;;
-    "Check (Teardown)") DRY=1 FULL=1 ;;
-    "Teardown (Reset)") RESET=1 ;;
-    "Teardown (Full)") FULL=1 ;;
+    "Check (Reset)") menu_run --dry-run --reset ;;
+    "Check (Teardown)") menu_run --dry-run --full ;;
+    "Teardown (Reset)") menu_run --reset ;;
+    "Teardown (Full)") menu_run --full ;;
     *) exit 0 ;;
   esac
 }
@@ -801,7 +802,9 @@ cmd_git
 if [ "$DRY" = 1 ]; then
   stage "Summary" "Nothing changed: this was a dry run. The log has every 'would' line: ${LOGFILE/#$HOME/\~}"
   steps_end
-  verdict ok "DRY RUN: nothing changed. To do what the 'would' lines name: hack/teardown.sh$(mode_flag)"
+  next="hack/teardown.sh$(mode_flag)"
+  if [ "${DR_MENU:-0}" = 1 ]; then next="Teardown ($(if [ "$FULL" = 1 ]; then echo Full; else echo Reset; fi)) in the menu"; fi
+  verdict ok "DRY RUN: nothing changed. To do what the 'would' lines name: $next"
 else
   summary
 fi
