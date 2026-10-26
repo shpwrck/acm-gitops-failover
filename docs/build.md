@@ -396,12 +396,14 @@ OLM holds the new GitOps
 InstallPlan for approval too, although the GitOps Subscription is
 Automatic: the Subscription shows `InstallPlanPending` with reason
 `RequiresApproval`, and no GitOps CSV appears. On a cluster that uses
-OpenShift's own Gateway API (in the lab, hub-x, for RHOAI) the ingress
-operator installs Service Mesh 3 there and keeps its Subscription on
-Manual, putting it back within seconds if you change it. Approve the plan the
+OpenShift's own Gateway API (Red Hat OpenShift AI turns it on, for
+example) the ingress operator installs Service Mesh 3 there and keeps
+its Subscription on Manual, putting it back within seconds if you change
+it. Approve the plan the
 Subscription names, after checking that it installs GitOps alone. Never
 approve an older pending plan in that namespace instead: it can carry
-other operators' changes (on hub-x, one would roll Service Mesh back).
+other operators' changes (one older plan seen live would have rolled
+Service Mesh back).
 `hack/build.sh` approves such a plan when it holds only GitOps, and stops
 and names it otherwise:
 
