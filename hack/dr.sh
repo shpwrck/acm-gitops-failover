@@ -7,7 +7,8 @@
 # Usage: hack/dr.sh [command] [--git] [--yes]
 #
 # With no command, on a terminal, it says what the exercise does and offers
-# a menu: Check, Run (Manual), Run (Git), Quit.
+# a menu: Check, Run (Manual), Run (Git), Quit. Each pick comes back to the
+# menu when it ends, done or stopped; only Quit (or Ctrl-C) leaves.
 #
 #   run        one whole exercise: check, probes, outage, deploy, failover,
 #              rejoin, summary. It opens with a page on what the run will do,
@@ -1058,7 +1059,7 @@ run_overview() {   # what the run will do, before anything starts; returns 1 for
   if [ "$YES" = 1 ] || ! { : </dev/tty; } 2>/dev/null; then return 0; fi
   blank
   if [ "$UI" = gum ]; then
-    choice=$(gum choose --header "Next: Pre-flight (read-only)" Continue "Back to the menu" </dev/tty 2>/dev/tty) || exit 0
+    choice=$(gum choose --header "Next: Pre-flight (read-only)" Continue "Back to the menu" </dev/tty 2>/dev/tty) || if [ $? = 130 ]; then exit 130; fi
   else
     PS3="Next: Pre-flight (read-only). "
     select choice in Continue "Back to the menu"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
@@ -1102,6 +1103,17 @@ cmd_run() {
     "Run hack/dr.sh again for run $((RUN + 1)), which fails over the other way."
 }
 
+check_alone() {   # hack/dr.sh check: the pre-flight on its own, under a header as build.sh --check has
+  STAGES=(Pre-flight) STAGE=1 T0=$SECONDS
+  STEPS_TITLE="Check · $(cl "$ACTIVE") active, $(cl "$PASSIVE") passive, $(cl "$MANAGED") workload"
+  steps_pin
+  if [ "$PIN" = 0 ]; then say "$STEPS_TITLE"; fi
+  blank
+  explain "$(stage_text 1)"
+  cmd_check || return 1
+  steps_end
+}
+
 # --- main --------------------------------------------------------------------
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$SELF"; }
@@ -1121,9 +1133,9 @@ menu() {   # no command on a terminal: say what the exercise does, then pick wha
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
-    Check) CMD=check ;;
-    "Run (Manual)") CMD=run GIT=0 ;;
-    "Run (Git)") CMD=run GIT=1 ;;
+    Check) menu_run check ;;
+    "Run (Manual)") GIT=0; run_overview || menu_again; menu_run run ;;
+    "Run (Git)") GIT=1; run_overview || menu_again; menu_run run --git ;;
     *) exit 0 ;;
   esac
 }
@@ -1167,7 +1179,8 @@ case $CMD in _probe-*) ;; *) start_screen ;; esac
 if [ -z "$CMD" ]; then
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; exit 2; fi
 fi
-while [ "$CMD" = run ] && ! run_overview; do start_screen; menu; done   # a run starts with what it will do
+# a run starts with what it will do (a run picked from the menu showed it there)
+if [ "$CMD" = run ] && [ "${DR_MENU:-0}" = 0 ] && ! run_overview; then menu_again; fi
 case $CMD in
   _probe-http) echo $$ >>"$PROBE_PIDS"; probe_http "${ARGS[0]}" ;;
   _probe-pointer) echo $$ >>"$PROBE_PIDS"; probe_pointer "${ARGS[0]}" ;;
@@ -1184,7 +1197,7 @@ case $CMD in
     set -E
     trap 'on_err "$BASH_COMMAND"' ERR
     sanity
-    if [ "$CMD" = check ]; then cmd_check || { DIED=1; exit 1; }; else "cmd_$CMD"; fi
+    if [ "$CMD" = check ]; then check_alone || { DIED=1; exit 1; }; else "cmd_$CMD"; fi
     ;;
   *) usage; exit 2 ;;
 esac

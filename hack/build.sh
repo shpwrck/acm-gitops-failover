@@ -4,7 +4,8 @@
 #
 # Usage: hack/build.sh [--check] [--yes]
 #
-# With no options, on a terminal, it shows a menu.
+# With no options, on a terminal, it shows a menu: Check, Build, Quit. Each
+# pick comes back to the menu when it ends; only Quit (or Ctrl-C) leaves.
 #
 #   (default)  build: ACM on both hubs (pinned to one version), OpenShift
 #              GitOps on all three clusters, backup storage, the import of
@@ -51,29 +52,35 @@ done
 # --- settings ----------------------------------------------------------------------
 
 GUM_PAD="1 0 0 0"   # top right bottom left: a blank line above each question
-ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with only its printable characters
-  local v="" e=$'\e' b=$'\a'
+ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with only its printable characters, in ANSWER
+  local v="" e=$'\e' b=$'\a' rc=0
   if [ "$UI" = gum ]; then
     # no placeholder: its first letter, under the cursor, reads as typed text. gum draws on
     # stderr, which goes to the log too: straight to the terminal instead, so it redraws
     # cleanly and what you type stays out of the log. Its top padding, a blank line above
     # the question, goes away with the prompt, so answered questions leave no gaps
-    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --padding "$GUM_PAD" --header "$1" </dev/tty 2>/dev/tty); else v=$(gum input --placeholder "" --padding "$GUM_PAD" --value "${3:-}" --header "$1" </dev/tty 2>/dev/tty); fi
+    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --padding "$GUM_PAD" --header "$1" </dev/tty 2>/dev/tty) || rc=$?
+    else v=$(gum input --placeholder "" --padding "$GUM_PAD" --value "${3:-}" --header "$1" </dev/tty 2>/dev/tty) || rc=$?; fi
+    gum_stop "$rc"
   else
     kind live
     if [ "$2" = 1 ]; then read -rsp "$1: " v </dev/tty; echo >/dev/tty; else read -rp "$1${3:+ [$3]}: " v </dev/tty; v=${v:-${3:-}}; fi
   fi
   # a pasted line break comes back as a space, and a terminal can slip in escape sequences:
   # none of them belong in a URL or a key
-  printf '%s' "$v" | LC_ALL=C sed -E "s#${e}\[[0-9;:?<=>]*[ -/]*[@-~]##g; s#${e}[]P^_X][^${e}${b}]*(${b}|${e}\\\\)?##g; s#\[20[01]~##g" |
-    LC_ALL=C tr -cd '[:graph:]'
+  ANSWER=$(printf '%s' "$v" | LC_ALL=C sed -E "s#${e}\[[0-9;:?<=>]*[ -/]*[@-~]##g; s#${e}[]P^_X][^${e}${b}]*(${b}|${e}\\\\)?##g; s#\[20[01]~##g" |
+    LC_ALL=C tr -cd '[:graph:]')
 }
-pick() {   # pick <question> <preselected> <choice...>: one of the choices, picked on the terminal
-  local c
-  if [ "$UI" = gum ]; then gum choose --padding "$GUM_PAD" --header "$1" ${2:+--selected "$2"} "${@:3}" </dev/tty 2>/dev/tty || die "stopped at your request"; return 0; fi
+pick() {   # pick <question> <preselected> <choice...>: one of the choices, picked on the terminal, in ANSWER
+  local rc=0
+  if [ "$UI" = gum ]; then
+    ANSWER=$(gum choose --padding "$GUM_PAD" --header "$1" ${2:+--selected "$2"} "${@:3}" </dev/tty 2>/dev/tty) || rc=$?
+    gum_stop "$rc"
+    return 0
+  fi
   kind live
   PS3="$1 "
-  select c in "${@:3}"; do if [ -n "$c" ]; then echo "$c"; return 0; fi; done </dev/tty
+  select ANSWER in "${@:3}"; do if [ -n "$ANSWER" ]; then return 0; fi; done </dev/tty
   die "stopped at your request"
 }
 url_ok() { [[ $1 =~ ^https?://[^/#[:space:]]+(/[^#[:space:]]*)?$ ]]; }   # url_ok <text>: an http(s) URL the settings file can hold
@@ -126,7 +133,7 @@ ask_settings() {   # ask_settings new|change: ask for the settings, from the fil
   kc=$(dirname "$DR_ENV")/kubeconfig
   src=${KUBECONFIG:-$HOME/.kube/config}
   while [ "$n" -lt 3 ]; do
-    src=$(ask "Your kubeconfig" 0 "${src/#$HOME/\~}")
+    ask "Your kubeconfig" 0 "${src/#$HOME/\~}"; src=$ANSWER
     src=${src/#\~/$HOME}
     ctxs=$(KUBECONFIG=$src oc config get-contexts -o name 2>/dev/null) || ctxs=""
     n=$(grep -c . <<<"$ctxs" || true)
@@ -134,7 +141,7 @@ ask_settings() {   # ask_settings new|change: ask for the settings, from the fil
   done
   if [ "$mode" = change ]; then branch=$BRANCH; else branch=$(git branch --show-current 2>/dev/null || echo main); fi
   while :; do
-    branch=$(ask "Branch the clusters pull from (the targetRevision in your copy)" 0 "$branch")
+    ask "Branch the clusters pull from (the targetRevision in your copy)" 0 "$branch"; branch=$ANSWER
     git fetch -q origin "$branch" 2>/dev/null || true
     if git rev-parse -q --verify "origin/$branch" >/dev/null; then break; fi
     note "no branch $branch on origin: push it first, or name another"
@@ -143,11 +150,11 @@ ask_settings() {   # ask_settings new|change: ask for the settings, from the fil
   local BRANCH=$branch
   if [[ $(git_role hub-y) == active* ]]; then act=hub-y pas=hub-x; fi
   # shellcheck disable=SC2086 # one context per word
-  a=$(pick "Which context is the hub that starts active ($act)?" "$act" $ctxs)
+  pick "Which context is the hub that starts active ($act)?" "$act" $ctxs; a=$ANSWER
   # shellcheck disable=SC2046 # one context per word
-  p=$(pick "Which context is the hub that starts passive ($pas)?" "$pas" $(grep -vx -- "$a" <<<"$ctxs"))
+  pick "Which context is the hub that starts passive ($pas)?" "$pas" $(grep -vx -- "$a" <<<"$ctxs"); p=$ANSWER
   # shellcheck disable=SC2046 # one context per word
-  m=$(pick "Which context is the workload cluster (spoke)?" spoke $(grep -vx -e "$a" -e "$p" <<<"$ctxs"))
+  pick "Which context is the workload cluster (spoke)?" spoke $(grep -vx -e "$a" -e "$p" <<<"$ctxs"); m=$ANSWER
   if [ "$(readlink -f "$src")" = "$(readlink -f "$kc")" ] && [ "$a" = "$act" ] && [ "$p" = "$pas" ] && [ "$m" = spoke ]; then
     finished "${kc/#$HOME/\~}: as it was"
   else
@@ -171,19 +178,19 @@ ask_settings() {   # ask_settings new|change: ask for the settings, from the fil
     line "     $(cl "$pas")  the passive hub, your $p"
     line "     $(cl spoke)  the workload cluster, your $m"
   fi
-  bucket=$(ask "S3 bucket for the backups" 0 "${S3_BUCKET:-acm-backups}")
-  prefix=$(ask "Prefix in the bucket" 0 "${S3_PREFIX:-acm}")
-  region=$(ask "S3 region" 0 "${S3_REGION:-us-east-1}")
+  ask "S3 bucket for the backups" 0 "${S3_BUCKET:-acm-backups}"; bucket=$ANSWER
+  ask "Prefix in the bucket" 0 "${S3_PREFIX:-acm}"; prefix=$ANSWER
+  ask "S3 region" 0 "${S3_REGION:-us-east-1}"; region=$ANSWER
   url=${S3_URL:-}
   while :; do
-    url=$(ask "S3 endpoint URL (e.g. https://s3.example.com; empty for AWS S3)" 0 "$url")
+    ask "S3 endpoint URL (e.g. https://s3.example.com; empty for AWS S3)" 0 "$url"; url=$ANSWER
     url=${url%/}
     if [ -z "$url" ] || url_ok "$url"; then break; fi
     note "'$url' is not an http(s) URL: enter the endpoint only"
   done
   ca=${S3_CA_FILE:-}
   while :; do
-    ca=$(ask "CA file (PEM) of the S3 endpoint; empty if its certificate is publicly trusted" 0 "$ca")
+    ask "CA file (PEM) of the S3 endpoint; empty if its certificate is publicly trusted" 0 "$ca"; ca=$ANSWER
     if [ -z "$ca" ] || [ -f "${ca/#\~/$HOME}" ]; then break; fi
     note "no file at $ca"
   done
@@ -214,7 +221,8 @@ stage_settings() {   # on a terminal, the first stage: write the settings file, 
     stage Settings "The settings file, ${DR_ENV/#$HOME/\~}, names the clusters, the branch they pull from and the backup storage; hack/dr.sh and hack/teardown.sh read it too. Keep it, or change it: the questions start from what it holds. Nothing changes on the clusters in this stage."
     echo
     settings_show
-    if [ "$(pick "Use these settings?" "" Keep Change)" = Keep ]; then
+    pick "Use these settings?" "" Keep Change
+    if [ "$ANSWER" = Keep ]; then
       logln "   kept"
       settings_routes
       return 0
@@ -239,7 +247,7 @@ IPLAN=installplans.operators.coreos.com
 MCH=multiclusterhubs.operator.open-cluster-management.io
 A_BACKUP=acm-gitops-failover/cluster-backup
 A_APPROVAL=acm-gitops-failover/install-plan-approval
-TMP=$(mktemp -d)
+TMP=""   # made after the menu: a menu's own process runs nothing that needs it
 
 # --- what is there -----------------------------------------------------------------
 
@@ -621,18 +629,18 @@ s3_inputs() {
   say "S3 access"
   explain "The keys go into a secret on each hub and nowhere else: not into a file, not into the log."
   if [ -z "$S3_URL" ] && ! grep -q '^S3_URL=' "$DR_ENV"; then
-    S3_URL=$(ask "S3 endpoint URL (e.g. https://s3.example.com; empty for AWS S3)" 0)
+    ask "S3 endpoint URL (e.g. https://s3.example.com; empty for AWS S3)" 0; S3_URL=$ANSWER
     S3_URL=${S3_URL%/}
     if [ -n "$S3_URL" ] && ! url_ok "$S3_URL"; then die "'$S3_URL' is not an http(s) URL: run it again and enter the endpoint only"; fi
     set_setting S3_URL "$S3_URL"
     finished "S3_URL=${S3_URL:-(AWS S3)} saved in $DR_ENV"
   fi
   if [ -z "$S3_ACCESS_KEY" ]; then
-    S3_ACCESS_KEY=$(ask "S3 access key" 0)
+    ask "S3 access key" 0; S3_ACCESS_KEY=$ANSWER
     finished "S3 access key: ${#S3_ACCESS_KEY} characters, ending in ${S3_ACCESS_KEY: -4}"
   fi
   if [ -z "$S3_SECRET_KEY" ]; then
-    S3_SECRET_KEY=$(ask "S3 secret key" 1)
+    ask "S3 secret key" 1; S3_SECRET_KEY=$ANSWER ANSWER=""
     finished "S3 secret key: ${#S3_SECRET_KEY} characters"
   fi
   if [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then die "the S3 keys are empty"; fi
@@ -850,8 +858,8 @@ menu() {
     select choice in "${items[@]}"; do if [ -n "$choice" ]; then break; fi; done </dev/tty
   fi
   case $choice in
-    Check) CHECK=1 ;;
-    Build) ;;
+    Check) menu_run --check ;;
+    Build) menu_run ;;
     *) exit 0 ;;
   esac
 }
@@ -879,9 +887,10 @@ on_exit() {
 
 trap on_exit EXIT
 start_screen
-if [ "$ARGC" = 0 ]; then
+if [ "$ARGC" = 0 ] && [ "${DR_MENU:-0}" = 0 ]; then   # a menu pick runs as its own hack/build.sh
   if [ -t 0 ] && [ -t 1 ]; then menu; else usage; DIED=1; exit 2; fi
 fi
+TMP=$(mktemp -d)
 ASK=0   # on a terminal, the settings are the first stage
 if [ "$YES" = 0 ] && [ -t 0 ] && [ -t 1 ]; then ASK=1; fi
 if [ ! -f "$DR_ENV" ] && [ "$ASK" = 0 ]; then

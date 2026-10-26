@@ -139,6 +139,9 @@ hack/build.sh --check   # read-only on the clusters: what it would install, reus
 hack/build.sh           # a menu; --yes builds without asking
 ```
 
+The menu offers Check, Build and Quit. Each pick, done or stopped, ends
+with Back to the menu; only Quit (or Ctrl-C) leaves.
+
 With gum, the script starts on a clear screen and keeps the top of the
 screen in place: the stages (done, current and to come) and the time
 since it started. Each stage starts on an empty
@@ -639,7 +642,8 @@ hack/teardown.sh                     # a menu; --yes removes without asking
 
 On its own, `hack/teardown.sh` offers Check (Reset) and Check (Teardown),
 the dry runs of `--reset` and `--full`, then Teardown (Reset) and
-Teardown (Full). The default mode is a command:
+Teardown (Full). Each pick, done or stopped, ends with Back to the menu;
+only Quit (or Ctrl-C) leaves. The default mode is a command:
 `hack/teardown.sh --dry-run`, then `hack/teardown.sh --yes`.
 
 | Mode | What goes |
