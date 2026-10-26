@@ -1008,42 +1008,53 @@ run_started() {   # a run started again after a stop carries on in the same fold
   if [ "${k:-0}" -gt 0 ]; then event "run $RUN started (attempt $((k + 1)))"; else event "run $RUN started"; fi
 }
 
-run_step() {   # run_step <n> <text>: one line of the overview, under the stage's name in the progress header
-  local w l first=1
+run_step() {   # run_step <n> <text> [step...]: a stage of the overview under its name in the progress header, then its numbered steps
+  local w i=0 t l first=1 pre
   w=$(cols)
   w=$((w > 84 ? 76 : w - 8))
   logln "   $1 ${STAGES[$1 - 1]}: $2"
   kind text
-  while IFS= read -r l; do
-    if [ "$first" = 1 ]; then printf '   %s%-12s%s%s\n' "$C_B" "${STAGES[$1 - 1]}" "$C_OFF" "$(paint "$l")"; first=0
-    else printf '   %12s%s\n' "" "$(paint "$l")"; fi
-  done < <(printf '%s\n' "$2" | fold -s -w $((w - 12)) | sed 's/ *$//')
+  for t in "$2" "${@:3}"; do
+    pre="" first=1
+    if [ "$i" -gt 0 ]; then pre="$i. "; logln "      $pre$t"; fi
+    while IFS= read -r l; do
+      if [ "$i" = 0 ] && [ "$first" = 1 ]; then printf '   %s%-12s%s%s\n' "$C_B" "${STAGES[$1 - 1]}" "$C_OFF" "$(paint "$l")"
+      elif [ "$first" = 1 ]; then printf '   %12s%s%s\n' "" "$pre" "$(paint "$l")"
+      else printf '   %12s%*s%s\n' "" "${#pre}" "" "$(paint "$l")"; fi
+      first=0
+    done < <(printf '%s\n' "$t" | fold -s -w $((w - 12 - ${#pre})) | sed 's/ *$//')
+    i=$((i + 1))
+  done
 }
 run_overview() {   # what the run will do, before anything starts; returns 1 for Back to the menu
-  local a=$ACTIVE p=$PASSIVE m=$MANAGED fo rj you choice
+  local a=$ACTIVE p=$PASSIVE m=$MANAGED act prom rj you choice
   if [ "$LAST" != top ]; then start_screen; fi   # a page of its own, after the menu
   if [ "$GIT" = 1 ]; then
-    fo="You merge two PRs to dr/$p: PR-A makes $(cl "$p") restore $(cl "$a")'s newest backup and take over $(cl "$m"), then PR-B starts $(cl "$p")'s backups. The push app then gets the new revision."
+    act="You merge PR-A to dr/$p, and $(cl "$p")'s own Argo CD swaps its standby restore for an activation restore: $(cl "$a")'s newest backup again, this time with $(cl "$m")'s import token."
+    prom="You merge PR-B, and $(cl "$p") starts writing its own backups. Only now, so a failed activation never overwrites $(cl "$a")'s last good backup."
     rj="You merge the demote PR to dr/$a, then power $(cl "$a") back on. It comes back as the passive hub."
     you="cut $(cl "$a")'s power, merge 3 PRs, and power $(cl "$a") back on"
   else
-    fo="The script makes $(cl "$p") the active hub: $(cl "$p") restores $(cl "$a")'s newest backup and takes over $(cl "$m"). The push app then gets the new revision."
-    rj="You power $(cl "$a") back on, and the script makes it the passive hub."
-    you="cut $(cl "$a")'s power, then power it back on"
+    act="You confirm, and the script swaps $(cl "$p")'s standby restore for an activation restore: $(cl "$a")'s newest backup again, this time with $(cl "$m")'s import token."
+    prom="The script starts $(cl "$p")'s own backups. Only now, so a failed activation never overwrites $(cl "$a")'s last good backup."
+    rj="You power $(cl "$a") back on; the script makes it the passive hub."
+    you="cut $(cl "$a")'s power, confirm the activation, and power $(cl "$a") back on"
   fi
   box double 13 "Run $RUN · $(mode_name): $(cl "$a") goes down, $(cl "$p") takes over" \
-    "$(cl "$a") is the active ACM hub and $(cl "$p") the passive one. This run cuts $(cl "$a")'s power, $(cl "$p") takes over $(cl "$m"), and $(cl "$a") then rejoins as the passive hub. Probes check that $(cl "$m")'s two demo apps keep answering, and time how long a new git revision takes to reach them."
+    "$(cl "$a") is the active ACM hub, $(cl "$p") the passive one. $(cl "$m")'s own Argo CD syncs a pull app from git; the active hub's Argo CD pushes a push app. Probes record whether both keep answering, and when each gets a new revision."
   blank
-  run_step 1 "Read-only checks that the lab is ready. Nothing changes."
-  run_step 2 "The probes start. You cut $(cl "$a")'s power; $(cl "$m")'s apps should not notice."
-  run_step 3 "With no hub up, the script commits a new revision of both apps to $BRANCH. The pull app gets it from git with no hub; the push app waits for one."
-  run_step 4 "$fo"
+  run_step 1 "Read-only checks. Nothing changes before \"Start run $RUN?\"."
+  run_step 2 "The probes start, then you cut $(cl "$a")'s power."
+  run_step 3 "With no hub up, the script commits a new revision of both apps to $BRANCH. The pull app gets it; the push app waits for a hub."
+  run_step 4 "$(cl "$p") has been a warm standby, restoring each of $(cl "$a")'s backups except the managed clusters. To take over:" \
+    "Death gate: $(cl "$a")'s API must stay down, so $(cl "$m") never answers to two hubs." \
+    "$act" \
+    "$(cl "$p") re-imports $(cl "$m") with that token. $(cl "$m")'s agent and addons switch to $(cl "$p"), its apps keep running, and $(cl "$p")'s Argo CD delivers the new revision to the push app." \
+    "$prom"
   run_step 5 "$rj"
-  run_step 6 "The probes stop. The script shows whether the apps kept answering, and how long each step took."
+  run_step 6 "The probes stop, and the script shows what they recorded."
   blank
-  explain "Your part: $you. The script stops and says YOUR TURN each time it needs you$(if [ "$YES" = 0 ]; then echo ", and between stages it waits for Continue. After the pre-flight it asks \"Start run $RUN?\" before anything changes"; fi)."
-  blank
-  explain "At the end $(cl "$p") is active and $(cl "$a") passive, so the next run fails over the other way. Past runs took 12 to 33 minutes, plus your pauses. Logs: ${LOGDIR/#$HOME/\~}"
+  explain "Your part: $you; the script stops for each. At the end $(cl "$p") is active and $(cl "$a") passive, so the next run fails over the other way. Past runs: 12 to 33 min plus your pauses. Logs: ${LOGDIR/#$HOME/\~}"
   if [ "$YES" = 1 ] || ! { : </dev/tty; } 2>/dev/null; then return 0; fi
   blank
   if [ "$UI" = gum ]; then
