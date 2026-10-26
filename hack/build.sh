@@ -50,14 +50,17 @@ done
 
 # --- settings ----------------------------------------------------------------------
 
+GUM_PAD="1 0 0 0"   # top right bottom left: a blank line above each question
 ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with only its printable characters
   local v="" e=$'\e' b=$'\a'
   if [ "$UI" = gum ]; then
     # no placeholder: its first letter, under the cursor, reads as typed text. gum draws on
     # stderr, which goes to the log too: straight to the terminal instead, so it redraws
-    # cleanly and what you type stays out of the log
-    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --header "$1" </dev/tty 2>/dev/tty); else v=$(gum input --placeholder "" --value "${3:-}" --header "$1" </dev/tty 2>/dev/tty); fi
+    # cleanly and what you type stays out of the log. Its top padding, a blank line above
+    # the question, goes away with the prompt, so answered questions leave no gaps
+    if [ "$2" = 1 ]; then v=$(gum input --password --placeholder "" --padding "$GUM_PAD" --header "$1" </dev/tty 2>/dev/tty); else v=$(gum input --placeholder "" --padding "$GUM_PAD" --value "${3:-}" --header "$1" </dev/tty 2>/dev/tty); fi
   else
+    kind live
     if [ "$2" = 1 ]; then read -rsp "$1: " v </dev/tty; echo >/dev/tty; else read -rp "$1${3:+ [$3]}: " v </dev/tty; v=${v:-${3:-}}; fi
   fi
   # a pasted line break comes back as a space, and a terminal can slip in escape sequences:
@@ -67,7 +70,8 @@ ask() {   # ask <prompt> <secret 0|1> [default]: a line from the terminal, with 
 }
 pick() {   # pick <question> <preselected> <choice...>: one of the choices, picked on the terminal
   local c
-  if [ "$UI" = gum ]; then gum choose --header "$1" ${2:+--selected "$2"} "${@:3}" </dev/tty 2>/dev/tty || die "stopped at your request"; return 0; fi
+  if [ "$UI" = gum ]; then gum choose --padding "$GUM_PAD" --header "$1" ${2:+--selected "$2"} "${@:3}" </dev/tty 2>/dev/tty || die "stopped at your request"; return 0; fi
+  kind live
   PS3="$1 "
   select c in "${@:3}"; do if [ -n "$c" ]; then echo "$c"; return 0; fi; done </dev/tty
   die "stopped at your request"
@@ -103,6 +107,19 @@ settings_show() {   # what the settings file holds
   line "     workload    $(cl "$MANAGED")"
   line "     branch      $BRANCH"
   line "     storage     s3://$S3_BUCKET/$S3_PREFIX in $S3_REGION, $at${S3_CA_FILE:+, CA file $S3_CA_FILE}"
+  line "     demo apps   ${APP_URL:-not deployed yet (the build saves their URLs)}"
+  line "     next run    ${RUN:-1}"
+}
+settings_routes() {   # settings without the demo apps' URLs, on an exercise that has the apps: the URLs from their routes
+  local h
+  if [ -n "${APP_URL:-}" ]; then return 0; fi
+  h=$(oc --context "$MANAGED" get routes.route.openshift.io -n hello-failover -o jsonpath='{.items[0].spec.host}' 2>/dev/null || true)
+  if [ -z "$h" ]; then return 0; fi   # not deployed yet: the Demo apps stage saves them
+  APP_URL=https://$h
+  set_setting APP_URL "$APP_URL"
+  h=$(oc --context "$MANAGED" get routes.route.openshift.io -n hello-failover-push -o jsonpath='{.items[0].spec.host}' 2>/dev/null || true)
+  if [ -n "$h" ]; then PUSH_APP_URL=https://$h; set_setting PUSH_APP_URL "$PUSH_APP_URL"; fi
+  finished "APP_URL and PUSH_APP_URL from the demo apps' routes on $(cl "$MANAGED"), saved"
 }
 ask_settings() {   # ask_settings new|change: ask for the settings, from the file's values (change) or the usual ones (new); write them and the kubeconfig
   local mode=$1 src ctxs a p m kc tmp branch bucket prefix region url ca n=0 act=hub-x pas=hub-y
@@ -173,7 +190,9 @@ ask_settings() {   # ask_settings new|change: ask for the settings, from the fil
   if [ "$mode" = new ]; then
     # the build writes the demo apps' routes once they answer
     sed -e '/^# routes of the two demo apps/,/^$/d' -e 's/^# S3_URL=.*/S3_URL=/' "$REPO/hack/dr.env.example" >"$DR_ENV"
-    set_setting RUN 1
+    # the next run's number: after the runs whose logs are in ~/acm-dr/runs
+    n=$(find "$HOME/acm-dr/runs" -maxdepth 1 -name 'run-*' -printf '%f\n' 2>/dev/null | sed -n 's/^run-\([0-9][0-9]*\)$/\1/p' | sort -n | tail -n 1)
+    set_setting RUN $((${n:-0} + 1))
   fi
   set_setting KUBECONFIG "${kc/#$HOME/\~}"
   set_setting ACTIVE "$act"
@@ -190,23 +209,22 @@ ask_settings() {   # ask_settings new|change: ask for the settings, from the fil
 stage_settings() {   # on a terminal, the first stage: write the settings file, or show it and keep or change it
   if [ ! -f "$DR_ENV" ]; then
     stage Settings "There is no settings file at ${DR_ENV/#$HOME/\~} yet. Answer a few questions and the build writes it, together with $(dirname "${DR_ENV/#$HOME/\~}")/kubeconfig: a copy of your kubeconfig in which the two hubs and the workload cluster are named hub-x, hub-y and spoke, the names the repo's manifests and dr/ use. Your own kubeconfig stays as it is. hack/dr.sh and hack/teardown.sh read the same file. Nothing changes on the clusters in this stage."
-    echo
     ask_settings new
   else
     stage Settings "The settings file, ${DR_ENV/#$HOME/\~}, names the clusters, the branch they pull from and the backup storage; hack/dr.sh and hack/teardown.sh read it too. Keep it, or change it: the questions start from what it holds. Nothing changes on the clusters in this stage."
     echo
     settings_show
-    echo
     if [ "$(pick "Use these settings?" "" Keep Change)" = Keep ]; then
       logln "   kept"
+      settings_routes
       return 0
     fi
     if [ "$PIN" = 1 ]; then pin_clear; stage_head Settings; fi   # the questions on an empty window
     explain "Each question starts from what the settings file holds: Enter keeps it."
-    echo
     ask_settings change
   fi
   load_settings
+  settings_routes
   settings_title
   pin_draw
   settings_show
@@ -362,11 +380,13 @@ stage() {   # stage <title> <what and why>
   explain "$2"
 }
 stage_head() {   # stage_head <title>: the current stage's heading
+  blank
   if [ "$UI" = gum ]; then
-    printf '\n %s── %s%s\n' "$C_B$C_ACC" "$(paint "$(stage_name "$STAGE" "$1")" "$C_B$C_ACC")" "$C_OFF"
+    printf ' %s── %s%s\n' "$C_B$C_ACC" "$(paint "$(stage_name "$STAGE" "$1")" "$C_B$C_ACC")" "$C_OFF"
   else
-    printf '\n#### %s\n' "$(bare "$(stage_name "$STAGE" "$1")")"
+    printf '#### %s\n' "$(bare "$(stage_name "$STAGE" "$1")")"
   fi
+  LAST=heading
 }
 
 declare -A ACM_NS ACM_HAS GITOPS_HAS GITOPS_PIN

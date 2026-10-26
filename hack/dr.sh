@@ -47,7 +47,11 @@ DR_ENV=${DR_ENV:-$HOME/acm-dr/dr.env}
 DR_ENV=$(readlink -f "$DR_ENV")
 # shellcheck source=/dev/null
 . "$DR_ENV"
-: "${ACTIVE:?set ACTIVE in $DR_ENV}" "${PASSIVE:?set PASSIVE in $DR_ENV}" "${APP_URL:?set APP_URL in $DR_ENV}"
+: "${ACTIVE:?set ACTIVE in $DR_ENV}" "${PASSIVE:?set PASSIVE in $DR_ENV}"
+if [ -z "${APP_URL:-}" ]; then
+  echo "no APP_URL in $DR_ENV: run hack/build.sh and keep your settings; it reads the demo apps' URLs from their routes (or deploys the apps)" >&2
+  exit 2
+fi
 MANAGED=${MANAGED:-spoke}
 PUSH_APP_URL=${PUSH_APP_URL:-}
 BRANCH=${BRANCH:-main}
@@ -82,6 +86,7 @@ event() {   # a milestone: on the screen, in the log and in events.log
   t=$(now)
   bare "$t $*"$'\n' >>"$LOGDIR/events.log"
   logln "$t $*"
+  kind live
   if [ "$UI" = gum ]; then printf '   %s◆ %s%s %s\n' "$C_ACC" "${t:11:8}" "$C_OFF" "$(paint "$*")"; else echo "$t $(bare "$*")"; fi
   pin_draw
 }
@@ -136,7 +141,9 @@ stage() {   # stage <n>: where the run stands. With gum, each stage after the fi
   STAGE_EV=$n STAGE_N=$1
   logln "" "#### Stage $1/${#STAGES[@]}: ${STAGES[$1 - 1]}"
   if [ "$UI" != gum ]; then
-    printf '\n#### Stage %d/%d: %s\n' "$1" "${#STAGES[@]}" "${STAGES[$1 - 1]}"
+    blank
+    printf '#### Stage %d/%d: %s\n' "$1" "${#STAGES[@]}" "${STAGES[$1 - 1]}"
+    LAST=heading
     explain "$(stage_text "$1")"
     return 0
   fi
@@ -147,13 +154,17 @@ stage() {   # stage <n>: where the run stands. With gum, each stage after the fi
     if [ "$1" -gt 1 ]; then fresh_screen; fi
     w=$(cols)
     w=$((w > 80 ? 78 : w - 2))
-    printf '\n %s%s%s\n %s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF" "$(crumbs "$1")"
+    blank
+    printf ' %s%s%s\n %s\n' "$C_DIM" "$(run_rule "$w")" "$C_OFF" "$(crumbs "$1")"
+    LAST=heading
   fi
   if [ -n "$recap" ]; then   # the end of the last stage, so the clear screen keeps some context
-    printf '\n   %s%s ended with:%s\n' "$C_DIM" "${STAGES[$1 - 2]}" "$C_OFF"
+    blank
+    printf '   %s%s ended with:%s\n' "$C_DIM" "${STAGES[$1 - 2]}" "$C_OFF"
     while read -r i s; do printf '   %s◆ %s %s%s\n' "$C_DIM" "${i:11:8}" "$s" "$C_OFF"; done <<<"$recap"
+    LAST=live
   fi
-  echo
+  blank
   explain "$(stage_text "$1")"
 }
 stage_text() {   # stage_text <n>: what the stage does and why
