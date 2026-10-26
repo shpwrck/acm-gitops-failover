@@ -24,15 +24,36 @@ APP=applications.argoproj.io
 
 UI=plain
 if [ -t 1 ] && [ "${DR_PLAIN:-0}" != 1 ] && [ -z "${NO_COLOR:-}" ] && command -v gum >/dev/null; then UI=gum; fi
-C_B="" C_DIM="" C_OFF="" C_OK="" C_BAD="" C_WARN="" C_ACC=""
+C_B="" C_DIM="" C_OFF="" C_OK="" C_BAD="" C_WARN="" C_ACC="" C_CL=""
 if [ "$UI" = gum ]; then
-  C_B=$'\e[1m' C_DIM=$'\e[2m' C_OFF=$'\e[0m' C_OK=$'\e[92m' C_BAD=$'\e[91m' C_WARN=$'\e[33m' C_ACC=$'\e[95m'
+  C_B=$'\e[1m' C_DIM=$'\e[2m' C_OFF=$'\e[0m' C_OK=$'\e[92m' C_BAD=$'\e[91m' C_WARN=$'\e[33m' C_ACC=$'\e[95m' C_CL=$'\e[1;96m'
 fi
 exec 3>/dev/null
 
+# Cluster names: a message marks each one with cl, and paint shows it bold
+# and in its own color. The log and plain output get the bare name.
+CL_ON=$'\x1e' CL_OFF=$'\x1f'
+cl() { printf '%s%s%s' "$CL_ON" "$1" "$CL_OFF"; }   # cl <context>: a cluster name in a message
+bare() { printf '%s' "${1//[$CL_ON$CL_OFF]/}"; }   # bare <text>: the text without the marks
+paint() {   # paint <text> [style]: the marked names in C_CL, each followed by <style>, the text's own
+  local s=$1
+  if [ "$UI" != gum ]; then bare "$s"; return 0; fi
+  s=${s//$CL_ON/$C_CL}
+  printf '%s' "${s//$CL_OFF/$C_OFF${2:-}}"
+}
+
 now() { date -u +%FT%TZ; }
-logln() { printf '%s\n' "$@" >&3; }
-line() { printf '%s\n' "$*"; logln "$*"; }
+# Spacing: a blank line wherever description text meets live output (checks, waits, tables), in
+# either direction, and never two in a row. LAST is what the screen's last line is: blank, top (of
+# an empty window), heading (a heading or a box), text (description) or live (output)
+LAST=top
+blank() { if [ "$LAST" != blank ]; then echo; LAST=blank; fi; }
+kind() {   # kind text|live: a line of that kind comes next; after one of the other kind, a blank line first
+  if { [ "$LAST" = text ] && [ "$1" = live ]; } || { [ "$LAST" = live ] && [ "$1" = text ]; }; then echo; fi
+  LAST=$1
+}
+logln() { local l; for l in "$@"; do printf '%s\n' "${l//[$CL_ON$CL_OFF]/}"; done >&3; }
+line() { kind live; printf '%s\n' "$(paint "$*")"; logln "$*"; }
 not() { ! "$@"; }
 dur() {   # dur <seconds>: 41s, 3m05s, 1h02m
   if [ "$1" -lt 60 ]; then echo "$1s"
@@ -49,36 +70,46 @@ cols() {   # the terminal's width; 80 when it does not say
 gumc() { CLICOLOR_FORCE=1 gum "$@"; }
 
 box() {   # box <border> <color> <title> [line...]: a framed message with gum, plain lines without
-  local border=$1 color=$2 title=$3 l w
+  local border=$1 color=$2 title=$3 l w lines=()
   shift 3
   logln "" "== $title"
   for l in "$@"; do logln "   $l"; done
   if [ "$UI" = gum ]; then
     w=$(cols)
     w=$((w > 80 ? 76 : w - 4))
-    printf '\n%s\n' "$(gumc style --border "$border" --border-foreground "$color" --padding '0 2' --margin '0 1' --width "$w" \
-      "$(gumc style --bold --foreground "$color" "$title")" "$@")"
+    for l in "$@"; do lines+=("$(paint "$l")"); done
+    blank
+    printf '%s\n' "$(gumc style --border "$border" --border-foreground "$color" --padding '0 2' --margin '0 1' --width "$w" -- \
+      "$(gumc style --bold --foreground "$color" -- "$(paint "$title" $'\e[1;38;5;'"$color"m)")" ${lines[@]+"${lines[@]}"})"
   else
-    printf '\n== %s\n' "$title"
-    for l in "$@"; do printf '%s\n' "$l" | fold -s -w 76 | sed 's/ *$//; s/^/   /'; done
+    blank
+    printf '== %s\n' "$(bare "$title")"
+    for l in "$@"; do bare "$l" | fold -s -w 76 | sed 's/ *$//; s/^/   /'; echo; done
   fi
+  LAST=heading
+}
+intro() {   # intro <title> [line...]: what the script does, above its menu; all three scripts open this way
+  box rounded 13 "$@"
 }
 your_turn() {   # your_turn <what> [line...]: something only you can do; the bell calls you back
   box double 3 "YOUR TURN: $1" "${@:2}"
   if [ "$UI" = gum ]; then printf '\a'; fi
 }
 say() {
-  HELP_SHOWN="" PIN_STEP=$*
+  HELP_SHOWN=""
   logln "" "== $*"
   pin_draw
-  if [ "$UI" = gum ]; then printf '\n %s▍%s%s%s\n' "$C_ACC" "$C_B" "$*" "$C_OFF"; else printf '\n== %s\n' "$*"; fi
+  blank
+  if [ "$UI" = gum ]; then printf ' %s▍%s%s%s\n' "$C_ACC" "$C_B" "$(paint "$*" "$C_ACC$C_B")" "$C_OFF"; else printf '== %s\n' "$(bare "$*")"; fi
+  LAST=heading
 }
 mark() {   # mark <plain tag> <gum mark> <text>
   logln "   $1 $3"
-  if [ "$UI" = gum ]; then printf '   %s %s\n' "$2" "$3"; else printf '   %s %s\n' "$1" "$3"; fi
+  kind live
+  if [ "$UI" = gum ]; then printf '   %s %s\n' "$2" "$(paint "$3")"; else printf '   %s %s\n' "$1" "$(bare "$3")"; fi
 }
 BAD=0 RED_LIST=()
-ok() { mark "ok   " "${C_OK}✓${C_OFF}" "$*"; }
+ok() { SEC_OK=$((SEC_OK + 1)); mark "ok   " "${C_OK}✓${C_OFF}" "$*"; }
 HELP="" HELP_SHOWN=""
 help_at() { HELP=$1; }   # help_at <doc#anchor>: the section that explains the RED lines after it
 doc_url() {   # doc_url <path in the repo>: a web link into your copy of the repo, or the local file
@@ -92,7 +123,7 @@ link() {   # link <url>: the url, clickable where the terminal supports it
 }
 red() {   # a failed check, then (once per section) where the docs explain what could be wrong
   local u
-  BAD=1 RED_LIST+=("$*")
+  BAD=1 RED_LIST+=("$*") SEC_RED=$((SEC_RED + 1))
   mark "RED  " "${C_BAD}✗${C_OFF}" "$*"
   if [ -n "$HELP" ] && [ "$HELP" != "$HELP_SHOWN" ]; then
     HELP_SHOWN=$HELP
@@ -105,33 +136,40 @@ red() {   # a failed check, then (once per section) where the docs explain what 
     fi
   fi
 }
-note() { mark "note " "${C_WARN}•${C_OFF}" "$*"; }
-label() { logln "   $*"; printf '   %s%s%s\n' "$C_B" "$*" "$C_OFF"; }
+note() { SEC_NOTE=$((SEC_NOTE + 1)); mark "note " "${C_WARN}•${C_OFF}" "$*"; }
+label() { logln "   $*"; kind live; printf '   %s%s%s\n' "$C_B" "$(paint "$*" "$C_B")" "$C_OFF"; }
 explain() {   # explain <text>: what a step does and why, wrapped under its heading
   local w
   w=$(cols)
   w=$((w > 84 ? 76 : w - 8))
-  logln "$(printf '%s\n' "$*" | fold -s -w 76 | sed 's/ *$//; s/^/   /')"
-  printf '%s\n' "$*" | fold -s -w "$w" | sed 's/ *$//; s/^/   /'
+  logln "$(bare "$*" | fold -s -w 76 | sed 's/ *$//; s/^/   /')"
+  kind text
+  paint "$(printf '%s\n' "$*" | fold -s -w "$w" | sed 's/ *$//; s/^/   /')"
+  echo
 }
 finished() {   # finished <text>: a step that went through
   logln "   $*"
-  if [ "$UI" = gum ]; then printf '   %s✓%s %s%s%s\n' "$C_OK" "$C_OFF" "$C_DIM" "$*" "$C_OFF"; else echo "   $*"; fi
+  kind live
+  if [ "$UI" = gum ]; then printf '   %s✓%s %s%s%s\n' "$C_OK" "$C_OFF" "$C_DIM" "$(paint "$*" "$C_DIM")" "$C_OFF"; else echo "   $(bare "$*")"; fi
 }
 verdict() {   # verdict ok|bad <text>
   local color=9
   if [ "$1" = ok ]; then color=10; fi
   logln "" "$2"
+  blank
   if [ "$UI" = gum ]; then
-    printf '\n%s\n' "$(gumc style --border rounded --border-foreground "$color" --foreground "$color" --bold --padding '0 1' --margin '0 1' "$2")"
+    printf '%s\n' "$(gumc style --border rounded --border-foreground "$color" --foreground "$color" --bold --padding '0 1' --margin '0 1' -- \
+      "$(paint "$2" $'\e[1;38;5;'"$color"m)")"
   else
-    printf '\n%s\n' "$2"
+    printf '%s\n' "$(bare "$2")"
   fi
+  LAST=heading
 }
 show() {   # show [command...]: its output (or stdin), indented and dim, on the screen and in the log
   local out rc=0 l
   if [ $# -gt 0 ]; then out=$("$@" 2>&1) || rc=$?; else out=$(cat); fi
   if [ -n "$out" ]; then
+    kind live
     while IFS= read -r l; do
       logln "     $l"
       printf '     %s%s%s\n' "$C_DIM" "$l" "$C_OFF"
@@ -155,62 +193,145 @@ align() {   # tab-separated rows in aligned columns
 table() {   # table: tab-separated rows on stdin, the first one the header
   local rows
   rows=$(cat)
-  align <<<"$rows" >&3
+  bare "$rows" | align >&3
+  kind live
   if [ "$UI" = gum ]; then
+    rows=$(paint "$rows")
     # gum 0.17's --print leaves the header plain (and bolds the first row), so the header is colored here
     rows=$(awk -F'\t' -v OFS='\t' -v a="$C_B$C_ACC" -v z="$C_OFF" 'NR == 1 { for (i = 1; i <= NF; i++) $i = a $i z } 1' <<<"$rows")
     printf '%s\n' "$(gumc table --print --separator $'\t' --border rounded --border.foreground 8 --selected.foreground '' \
       --lazy-quotes <<<"$rows" | sed 's/^/  /')"
   else
-    align <<<"$rows"
+    bare "$rows" | align
   fi
 }
+
+# Sections of checks: with gum, a section whose checks are all green
+# collapses to its heading, a ✓ and what it found; one with a RED line or
+# a note shows in full. The log gets every line either way.
+SEC=0 SEC_H="" SEC_FILE="" SEC_OK=0 SEC_RED=0 SEC_NOTE=0 SEC_LAST="" SEC_KIND=""
+sec_begin() {   # sec_begin <heading>: a section of checks, held back until sec_end
+  if [ "$UI" != gum ]; then say "$1"; return 0; fi
+  SEC=1 SEC_H=$1 SEC_OK=0 SEC_RED=0 SEC_NOTE=0
+  SEC_FILE=$(mktemp) SEC_KIND=$LAST   # the screen's last line, for when the section shrinks to one
+  exec 5>&1 1>"$SEC_FILE"
+  say "$1"
+}
+sec_end() {   # sec_end <what was found>: the section in full, or one line when it is all green
+  local h w
+  if [ "$SEC" != 1 ]; then return 0; fi
+  exec 1>&5 5>&-
+  SEC=0
+  if [ $((SEC_RED + SEC_NOTE)) -gt 0 ] || [ "$SEC_OK" = 0 ]; then
+    cat "$SEC_FILE"
+    SEC_LAST=full
+  else
+    LAST=$SEC_KIND
+    if [ "$SEC_LAST" != line ]; then blank; fi   # a run of one-line sections starts after a blank line
+    SEC_LAST=line
+    h=$(bare "$SEC_H")
+    w=$(($(cols) - ${#h} - 8))
+    printf ' %s▍%s%s%s %s✓%s' "$C_ACC" "$C_B" "$(paint "$SEC_H" "$C_ACC$C_B")" "$C_OFF" "$C_OK" "$C_OFF"
+    if [ -n "${1:-}" ] && [ "$w" -ge 12 ]; then printf ' %s%s%s' "$C_DIM" "$(fit "$w" "$1" "$C_DIM")" "$C_OFF"; fi
+    echo
+    LAST=live
+  fi
+  rm -f "$SEC_FILE"
+}
+sec_flush() { if [ "$SEC" = 1 ]; then SEC_RED=1; sec_end; fi; }   # a stop inside a section shows all of it
 
 DIED=0
 die() {
   spin_stop
+  sec_flush
   pin_off
   DIED=1
   box thick 9 "STOP" "$*" ${LOGFILE:+"" "Log: $LOGFILE"}
   exit 1
 }
+gum_stop() {   # gum_stop <gum's exit status> [when]: Ctrl-C at a question interrupts the script; Esc or No stops it at your request
+  case $1 in
+    0) ;;
+    130) exit 130 ;;
+    *) die "stopped at your request${2:+, $2}" ;;
+  esac
+}
 confirm() {
   [ "$YES" = 1 ] && return 0
-  local answer=""
+  local answer="" rc=0
   if [ "$UI" = gum ]; then
-    echo
-    if gum confirm --default=false "$1" </dev/tty >/dev/tty 2>/dev/tty; then
+    blank
+    gum confirm --default=false "$(paint "$1")" </dev/tty >/dev/tty 2>/dev/tty || rc=$?
+    if [ "$rc" = 0 ]; then
       finished "$1 yes"
       return 0
     fi
     logln "$1 no"
-    die "stopped at your request"
+    gum_stop "$rc"
   fi
-  read -r -p "$1 [y/N] " answer </dev/tty || true
+  read -r -p "$(bare "$1") [y/N] " answer </dev/tty || true
   logln "$1 [y/N] $answer"
   [ "$answer" = y ] || [ "$answer" = Y ] || die "stopped at your request"
 }
+PAUSED=0   # seconds spent at go_on's prompt
+go_on() {   # go_on <next stage>: wait for Continue before the next stage clears the window (not with --yes, or without a terminal)
+  local t0=$SECONDS answer=""
+  if [ "${YES:-0}" = 1 ] || ! { : </dev/tty; } 2>/dev/null; then return 0; fi
+  logln "" "-- next: $1"
+  if [ "$UI" = gum ]; then
+    blank
+    gum choose --header "Next: $(paint "$1")" Continue </dev/tty >/dev/null 2>/dev/tty || gum_stop "$?" "before $1"
+  else
+    read -r -p "Next: $(bare "$1"). Press Enter to continue " answer </dev/tty || true
+  fi
+  PAUSED=$((PAUSED + SECONDS - t0))
+  logln "   continued after $(dur $((SECONDS - t0)))"
+}
+
+# The menu: with no options on a terminal, each script opens on its menu. A pick
+# runs as a new process of the script (DR_MENU=1), with its own settings, log
+# and screen. When it ends, done or stopped, "Back to the menu" starts the
+# script afresh, so the settings are read again. Only Quit leaves, or Ctrl-C.
+menu_run() {   # menu_run [option...]: the script with those options, then the menu again
+  local rc=0 int=0
+  trap 'int=1' INT   # Ctrl-C reaches both; however the pick ends, it leaves the menu too
+  DR_MENU=1 bash "$SELF" "$@" || rc=$?
+  trap - INT
+  if [ "$rc" = 130 ] || [ "$int" = 1 ]; then DIED=1; exit 130; fi
+  echo
+  rc=0
+  if [ "$UI" = gum ]; then
+    gum choose --header "" "Back to the menu" </dev/tty >/dev/null 2>/dev/tty || rc=$?
+  else
+    read -r -p "Press Enter for the menu " </dev/tty || rc=130
+  fi
+  if [ "$rc" = 130 ]; then DIED=1; exit 130; fi
+  menu_again
+}
+menu_again() { exec env -u DR_MENU bash "$SELF"; }   # the menu from the start: a clear screen, the settings read again
 
 # The spinner: one status line, redrawn ten times a second while the script
 # waits. Checks run in the background so it keeps turning.
-SPIN="" SPIN_T0=0 SPIN_N=0 SPIN_W=60 POLL_PID=""
+SPIN="" SPIN_SHOW="" SPIN_T0=0 SPIN_N=0 SPIN_W=60 POLL_PID=""
 FRAMES=(⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷)
 spin_begin() {   # spin_begin <title>
   spin_stop
   logln "   $1"
+  kind live
   if [ "$UI" = gum ]; then
     SPIN=$1 SPIN_T0=$SECONDS SPIN_W=$(($(cols) - 14))
     if [ "$SPIN_W" -lt 20 ]; then SPIN_W=20; fi
+    SPIN_SHOW=$(fit "$SPIN_W" "$1" "" cut)
     printf '\e[?25l'
     spin_draw
   else
-    echo "   $1"
+    echo "   $(bare "$1")"
   fi
 }
 spin_draw() {
   local e=$((SECONDS - SPIN_T0))
   SPIN_N=$(((SPIN_N + 1) % ${#FRAMES[@]}))
-  printf '\r\e[K   %s%s%s %s %s%d:%02d%s' "$C_ACC" "${FRAMES[SPIN_N]}" "$C_OFF" "${SPIN:0:SPIN_W}" "$C_DIM" $((e / 60)) $((e % 60)) "$C_OFF"
+  printf '\r\e[K   %s%s%s %s %s%d:%02d%s' "$C_ACC" "${FRAMES[SPIN_N]}" "$C_OFF" "$SPIN_SHOW" "$C_DIM" $((e / 60)) $((e % 60)) "$C_OFF"
   if [ "$PIN" = 1 ] && [ "$SECONDS" != "$PIN_AT" ]; then pin_draw; fi   # the header's clock and counters, once a second
 }
 spin_stop() { if [ -n "$SPIN" ]; then printf '\r\e[K\e[?25h'; SPIN=""; fi; }
@@ -281,6 +402,9 @@ spin_cmd() {   # spin_cmd <title> <command...>: a slow command; its output goes 
   return "$rc"
 }
 
+start_screen() {   # with gum, a script starts on a clear screen (DR_CLEAR=0: not when another script runs it)
+  if [ "$UI" = gum ] && [ "${DR_CLEAR:-1}" != 0 ]; then fresh_screen; fi
+}
 fresh_screen() {   # scroll what the screen shows into the scrollback, then write from the top
   local rows
   rows=$(stty size 2>/dev/null </dev/tty) || rows=""
@@ -288,13 +412,14 @@ fresh_screen() {   # scroll what the screen shows into the scrollback, then writ
   if ! [[ $rows =~ ^[0-9]+$ ]] || [ "$rows" -lt 1 ]; then rows=50; fi
   printf '%*s' "$rows" '' | tr ' ' '\n'
   printf '\e[H'
+  LAST=top
 }
 
 # The pinned header: with gum, on a terminal of at least 72 columns and
 # <rows> + 16 lines, the top <rows> lines stay put and show what <draw>
 # prints, and the output scrolls under them. What scrolls off the top of
 # that part is gone from the screen (the log keeps it). DR_PIN=0 turns it off.
-PIN=0 PIN_H=0 PIN_DRAW="" PIN_AT=-1 PIN_ROWS=0 PIN_COLS=80 PIN_STEP=""
+PIN=0 PIN_H=0 PIN_DRAW="" PIN_AT=-1 PIN_ROWS=0 PIN_COLS=80
 term_rows() {   # the terminal's height; 0 when it does not say
   local s
   s=$(stty size 2>/dev/null </dev/tty) || s=""
@@ -305,7 +430,10 @@ pin_fits() { PIN_ROWS=$(term_rows) PIN_COLS=$(cols); [ "$PIN_ROWS" -ge $((PIN_H 
 pin_on() {   # pin_on <rows> <draw function>: pin the header, and start the output under it on an empty screen
   if [ "$UI" != gum ] || [ "${DR_PIN:-1}" = 0 ] || [ "$PIN" = 1 ]; then return 0; fi
   PIN_H=$1 PIN_DRAW=$2
-  pin_fits || return 0
+  if ! pin_fits; then
+    note "the terminal is ${PIN_COLS}x$PIN_ROWS; the progress header needs 72x$((PIN_H + 16)) or more, so the output scrolls instead"
+    return 0
+  fi
   PIN=1
   fresh_screen
   printf '\e[%d;%dr' $((PIN_H + 1)) "$PIN_ROWS"   # the scrolling region: everything under the header
@@ -313,7 +441,7 @@ pin_on() {   # pin_on <rows> <draw function>: pin the header, and start the outp
   trap pin_resize WINCH
 }
 pin_clear() {   # empty the part under the header, and write from its top
-  if [ "$PIN" = 1 ]; then printf '\e[%d;1H\e[J' $((PIN_H + 1)); pin_draw; fi
+  if [ "$PIN" = 1 ]; then printf '\e[%d;1H\e[J' $((PIN_H + 1)); LAST=top; pin_draw; fi
 }
 pin_draw() {   # redraw the header; the cursor stays where the output is
   local out l i=0 s=$'\e7'
@@ -325,7 +453,7 @@ pin_draw() {   # redraw the header; the cursor stays where the output is
     s+=$'\e['"$i"$';1H\e[2K'"$l"
   done <<<"$out"
   while [ "$i" -lt "$PIN_H" ]; do i=$((i + 1)); s+=$'\e['"$i"$';1H\e[2K'; done
-  printf '%s\e8' "$s"
+  if [ "$SEC" = 1 ]; then printf '%s\e8' "$s" >&5; else printf '%s\e8' "$s"; fi   # past a held-back section, to the screen
 }
 pin_resize() {   # a new terminal size: a new scrolling region, or no header if it no longer fits
   if [ "$PIN" != 1 ]; then return 0; fi
@@ -339,8 +467,55 @@ pin_off() {   # the whole screen scrolls again; the header stays on it as last d
   trap - WINCH
   printf '\e7\e[r\e8'   # resetting the region homes the cursor, so it is saved around that
 }
-fit() {   # fit <width> <text>: the text, cut to <width> characters with an ellipsis
-  if [ "${#2}" -le "$1" ]; then printf '%s' "$2"; else printf '%s…' "${2:0:$(($1 - 1))}"; fi
+crumbs() {   # crumbs <n> [width]: the stages in STAGES, done, current and to come; wrapped at <width>
+  local i t len=0 s=""
+  # shellcheck disable=SC2153 # each script sets STAGES
+  for i in "${!STAGES[@]}"; do
+    t=${STAGES[i]}
+    if [ "$i" -gt 0 ]; then
+      if [ $((len + 5 + ${#t})) -gt "${2:-999}" ]; then s+=$'\n' len=0; else s+="${C_DIM} › ${C_OFF}" len=$((len + 3)); fi
+    fi
+    if [ "$i" -lt $(($1 - 1)) ]; then
+      s+="${C_OK}✓ $t${C_OFF}"
+    elif [ "$i" = $(($1 - 1)) ]; then
+      s+="${C_B}${C_ACC}● $t${C_OFF}"
+    else
+      s+="${C_DIM}○ $t${C_OFF}"
+    fi
+    len=$((len + 2 + ${#t}))
+  done
+  printf '%s' "$s"
+}
+STEPS_TITLE=""
+steps_header() {   # steps_header <width>: build.sh's and teardown.sh's pinned lines: what runs and for how long, and the stages
+  local w=$(($1 > 80 ? 78 : $1)) rule fill l n=0
+  rule="── $STEPS_TITLE · $(dur $((SECONDS - T0))) "
+  l=$(bare "$rule")
+  printf -v fill '%*s' $((w - ${#l} > 0 ? w - ${#l} : 0)) ''
+  printf ' %s%s%s\n' "$C_DIM" "$(paint "$rule${fill// /─}" "$C_DIM")" "$C_OFF"
+  while IFS= read -r l; do printf ' %s\n' "$l"; n=$((n + 1)); done <<<"$(crumbs "$STAGE" $((w - 1)))"
+  while [ "$n" -lt $((PIN_H - 2)) ]; do echo; n=$((n + 1)); done
+  printf -v fill '%*s' "$w" ''
+  printf ' %s%s%s\n' "$C_DIM" "${fill// /─}" "$C_OFF"
+}
+steps_pin() {   # pin steps_header, as tall as the stages need at this width
+  local w=$(($(cols) - 1))
+  w=$((w > 80 ? 78 : w))
+  pin_on $(($(crumbs 1 $((w - 1)) | grep -c '') + 2)) steps_header
+}
+stage_name() {   # stage_name <n> <title>: the title; "Stage <n>/<all>: <title>" when no header shows where the stage stands
+  if [ "$PIN" = 1 ] || [ "${#STAGES[@]}" -le 1 ]; then printf '%s' "$2"; else printf 'Stage %d/%d: %s' "$1" "${#STAGES[@]}" "$2"; fi
+}
+steps_end() {   # every stage ticked in the header
+  STAGE=$((${#STAGES[@]} + 1))
+  pin_draw
+}
+fit() {   # fit <width> <text> [style] [cut]: the text, its names painted (then <style>); if longer, cut bare, with an ellipsis unless [cut]
+  local b
+  b=$(bare "$2")
+  if [ "${#b}" -le "$1" ]; then paint "$2" "${3:-}"
+  elif [ $# -ge 4 ]; then printf '%s' "${b:0:$1}"
+  else printf '%s…' "${b:0:$(($1 - 1))}"; fi
 }
 
 # --- cluster checks ------------------------------------------------------------
@@ -423,7 +598,7 @@ orphan_agent() {   # orphan_agent <context>: the cluster's own agent with no hub
     ! some "$1" multiclusterengines.multicluster.openshift.io
 }
 
-repo_url() { git remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##'; }
+repo_url() { git remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#^ssh://git@github.com/#https://github.com/#' -e 's#\.git$##'; }
 git_role() {   # git_role <hub>: active, passive or something else, as dr/<hub> lists it on origin/$BRANCH
   local k
   k=$(git show "origin/$BRANCH:dr/$1/kustomization.yaml" 2>/dev/null | sed -n 's/^  - //p' | paste -sd' ' -)

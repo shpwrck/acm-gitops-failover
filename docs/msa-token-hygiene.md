@@ -21,11 +21,11 @@ with `.status.tokenSecretRef` empty. On some activations the
 `TokenReported` condition is missing entirely instead of `False`; the
 cause and the fix are the same.
 
-Version note: this happened on every ACM 2.17.0 activation. On the
-first ACM 2.17.3 activation (2026-10-21) it did not: about a minute
-after the claim, the restored secret carried owner
-`ManagedServiceAccount` and a fresh 144 h expiry. Keep the check in
-place either way; it costs one command.
+Version note: this happened on every ACM 2.17.0 activation. On ACM
+2.17.3 it did not, on any of the nine activations from 2026-10-21 to
+2026-10-26: about a minute after the claim, the restored secret carried
+owner `ManagedServiceAccount` and a fresh 144 h expiry. Keep the check
+in place either way; it costs one command.
 
 The activation restore brings the hub-side token secret back as a plain
 Velero object: the token is correct, but the secret has no

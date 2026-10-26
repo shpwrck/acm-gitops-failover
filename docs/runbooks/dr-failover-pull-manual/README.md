@@ -22,11 +22,19 @@ document's step numbers, so this document stays the explanation of what
 it does. It never powers a cluster off or on: it tells you when to cut
 or restore power, then waits until the API is dead or answers again.
 
-Set it up once, in the repo checkout on the branch the clusters track:
+It reads the settings file `~/acm-dr/dr.env`, which
+[`hack/build.sh`](../../build.md#the-scripted-build) writes, so a lab
+the build made is ready. For a lab built by hand, write it once, in the
+repo checkout on the branch the clusters track:
 
 ```bash
 mkdir -p ~/acm-dr && cp hack/dr.env.example ~/acm-dr/dr.env
 ${EDITOR:-vi} ~/acm-dr/dr.env   # KUBECONFIG, ACTIVE, PASSIVE, the two app URLs, BRANCH
+```
+
+Then:
+
+```bash
 sudo dnf install -y gum         # optional (brew install gum elsewhere): boxes, spinners and tables
 hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr/ is bootstrapped)
 ```
@@ -34,27 +42,36 @@ hack/dr.sh check                # Phase 0, read-only (plus the P.2 check once dr
 With [gum](https://github.com/charmbracelet/gum) installed, the script
 shows a stage tracker, a spinner with the elapsed time while it waits,
 a boxed **YOUR TURN** (with the terminal bell) when it needs you, and a
-timing table at the end. Each stage starts on a clear screen. During a
+timing table at the end. Each stage starts on a clear screen, and from
+the Deploy stage on, the run waits for you to pick Continue first, so
+you can read the last stage (`--yes` skips the waits). The timing table
+leaves the time spent at those prompts out of every time it shows, and
+says how long it was. During a
 run the top of the screen stays put: the stage tracker and the time
-since the run started, the current step, both probes' samples and
+since the run started, both probes' samples and
 failures, which hub `$MANAGED` reports to and which revisions are
 served, and the last milestone. The output scrolls under it. What
 scrolls off is gone from the screen but kept in `console.log`; the
 summary at the end scrolls as usual, so the scrollback keeps it. The
-pinned header needs a terminal of at least 72 columns and 23 lines, and
-`DR_PIN=0` turns it off. Without gum, or with `DR_PLAIN=1`, the script
-prints the same steps as plain text.
+pinned header needs a terminal of at least 72 columns and 22 lines, and
+`DR_PIN=0` turns it off. With gum, a pre-flight section that is all
+green, in a run or in `hack/dr.sh check`, collapses to one line: its
+heading, a ✓ and what it found. Without gum, or with `DR_PLAIN=1`, the
+script prints the same steps as plain text.
 
 Each stage opens with a paragraph on what it is about to do and why, and
 each step with a line or two, so a run can be followed (or presented)
 without this document open. A RED pre-flight line links to the section
 of the docs that explains what could be wrong.
 
-Then one exercise is one command. On its own, `hack/dr.sh` shows which
-hub is active now, which one takes over in the next run, and a menu: a
-manual run, a git-driven run, the pre-flight check, the last run's
-summary, or approving certificates after a power-on. The same choices
-are also commands:
+Then one exercise is one command. On its own, `hack/dr.sh` says what the
+exercise does and offers a short menu: Check (the lab), Run (Manual),
+Run (Git), or Quit. Each pick, done or stopped, ends with Back to the
+menu, which shows the menu again with the settings read afresh; only
+Quit (or Ctrl-C) leaves. The same choices are also commands, which run
+once and exit, and so are the
+last run's summary (`hack/dr.sh probe summary`) and approving
+certificates after a power-on (`hack/dr.sh nodes`):
 
 ```bash
 hack/dr.sh              # the menu
@@ -62,7 +79,10 @@ hack/dr.sh run          # the manual paths: this runbook and the Manual Push Pat
 hack/dr.sh run --git    # the git-driven paths: you review and merge each PR it opens
 ```
 
-`run` stops only for what you have to do yourself: cut `$ACTIVE`'s
+`run` opens with a page on what the run will do: each stage in a line
+or two, what it needs from you, how the lab ends up, and where the logs
+go. Continue starts the pre-flight; Back to the menu changes nothing.
+After that, it stops only for what you have to do yourself: cut `$ACTIVE`'s
 power (B.1), merge the PRs on a `--git` run (D'.2, F', G'.1), and power
 the hub back on (G.0). For each PR it pushes the branch and prints a
 link to GitHub's new-PR page with the title and body filled in (with

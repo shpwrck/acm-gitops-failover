@@ -68,33 +68,57 @@ You need three OpenShift clusters (two that can run ACM 2.17 as hubs, and
 one workload cluster; this repo was verified on OpenShift 4.21, so check
 the ACM support matrix for other versions), an S3-compatible bucket both
 hubs can reach, a git repository every cluster can reach, and a
-workstation with `oc`, `git`, `jq` and curl 8 or newer.
+Linux workstation (WSL works; the scripts use GNU `date` and `sed`) with
+bash 4 or newer, `oc`, `git`, `jq` and curl 8 or newer.
+Two tools are optional for the `hack/` scripts:
+[gum](https://github.com/charmbracelet/gum) gives them menus, a pinned
+progress header and boxes (without it, or with `DR_PLAIN=1`, they print
+plain text), and `gh`, signed in, lets `hack/dr.sh` open the git-driven
+failover's pull requests itself (without it, it prints a link to
+GitHub's new-PR page, filled in).
 
 1. **Fork or copy this repo** and change the values below to match your
    environment. To exercise a copy without touching its `main`, put the
    changed values on a branch and set `targetRevision` to that branch:
    the git-driven failover pull requests and the mid-outage deploys then
-   land on the branch too.
+   land on the branch too. The `hack/` scripts push to that branch
+   directly (the mid-outage deploy, the teardown's reset of `dr/`), so it
+   must accept pushes from your workstation: with a protected `main`,
+   use a branch.
 2. **Build the environment**: [docs/build.md](docs/build.md) applies
    `manifests/` step by step and bootstraps `dr/`. `hack/build.sh` runs
    the same steps for you ([the scripted
-   build](docs/build.md#the-scripted-build)); start with `hack/build.sh
-   --check`, which changes nothing.
+   build](docs/build.md#the-scripted-build)); its menu offers Check and
+   Build. Start with Check (`hack/build.sh --check`), which changes
+   nothing on the clusters. Its first stage asks which clusters, branch
+   and bucket to use and saves them in `~/acm-dr/`; after that, it shows
+   them, to keep or change.
 3. **Run a failover** with one of the runbooks above, by hand or with
-   `hack/dr.sh`.
-4. **Tear it down** with `hack/teardown.sh`, after a `--dry-run`
-   ([Tearing it down](docs/build.md#tearing-it-down)). It removes only
-   what this repo put on the clusters, unless you pass `--full`, and
-   resets `dr/` in git to the roles the next build starts from.
+   `hack/dr.sh`: its menu offers Check (the pre-flight), Run (Manual)
+   and Run (Git), and a run opens with a page on what it will do, stage
+   by stage, and what it needs from you.
+4. **Tear it down** with `hack/teardown.sh`
+   ([Tearing it down](docs/build.md#tearing-it-down)). Its menu offers a
+   dry run (Check) and the teardown itself, in two modes: Reset removes
+   only the exercise (the DR roles, the demo apps, and `dr/` in git back
+   to the roles the next build starts from) and keeps ACM, OpenShift
+   GitOps and the backup storage, so the next build takes minutes; Full
+   also removes ACM and OpenShift GitOps, whoever installed them, and
+   detaches the workload cluster. As a command without `--reset` or
+   `--full`, it removes only what this repo put on the clusters.
+
+With no options on a terminal, each `hack/` script opens on its menu and
+comes back to it after every pick, done or stopped; only Quit (or
+Ctrl-C) leaves. With options, it runs once and exits, for scripting.
 
 | Value | Where it is set | Default here |
 | --- | --- | --- |
-| Git repository URL | `repoURL` in `manifests/62-appset-pull.yaml`, `manifests/63-appset-push.yaml`, `dr/bootstrap/dr-role-hub-*.yaml` (CI fails if they disagree) | `https://github.com/redhat-na-ssa/acm-gitops-failover` |
+| Git repository URL | `repoURL` in `manifests/62-appset-pull.yaml`, `manifests/63-appset-push.yaml`, `dr/bootstrap/dr-role-hub-*.yaml` (CI fails if they disagree; the `hack/build.sh` pre-flight checks they name your clone's `origin`) | `https://github.com/redhat-na-ssa/acm-gitops-failover` |
 | Git revision the clusters track | `targetRevision` in the same four files | `main` |
-| S3 endpoint, bucket, prefix, region | `manifests/50-dpa.yaml` (a copy, per build step 3), or `S3_*` in `~/acm-dr/dr.env` for `hack/build.sh` | `https://s3.example.com`, `acm-backups`, `acm`, `us-east-1` |
+| S3 endpoint, bucket, prefix, region | `manifests/50-dpa.yaml` (a copy, per build step 3), or the Settings stage of `hack/build.sh`, which saves them in `~/acm-dr/dr.env` | `https://s3.example.com`, `acm-backups`, `acm`, `us-east-1` |
 | Workload cluster name | `manifests/40-import-spoke.yaml` and the `name: spoke` selector in `manifests/61-gitops-integration.yaml` | `spoke` |
 | Hub names | `dr/hub-x/`, `dr/hub-y/` and `dr/bootstrap/dr-role-hub-{x,y}.yaml` (directory name and `path` must match) | `hub-x`, `hub-y` |
-| kubeconfig contexts | the `export` lines at the top of each runbook, or `~/acm-dr/dr.env` for the `hack/` scripts | `hub-x`, `hub-y`, `spoke` |
+| kubeconfig contexts | the `export` lines at the top of each runbook; for the `hack/` scripts, the Settings stage of `hack/build.sh` copies your kubeconfig to `~/acm-dr/kubeconfig` with the three contexts renamed | `hub-x`, `hub-y`, `spoke` |
 | Hub replica mode | `availabilityConfig` in `manifests/20-multiclusterhub.yaml` | `Basic` (single-node hubs) |
 
 ## Repository layout

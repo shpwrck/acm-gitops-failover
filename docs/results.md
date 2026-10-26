@@ -63,8 +63,12 @@ The first run was done by hand on 2026-10-21 (manual pull and push,
 hub-x powered off): activation to claim 11 s, the hubless deploy served
 in 3:30, and 0 failed samples out of 178. On 2026-10-22 four more runs
 used [`hack/dr.sh`](../hack/dr.sh), alternating the hub that dies, each
-with both demo apps deployed and probed. Every outage was a power-off
-by hand.
+with both demo apps deployed and probed. On 2026-10-23 the lab was
+removed with [`hack/teardown.sh --full`](build.md#tearing-it-down) and
+rebuilt from the bare clusters with [`hack/build.sh`](build.md#the-scripted-build)
+in 53 minutes, and two more git-driven runs followed. On 2026-10-26 a
+manual and a git-driven run checked the scripts after their readability
+review. Every outage was a power-off by hand.
 
 | Run | Path | Hub that died | To claim | To all addons | To push delivery back | Pull deploy, no hub | Push delivery RTO | Failed samples from the cut on |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -72,14 +76,26 @@ by hand.
 | 2 | Git-driven | hub-x | 27 s | 1:53 | 3:04 | 1:44 | 6:31 | 0 |
 | 3 | Manual | hub-y | 12 s | 1:43 | 2:23 | 6:23 | 9:12 | 0 |
 | 4 | Git-driven | hub-x | 28 s | 55 s | 2:16 | 0:26 | 4:57 | 0 |
+| 5 | Git-driven | hub-y | 28 s | 50 s | 2:07 | 0:27 | 3:45 | 1 (a probe timeout, below) |
+| 6 | Git-driven | hub-x | 27 s | 1:55 | 3:14 | 2:46 | 9:56 | 0 |
+| 7 | Manual | hub-y | 12 s | 40 s | 1:42 | 2:19 | 4:42 | 0 |
+| 8 | Git-driven | hub-x | 28 s | 56 s | 2:14 | 4:18 | 7:28 | 0 |
 
 "To" columns count from the activation restore's apply (manual) or the
-PR-A merge (git-driven). The git-driven claims include the activation
-race of finding 3, which fired on both runs and cost about 16 s. Each
-probe sampled every 10 s, 75 to 308 samples per app per run. The only
-failed sample in the whole series was one pull-app timeout in run 2, 32
-minutes before the cut, in an attempt that was stopped and started
-again; the push app answered in the same second.
+PR-A merge (git-driven). From run 7 on, the script waits for Continue
+between stages, and the times leave that wait out, as the script's own
+summary does. The git-driven claims include the activation race of
+finding 3, which fired on every git-driven run and cost about 16 s. Each
+probe sampled every 10 s, 72 to 308 samples per app per run.
+The series has two failed samples, both pull-app probe timeouts (curl's
+5 s limit, logged as `000`) while the push app answered through the same
+router in the same second. One came in run 2, 32 minutes before the
+cut, in an attempt that was stopped and started again. The other came in
+run 5, 7 s after the claim. The pull app's pod, route and endpoints did
+not change around it, and the next sample was 200, so it was the
+probe's side (a slow lookup or connect from the workstation), not the
+app. Since then the probe logs curl's exit code and timings on every
+failed sample.
 
 The push delivery RTO counts from the mid-outage commit, and the runbook
 waits for the pull app to serve that commit (C.1) before the failover
@@ -92,9 +108,9 @@ minutes; the "to push delivery back" column is the part DR controls.
 
 Other timings from these runs:
 
-- Human review dominated the git-driven runs: 1:10 to 1:44 per PR
-  (one demote PR waited 8:53 for its merge).
-- The returned hub read the moved cluster as `Unknown` 3:14 to 3:45
+- Human review took 0:24 to 3:22 per PR in the git-driven runs (one
+  demote PR waited 8:53 for its merge).
+- The returned hub read the moved cluster as `Unknown` 3:14 to 3:48
   after its API answered again.
 - A whole run, from the probes starting to rejoin done, took 12 to 33
   minutes; most of the spread is the wait for a cut time between backup
@@ -111,7 +127,7 @@ the runbooks; this list says why the runbooks look the way they do.
    fails days later in `Pending Import`. Reproduced on every activation
    on ACM 2.17.0; fixed by deleting the restored secret after the claim
    lands. On ACM 2.17.3 (the October runs) the controller adopted and
-   rotated the restored secret within about a minute on all five
+   rotated the restored secret within about a minute on all nine
    activations, so step E.3 checks which case it is before deleting
    anything. Details: [msa-token-hygiene.md](msa-token-hygiene.md).
 2. **A one-PR git-driven failover does not work.** Delivering the
