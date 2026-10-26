@@ -163,7 +163,9 @@ stage() {   # stage <n>: where the run stands. With gum, each stage after the fi
   if [ -n "$recap" ]; then   # the end of the last stage, so the clear screen keeps some context
     blank
     printf '   %s%s ended with:%s\n' "$C_DIM" "${STAGES[$1 - 2]}" "$C_OFF"
-    while read -r i s; do printf '   %s◆ %s %s%s\n' "$C_DIM" "${i:11:8}" "$s" "$C_OFF"; done <<<"$recap"
+    w=$(cols)
+    w=$((w > 80 ? 78 : w - 2))
+    while read -r i s; do printf '   %s◆ %s %s%s\n' "$C_DIM" "${i:11:8}" "$(fit $((w - 14)) "$s")" "$C_OFF"; done <<<"$recap"
     LAST=live
   fi
   blank
